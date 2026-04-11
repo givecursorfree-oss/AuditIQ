@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { useState } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import FloatingChatButton from '../FloatingChatButton';
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -15,6 +16,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <FloatingChatButton />
     </div>
   );
 }

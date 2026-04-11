@@ -129,3 +129,133 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ===== Copilot Aurora Glassmorphism ===== */
+.copilot-aurora {
+  background: linear-gradient(135deg, #e0f2fe 0%, #fdf4ff 50%, #fef3c7 100%);
+  background-size: 400% 400%;
+  animation: aurora-shift 15s ease infinite;
+}
+@keyframes aurora-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.copilot-glass-panel {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.copilot-glass-card {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  cursor: pointer;
+}
+.copilot-glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
+}
+
+.copilot-glass-input {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+/* Floating AI Circle Button */
+.floating-ai-btn {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 50;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding: 0;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.35);
+  color: #fff;
+  cursor: pointer;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.floating-ai-btn:hover {
+  transform: translateY(-2px) scale(1.08);
+  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.45);
+}
+.floating-ai-tooltip {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%) translateX(8px);
+  white-space: nowrap;
+  background: #1f2937;
+  color: #f9fafb;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.floating-ai-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  transform: translateY(-50%);
+  border-width: 6px 0 6px 6px;
+  border-style: solid;
+  border-color: transparent transparent transparent #1f2937;
+}
+.floating-ai-btn:hover .floating-ai-tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* Dark theme overrides for Copilot */
+.dark .copilot-aurora {
+  background: #12141c;
+  background-image: radial-gradient(circle at 50% 0%, rgba(30, 41, 59, 0.5) 0%, transparent 70%);
+  animation: none;
+}
+.dark .copilot-glass-panel {
+  background: #1a1c23;
+  border-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.dark .copilot-glass-card {
+  background: #1a1e28;
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.dark .copilot-glass-card:hover {
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  transform: translateY(-2px);
+}
+.dark .copilot-glass-input {
+  background: #252830;
+  border-color: rgba(107, 114, 128, 0.5);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.dark .copilot-glass-input:focus-within {
+  border-color: rgba(107, 114, 128, 0.7);
+}
