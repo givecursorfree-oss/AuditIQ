@@ -1,0 +1,43 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+.env
+uploads/
+.venv/
+__pycache__/
+*.pyc
+
+# Skills & agent tooling (not app code)
+.github/skills/
+.github/agents/
+.github/get-shit-done/
+.github/gsd-file-manifest.json
+.github/copilot-instructions.md
+.github/instructions/
+dashboard-SKILL.md
+.agents/
+.cursor/
+.cursorrules
+.windsurfrules
+.claude/
+.opencode.json
+.mcp.json
+.code-review-graph/
+.planning/
+
+# Graphify build output (cache + large HTML + internal state)
+graphify-out/cache/
+graphify-out/graph.html
+graphify-out/.graphify_*
+
+# Misc
+*.docx
+*.png
+*.tsbuildinfo
+extract_prd.py
+AuditIQ.jsx
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+package-lock.json

@@ -1,0 +1,478 @@
+// PRD Section 7.1: MySQL (MariaDB via XAMPP) for local & production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── RBAC: Configurable Roles & Permissions ───
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false) // System roles cannot be deleted
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  module      String   // dashboard, engagements, workpapers, documents, reports, attendance, copilot, settings
+  action      String   // view, create, edit, delete, approve, export
+  description String?
+
+  roles       RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  initials      String
+  role          String   @default("Staff") // Legacy field for JWT backward compat
+  phone         String?
+  designation   String?  // CA Rajesh Sharma, Article Clerk, etc.
+  isActive      Boolean  @default(true)
+  twoFactorEnabled Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // RBAC relation
+  roleId        String?
+  roleRef       Role?    @relation(fields: [roleId], references: [id])
+
+  // Relations
+  firmId        String?
+  firm          Firm?    @relation(fields: [firmId], references: [id])
+  engagementMembers EngagementMember[]
+  workpapers    Workpaper[]
+  reviewComments ReviewComment[]
+  signoffs      SignOff[]
+  documents     Document[]
+  timeEntries   TimeEntry[]
+  notifications Notification[]
+  attendances   Attendance[]
+  leaveRequests LeaveRequest[]
+  leaveApprovals LeaveRequest[] @relation("LeaveApprover")
+  auditLogs     AuditLog[]
+  copilotMessages CopilotMessage[]
+  copilotSessions CopilotSession[]
+}
+
+model Firm {
+  id            String   @id @default(uuid())
+  name          String
+  registrationNo String?
+  pan           String?
+  gstin         String?
+  address       String?
+  city          String?
+  state         String?
+  pincode       String?
+  phone         String?
+  email         String?
+  website       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  clients       Client[]
+  engagements   Engagement[]
+  offices       Office[]
+}
+
+// ─── PRD 5.1: Engagement & Client Management ───
+
+model Client {
+  id            String   @id @default(uuid())
+  name          String
+  cin           String?  // Company Identification Number
+  pan           String?
+  gstin         String?
+  category      String?  // Private Ltd, Public Ltd, LLP, Trust, Sole Prop
+  industry      String?
+  address       String?
+  city          String?
+  state         String?
+  contactName   String?
+  contactEmail  String?
+  contactPhone  String?
+  turnover      String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  firmId        String
+  firm          Firm     @relation(fields: [firmId], references: [id])
+  engagements   Engagement[]
+}
+
+model Engagement {
+  id            String   @id @default(uuid())
+  title         String
+  type          String   // Statutory | Tax (44AB) | GST | Internal | Special
+  financialYear String   // e.g., 2024-25
+  status        String   @default("Planning") // Planning | Fieldwork | Under Review | Reporting | Closed
+  progress      Int      @default(0)
+  scope         String?  @db.Text
+  startDate     DateTime?
+  deadline      DateTime?
+  billingType   String?  // Fixed | Hourly | Retainer
+  billingAmount Float?
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  clientId      String
+  client        Client   @relation(fields: [clientId], references: [id])
+  firmId        String
+  firm          Firm     @relation(fields: [firmId], references: [id])
+
+  members       EngagementMember[]
+  workpapers    Workpaper[]
+  documents     Document[]
+  documentRequests DocumentRequest[]
+  observations  Observation[]
+  signoffs      SignOff[]
+  timeEntries   TimeEntry[]
+  reports       Report[]
+  copilotSessions CopilotSession[]
+  deadlines     Deadline[]
+}
+
+model EngagementMember {
+  id            String   @id @default(uuid())
+  role          String   // Lead | Reviewer | Preparer
+  assignedAt    DateTime @default(now())
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@unique([engagementId, userId])
+}
+
+// ─── PRD 5.2: Document & Evidence Management ───
+
+model Document {
+  id            String   @id @default(uuid())
+  fileName      String
+  originalName  String
+  mimeType      String
+  size          Int
+  storagePath   String
+  category      String?  // Bank Statement | Invoice | Ledger | TDS Cert | Other
+  folder        String   @default("Current File") // Permanent File | Current File | Correspondence | Reports
+  version       Int      @default(1)
+  parentId      String?  // For version tracking — points to previous version
+  isOcrProcessed Boolean @default(false)
+  ocrText       String?  @db.LongText
+  createdAt     DateTime @default(now())
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  uploadedById  String
+  uploadedBy    User     @relation(fields: [uploadedById], references: [id])
+  workpaperId   String?
+  workpaper     Workpaper? @relation(fields: [workpaperId], references: [id])
+}
+
+model DocumentRequest {
+  id            String   @id @default(uuid())
+  title         String
+  description   String?  @db.Text
+  status        String   @default("Pending") // Pending | Received | Rejected | Overdue
+  dueDate       DateTime?
+  clientNotes   String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+}
+
+// ─── PRD 5.3: Audit Workpapers & Fieldwork ───
+
+model Workpaper {
+  id            String   @id @default(uuid())
+  reference     String   // e.g., WP-01, WP-02
+  title         String
+  section       String   // Revenue | Expenses | Fixed Assets | Bank | Payroll | etc.
+  type          String   @default("Standard") // Standard | CARO | SA | GST | TDS | Lead Schedule
+  content       String?  @db.LongText // Rich text / JSON content of the workpaper
+  status        String   @default("Draft") // Draft | Prepared | Under Review | Reviewed | Approved | Needs Revision
+  conclusion    String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  preparedById  String
+  preparedBy    User     @relation(fields: [preparedById], references: [id])
+
+  auditSteps    AuditStep[]
+  reviewComments ReviewComment[]
+  documents     Document[]
+  signoffs      SignOff[]
+}
+
+model AuditStep {
+  id            String   @id @default(uuid())
+  stepNumber    Int
+  description   String   @db.Text
+  procedure     String?  @db.Text
+  isCompleted   Boolean  @default(false)
+  result        String?  @db.Text
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workpaperId   String
+  workpaper     Workpaper @relation(fields: [workpaperId], references: [id])
+}
+
+// ─── PRD 5.4: Review & Approval Workflow ───
+
+model ReviewComment {
+  id            String   @id @default(uuid())
+  content       String   @db.Text
+  isResolved    Boolean  @default(false)
+  parentId      String?  // For threaded replies
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workpaperId   String
+  workpaper     Workpaper @relation(fields: [workpaperId], references: [id])
+  authorId      String
+  author        User     @relation(fields: [authorId], references: [id])
+}
+
+model SignOff {
+  id            String   @id @default(uuid())
+  type          String   // Preparer | Manager | Partner
+  status        String   @default("Pending") // Pending | Approved | Rejected
+  comments      String?  @db.Text
+  signedAt      DateTime?
+  createdAt     DateTime @default(now())
+
+  workpaperId   String?
+  workpaper     Workpaper? @relation(fields: [workpaperId], references: [id])
+  engagementId  String?
+  engagement    Engagement? @relation(fields: [engagementId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+// ─── PRD 5.5: Reporting & Output Generation ───
+
+model Observation {
+  id            String   @id @default(uuid())
+  title         String
+  severity      String   @default("Moderate") // Critical | Moderate | Low
+  criteria      String?  @db.Text // What should be (the standard)
+  condition     String?  @db.Text // What is (the finding)
+  cause         String?  @db.Text
+  effect        String?  @db.Text
+  recommendation String? @db.Text
+  managementResponse String? @db.Text
+  status        String   @default("Open") // Open | Resolved | Disputed
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+}
+
+model Report {
+  id            String   @id @default(uuid())
+  type          String   // Statutory Audit | Tax Audit (3CD) | Management Letter | LLP | Trust | Custom
+  title         String
+  content       String?  @db.LongText // JSON or rich text content of the report
+  status        String   @default("Draft") // Draft | Under Review | Final | Signed
+  version       Int      @default(1)
+  generatedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+
+  form3cdData   Form3CDClause[]
+}
+
+model Form3CDClause {
+  id            String   @id @default(uuid())
+  clauseNumber  Int
+  clauseTitle   String
+  response      String?  @db.Text
+  remarks       String?  @db.Text
+  isApplicable  Boolean  @default(true)
+  isCompleted   Boolean  @default(false)
+
+  reportId      String
+  report        Report   @relation(fields: [reportId], references: [id])
+}
+
+// ─── PRD 5.6: Time, Billing & Practice Management ───
+
+model TimeEntry {
+  id            String   @id @default(uuid())
+  date          DateTime
+  hours         Float
+  description   String?  @db.Text
+  isBillable    Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+model Deadline {
+  id            String   @id @default(uuid())
+  title         String
+  type          String   // Statutory | Tax | GST | Internal | MCA
+  dueDate       DateTime
+  status        String   @default("On Track") // On Track | At Risk | Overdue | Completed
+  assignedTo    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+}
+
+// ─── PRD 5.7: Notifications ───
+
+model Notification {
+  id            String   @id @default(uuid())
+  title         String
+  message       String   @db.Text
+  type          String   @default("info") // info | warning | success | danger
+  isRead        Boolean  @default(false)
+  link          String?
+  createdAt     DateTime @default(now())
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+// ─── PRD 5.8: Facial Recognition Attendance Module ───
+
+model Office {
+  id            String   @id @default(uuid())
+  name          String
+  address       String?
+  latitude      Float?
+  longitude     Float?
+  geofenceRadius Int     @default(200) // meters
+
+  firmId        String
+  firm          Firm     @relation(fields: [firmId], references: [id])
+
+  attendances   Attendance[]
+}
+
+model Attendance {
+  id            String   @id @default(uuid())
+  date          DateTime
+  checkIn       DateTime?
+  checkOut      DateTime?
+  status        String   @default("present") // present | late | absent | leave | half-day
+  location      String?  // Office | Client Site | Remote
+  gpsLat        Float?
+  gpsLng        Float?
+  method        String   @default("face") // face | otp | manual
+  createdAt     DateTime @default(now())
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  officeId      String?
+  office        Office?  @relation(fields: [officeId], references: [id])
+}
+
+model LeaveRequest {
+  id            String   @id @default(uuid())
+  type          String   // Casual | Sick | Earned | Holiday
+  fromDate      DateTime
+  toDate        DateTime
+  days          Int
+  reason        String?  @db.Text
+  status        String   @default("Pending") // Pending | Approved | Rejected
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  approverId    String?
+  approver      User?    @relation("LeaveApprover", fields: [approverId], references: [id])
+}
+
+// ─── PRD 6: AI Copilot ───
+
+model CopilotSession {
+  id            String   @id @default(uuid())
+  title         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  engagementId  String?
+  engagement    Engagement? @relation(fields: [engagementId], references: [id])
+
+  messages      CopilotMessage[]
+}
+
+model CopilotMessage {
+  id            String   @id @default(uuid())
+  role          String   // user | assistant
+  content       String   @db.LongText
+  citations     String?  @db.Text // JSON array of source citations
+  wasAccepted   Boolean? // For AI outputs: accepted/edited/rejected tracking
+  createdAt     DateTime @default(now())
+
+  sessionId     String
+  session       CopilotSession @relation(fields: [sessionId], references: [id])
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+}
+
+// ─── PRD 7.2: Full audit log ───
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  action        String   // CREATE | UPDATE | DELETE | LOGIN | SIGNOFF | AI_USAGE
+  entity        String   // User | Client | Engagement | Workpaper | Document | etc.
+  entityId      String?
+  details       String?  @db.Text // JSON with change details
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+}
