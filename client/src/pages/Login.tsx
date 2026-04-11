@@ -62,7 +62,7 @@ export default function Login() {
             <img src="/logo.png" alt="AuditIQ" className="h-48 md:h-56 w-auto object-contain mb-8 brightness-0 invert drop-shadow-2xl" />
             <div className="h-1.5 w-24 rounded-full mb-8 bg-[#0070eb]" />
             <p className="text-2xl font-light text-[#e2e2e4] leading-relaxed tracking-tight max-w-md">
-              The definitive intelligence layer for modern enterprise compliance and risk management.
+              Purpose-built for Indian CA firms — manage every audit engagement from planning and fieldwork to reporting, with built-in ICAI & GST compliance intelligence.
             </p>
           </div>
 
