@@ -33,8 +33,8 @@ export default function Dashboard() {
     ])
       .then(([dashRes, dlRes, chartRes]) => {
         setData(dashRes.data);
-        setDeadlines(dlRes.data);
-        setChartData(chartRes.data);
+        setDeadlines(Array.isArray(dlRes.data) ? dlRes.data : []);
+        setChartData(Array.isArray(chartRes.data) ? chartRes.data : []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));

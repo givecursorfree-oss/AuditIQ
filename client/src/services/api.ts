@@ -14,9 +14,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 responses globally
+// Handle mock demo mode + 401 responses globally
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // If using mock token, always return demo data (Vercel SPA rewrite serves HTML for /api/* routes)
+    const token = localStorage.getItem('auditiq_token');
+    if (token === 'mock_jwt_token_demo') {
+      const url = response.config?.url || '';
+      const method = (response.config?.method || 'get').toLowerCase();
+      const body = response.config?.data ? JSON.parse(response.config.data) : {};
+      return { ...response, data: getDemoData(url, method, body) };
+    }
+    return response;
+  },
   (error) => {
     // If we're using the mock token, return realistic demo data
     const token = localStorage.getItem('auditiq_token');
