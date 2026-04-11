@@ -1,19 +1,71 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, Component } from 'react';
+import type { ReactNode, ErrorInfo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/layout/Layout';
 
+// Retry lazy imports once on chunk-load failure (handles Vercel redeploy cache invalidation)
+function lazyRetry(factory: () => Promise<{ default: React.ComponentType }>) {
+  return lazy(() =>
+    factory().catch(() => {
+      // If chunk fails to load (e.g. after redeploy), reload the page once
+      const hasReloaded = sessionStorage.getItem('chunk_reload');
+      if (!hasReloaded) {
+        sessionStorage.setItem('chunk_reload', '1');
+        window.location.reload();
+        return { default: () => null } as { default: React.ComponentType };
+      }
+      sessionStorage.removeItem('chunk_reload');
+      return factory(); // Re-throw if still fails after reload
+    })
+  );
+}
+
 // Lazy-load pages for code-splitting
-const Login = lazy(() => import('./pages/Login'));
-const Register = lazy(() => import('./pages/Register'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Engagements = lazy(() => import('./pages/Engagements'));
-const Workpapers = lazy(() => import('./pages/Workpapers'));
-const Documents = lazy(() => import('./pages/Documents'));
-const Copilot = lazy(() => import('./pages/Copilot'));
-const Attendance = lazy(() => import('./pages/Attendance'));
-const Reports = lazy(() => import('./pages/Reports'));
-const Settings = lazy(() => import('./pages/Settings'));
+const Login = lazyRetry(() => import('./pages/Login'));
+const Register = lazyRetry(() => import('./pages/Register'));
+const Dashboard = lazyRetry(() => import('./pages/Dashboard'));
+const Engagements = lazyRetry(() => import('./pages/Engagements'));
+const Workpapers = lazyRetry(() => import('./pages/Workpapers'));
+const Documents = lazyRetry(() => import('./pages/Documents'));
+const Copilot = lazyRetry(() => import('./pages/Copilot'));
+const Attendance = lazyRetry(() => import('./pages/Attendance'));
+const Reports = lazyRetry(() => import('./pages/Reports'));
+const Settings = lazyRetry(() => import('./pages/Settings'));
+
+// Error boundary to catch render errors and prevent blank screen
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('App error boundary caught:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-white">
+          <div className="text-center space-y-4">
+            <img src="/logo.png" alt="AuditIQ" className="h-14 w-auto mx-auto object-contain" />
+            <h2 className="text-lg font-semibold text-gray-800">Something went wrong</h2>
+            <p className="text-sm text-gray-500">Please refresh the page to continue.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function PageFallback() {
   return (
@@ -50,6 +102,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ErrorBoundary>
         <Suspense fallback={<PageFallback />}>
           <Routes>
             {/* Public routes */}
@@ -76,6 +129,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   );

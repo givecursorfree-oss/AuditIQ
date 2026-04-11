@@ -46,21 +46,20 @@ export default function Login() {
 
       {/* ── LEFT: Branding Panel ── */}
       <section className="relative hidden md:flex md:w-1/2 lg:w-3/5 items-center justify-center p-12 overflow-hidden bg-[#1a1c1d]">
-        {/* Background gradient + pattern */}
+        {/* Background image + overlay */}
         <div className="absolute inset-0 z-0">
-          <div className="w-full h-full" style={{
-            background: 'radial-gradient(ellipse at 30% 20%, rgba(0,88,188,0.15) 0%, transparent 50%), radial-gradient(ellipse at 70% 80%, rgba(0,88,188,0.08) 0%, transparent 50%), linear-gradient(135deg, #1a1c1d 0%, #22252a 50%, #1a1c1d 100%)',
-          }} />
-          <div className="absolute inset-0 opacity-[0.03]" style={{
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.8) 1px, transparent 1px)',
-            backgroundSize: '24px 24px',
-          }} />
+          <img
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuA4FEVC11qP_czTlKWHP3aND9QMfknjO7GKO8Uc4o09p27SVZ0fxMKsKnij-cCJ7P_5qyI--jgwoG5YhW_ISlgB0b-mlI9OBUoECi5aQM7g5yWjWAAByWFsoHCRAD8Q3ngzqb67y2tsZgoqf-Yj6OWGQQbTFIjpLN7cOxIY4s4wQ8w4T-q33x8A6cJhZcXGK6jGwGcIBXSgHCB7IL0uz7nEHyWXVcMNWYeIiWvgoLTy23kTJW2no1OyVTiQGPuqosKqubLGUnVIooaY"
+            alt=""
+            className="w-full h-full object-cover opacity-40 grayscale contrast-125"
+          />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(to top right, #1a1c1d 40%, rgba(26,28,29,0.75) 70%, rgba(0,88,188,0.28) 100%)' }} />
         </div>
 
         {/* Content */}
         <div className="relative z-10 w-full max-w-xl">
           <div className="mb-16">
-            <img src="/logo.svg" alt="AuditIQ" className="h-48 md:h-56 w-auto object-contain mb-8 brightness-0 invert drop-shadow-2xl" />
+            <img src="/logo.png" alt="AuditIQ" className="h-48 md:h-56 w-auto object-contain mb-8 brightness-0 invert drop-shadow-2xl" />
             <div className="h-1.5 w-24 rounded-full mb-8 bg-[#0070eb]" />
             <p className="text-2xl font-light text-[#e2e2e4] leading-relaxed tracking-tight max-w-md">
               The definitive intelligence layer for modern enterprise compliance and risk management.
@@ -110,7 +109,7 @@ export default function Login() {
 
           {/* Mobile-only logo */}
           <div className="md:hidden mb-10 flex justify-center">
-            <img src="/logo.svg" alt="AuditIQ" className="h-28 w-auto object-contain" />
+            <img src="/logo.png" alt="AuditIQ" className="h-28 w-auto object-contain" />
           </div>
 
           <header className="mb-10 text-center sm:text-left">

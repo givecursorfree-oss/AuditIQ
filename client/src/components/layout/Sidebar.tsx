@@ -70,9 +70,9 @@ export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
         <div className="flex items-center justify-between px-4 h-14 border-b border-border">
           <div className="flex items-center gap-2">
             {collapsed ? (
-              <img src="/logo.svg" alt="AuditIQ" className="h-10 w-10 object-contain shrink-0 dark:brightness-0 dark:invert" />
+              <img src="/logo.png" alt="AuditIQ" className="h-10 w-10 object-contain shrink-0 dark:brightness-0 dark:invert" />
             ) : (
-              <img src="/logo.svg" alt="AuditIQ" className="h-11 w-auto object-contain dark:brightness-0 dark:invert" />
+              <img src="/logo.png" alt="AuditIQ" className="h-11 w-auto object-contain dark:brightness-0 dark:invert" />
             )}
           </div>
           {/* Mobile close button */}
