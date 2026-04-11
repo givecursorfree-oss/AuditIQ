@@ -22,7 +22,9 @@ api.interceptors.response.use(
     const token = localStorage.getItem('auditiq_token');
     if (token === 'mock_jwt_token_demo') {
       const url = error.config?.url || '';
-      return Promise.resolve({ data: getDemoData(url) });
+      const method = (error.config?.method || 'get').toLowerCase();
+      const body = error.config?.data ? JSON.parse(error.config.data) : {};
+      return Promise.resolve({ data: getDemoData(url, method, body) });
     }
 
     // Treat 401 or 500 as error, but don't redirect to login if we are already trying to login
@@ -35,8 +37,108 @@ api.interceptors.response.use(
   }
 );
 
+// ─── Copilot Demo State (module-scoped) ───
+let _copilotSessions: any[] = [
+  { id: 'cs-1', title: 'SA 500 Audit Evidence Guidance', messageCount: 2, createdAt: '2025-06-15T10:00:00Z', updatedAt: '2025-06-15T10:05:00Z' },
+  { id: 'cs-2', title: 'Form 3CD Clause 21 Help', messageCount: 2, createdAt: '2025-06-14T14:00:00Z', updatedAt: '2025-06-14T14:10:00Z' },
+];
+
+const _copilotMessages: Record<string, any[]> = {
+  'cs-1': [
+    { id: 'cm-1', role: 'user', content: 'What are the key procedures for SA 500 - Audit Evidence?', createdAt: '2025-06-15T10:00:00Z', sessionId: 'cs-1' },
+    { id: 'cm-2', role: 'assistant', content: 'SA 500 "Audit Evidence" requires the auditor to design and perform audit procedures to obtain sufficient appropriate audit evidence.\n\n**Key procedures include:**\n\n1. **Inspection** — Examining records, documents, or tangible assets\n2. **Observation** — Watching a process or procedure being performed\n3. **External Confirmation** — Obtaining direct response from third parties (SA 505)\n4. **Recalculation** — Checking mathematical accuracy of documents\n5. **Reperformance** — Independent execution of procedures originally performed by the entity\n6. **Analytical Procedures** — Evaluating financial information through plausible relationships (SA 520)\n7. **Inquiry** — Seeking information from knowledgeable persons within or outside the entity\n\n**Sufficiency** relates to quantity (determined by assessed risk of material misstatement and quality of evidence). **Appropriateness** relates to quality — relevance and reliability.\n\nRefer to paragraphs 7–9 of SA 500 for detailed guidance on the nature of audit evidence.', createdAt: '2025-06-15T10:00:30Z', sessionId: 'cs-1' },
+  ],
+  'cs-2': [
+    { id: 'cm-3', role: 'user', content: 'Explain Form 3CD Clause 21 regarding CARO reporting', createdAt: '2025-06-14T14:00:00Z', sessionId: 'cs-2' },
+    { id: 'cm-4', role: 'assistant', content: 'Form 3CD Clause 21 relates to **amounts not credited to the Profit & Loss Account** as referred to in Section 43B of the Income Tax Act.\n\n**Section 43B covers deductions allowed only on actual payment:**\n\n1. Tax, duty, cess or fee under any law\n2. Employer\'s contribution to PF, superannuation, ESI, gratuity\n3. Bonus or commission to employees\n4. Interest on loan from scheduled bank / co-operative bank\n5. Leave encashment\n6. Interest on loan from NBFC / scheduled bank\n\n**Reporting requirement:** The tax auditor must report:\n- Amounts debited to P&L that are disallowable under Section 43B\n- Whether these amounts were paid before the due date of filing the return (Section 139(1))\n\n**CARO Connection:** While CARO 2020 is a separate reporting requirement under the Companies Act, Clause 21 disclosures help reconcile statutory dues compliance which overlaps with CARO clauses related to undisputed statutory dues (Clause iii of CARO 2020).', createdAt: '2025-06-14T14:01:00Z', sessionId: 'cs-2' },
+  ],
+};
+
+let _copilotCounter = 3;
+
+// AI-like demo responses for copilot
+const COPILOT_RESPONSES: Record<string, string> = {
+  materiality: '**Materiality Calculation for Revenue of ₹50 Crore:**\n\nUsing the common benchmarks for Indian audits:\n\n| Benchmark | Percentage | Amount (₹) |\n|-----------|-----------|-------------|\n| Revenue (0.5%–1%) | 0.75% | ₹37.50 Lakhs |\n| Total Assets (1%–2%) | 1.5% | Depends on BS |\n| PBT (5%–10%) | 7.5% | Depends on PBT |\n\n**Recommended Overall Materiality:** ₹37.50 Lakhs (0.75% of Revenue)\n**Performance Materiality:** ₹28.12 Lakhs (75% of Overall Materiality)\n**Trivial Threshold:** ₹1.87 Lakhs (5% of Overall Materiality)\n\nPer SA 320, materiality should be determined based on the entity\'s specific circumstances. For listed entities, revenue or PBT benchmarks are commonly used by Indian auditors.',
+  management: '**Draft: Management Representation Letter**\n\n*[On Entity Letterhead]*\n\nTo,\nM/s Sharma Gupta & Associates\nChartered Accountants\n301, Commerce House, Nariman Point\nMumbai – 400021\n\n**Subject: Management Representation Letter for the audit of financial statements for the year ended 31st March 2025**\n\nDear Sir/Madam,\n\nThis representation letter is provided in connection with your audit of the financial statements of [Company Name] for the year ended 31st March 2025, for the purpose of expressing an opinion as to whether the financial statements give a true and fair view in accordance with Indian Accounting Standards (Ind AS).\n\nWe confirm, to the best of our knowledge and belief:\n\n1. We have fulfilled our responsibilities for the preparation and fair presentation of the financial statements as per Ind AS.\n2. All transactions have been recorded and are reflected in the financial statements.\n3. We have provided you with access to all information relevant to the audit.\n4. There are no uncorrected misstatements.\n5. Related party relationships and transactions have been properly disclosed.\n\n*(Continue as per SA 580 requirements)*',
+  default: 'Thank you for your question. Here\'s what I can help with:\n\nAs an AI audit assistant, I can provide guidance on:\n\n• **Indian Auditing Standards (SA)** — Procedures, documentation requirements, and interpretations\n• **Form 3CA/3CB/3CD** — Tax audit report clauses and compliance\n• **CARO 2020** — Companies Auditor\'s Report Order requirements\n• **Ind AS** — Indian Accounting Standards application guidance\n• **GST Compliance** — GSTR reconciliation and ITC verification\n• **Materiality Calculations** — Benchmark-based computations\n• **Draft Letters** — Management representation, engagement letters, confirmation requests\n\nPlease note: All responses are for reference purposes only. Always verify against the latest ICAI pronouncements and applicable regulations.',
+};
+
+function getCopilotResponse(userMessage: string): string {
+  const lower = userMessage.toLowerCase();
+  if (lower.includes('materiality') || lower.includes('crore') || lower.includes('revenue')) return COPILOT_RESPONSES.materiality;
+  if (lower.includes('management') && lower.includes('representation') || lower.includes('letter')) return COPILOT_RESPONSES.management;
+  return COPILOT_RESPONSES.default;
+}
+
 // ─── Demo Data for Mock Mode ───
-function getDemoData(url: string) {
+function getDemoData(url: string, method = 'get', body: any = {}) {
+  // ── Copilot (method-aware) ──
+  if (url.includes('/copilot/sessions')) {
+    // POST /copilot/sessions - Create new session
+    if (method === 'post' && !url.includes('/messages')) {
+      const newSession = {
+        id: `cs-${++_copilotCounter}`,
+        title: body.title || 'New Chat',
+        messageCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      _copilotSessions.unshift(newSession);
+      _copilotMessages[newSession.id] = [];
+      return newSession;
+    }
+
+    // POST /copilot/sessions/:id/messages - Send message
+    if (method === 'post' && url.includes('/messages')) {
+      const sessionId = url.split('/sessions/')[1]?.split('/messages')[0];
+      const userMsg = {
+        id: `cm-${Date.now()}`,
+        role: 'user',
+        content: body.content || '',
+        createdAt: new Date().toISOString(),
+        sessionId,
+      };
+      const assistantMsg = {
+        id: `cm-${Date.now() + 1}`,
+        role: 'assistant',
+        content: getCopilotResponse(body.content || ''),
+        createdAt: new Date(Date.now() + 500).toISOString(),
+        sessionId,
+      };
+      if (!_copilotMessages[sessionId]) _copilotMessages[sessionId] = [];
+      _copilotMessages[sessionId].push(userMsg, assistantMsg);
+
+      // Update session metadata
+      const session = _copilotSessions.find(s => s.id === sessionId);
+      if (session) {
+        session.messageCount = _copilotMessages[sessionId].length;
+        session.updatedAt = new Date().toISOString();
+        if (session.title === 'New Chat') {
+          session.title = body.content.substring(0, 40) + (body.content.length > 40 ? '...' : '');
+        }
+      }
+
+      return { userMessage: userMsg, assistantMessage: assistantMsg };
+    }
+
+    // DELETE /copilot/sessions/:id
+    if (method === 'delete') {
+      const sessionId = url.split('/sessions/')[1];
+      _copilotSessions = _copilotSessions.filter(s => s.id !== sessionId);
+      delete _copilotMessages[sessionId];
+      return { success: true };
+    }
+
+    // GET /copilot/sessions/:id/messages
+    if (url.includes('/messages')) {
+      const sessionId = url.split('/sessions/')[1]?.split('/messages')[0];
+      return _copilotMessages[sessionId] || [];
+    }
+
+    // GET /copilot/sessions
+    return _copilotSessions;
+  }
+
   // Dashboard
   if (url === '/dashboard') return DEMO.dashboard;
   if (url.includes('/dashboard/deadlines')) return DEMO.deadlines;
@@ -65,14 +167,12 @@ function getDemoData(url: string) {
   // Admin
   if (url.includes('/admin/users')) return DEMO.users;
   if (url.includes('/admin/roles')) return DEMO.roles;
+  if (url.includes('/admin/permissions')) return DEMO.permissions;
   if (url.includes('/admin/firm')) return DEMO.firm;
-  if (url.includes('/admin/audit-log')) return DEMO.auditLog;
+  if (url.includes('/admin/audit-log')) return { logs: DEMO.auditLog, totalPages: 1 };
 
   // Notifications
   if (url.includes('/notifications/unread-count')) return { count: 5 };
-
-  // Copilot
-  if (url.includes('/copilot/sessions')) return [];
 
   return {};
 }
@@ -275,12 +375,40 @@ const DEMO = {
 
   // ─── Admin: Audit Log ───
   auditLog: [
-    { id: 'log-1', action: 'User Login', user: 'Rajesh Sharma', details: 'Logged in from 103.152.x.x', timestamp: '2025-06-15T14:30:00Z' },
-    { id: 'log-2', action: 'Document Upload', user: 'Priya Patel', details: 'Uploaded Balance Sheet - RIL FY25.pdf', timestamp: '2025-06-15T12:15:00Z' },
-    { id: 'log-3', action: 'Workpaper Approved', user: 'Neha Gupta', details: 'Approved WP-RIL-001 Revenue Recognition Testing', timestamp: '2025-06-14T18:20:00Z' },
-    { id: 'log-4', action: 'Role Updated', user: 'Rajesh Sharma', details: 'Updated Staff role permissions - added export', timestamp: '2025-06-14T16:00:00Z' },
-    { id: 'log-5', action: 'Engagement Created', user: 'Sanjay Mehta', details: 'Created Tax Audit - TCS FY 2024-25', timestamp: '2025-06-14T11:30:00Z' },
-    { id: 'log-6', action: 'User Deactivated', user: 'Rajesh Sharma', details: 'Deactivated user Vikram Singh (Article training ended)', timestamp: '2025-06-10T10:00:00Z' },
+    { id: 'log-1', action: 'User Login', entity: 'Session', details: 'Logged in from 103.152.x.x', createdAt: '2025-06-15T14:30:00Z', user: { firstName: 'Rajesh', lastName: 'Sharma' } },
+    { id: 'log-2', action: 'Document Upload', entity: 'Document', details: 'Uploaded Balance Sheet - RIL FY25.pdf', createdAt: '2025-06-15T12:15:00Z', user: { firstName: 'Priya', lastName: 'Patel' } },
+    { id: 'log-3', action: 'Workpaper Approved', entity: 'Workpaper', details: 'Approved WP-RIL-001 Revenue Recognition Testing', createdAt: '2025-06-14T18:20:00Z', user: { firstName: 'Neha', lastName: 'Gupta' } },
+    { id: 'log-4', action: 'Role Updated', entity: 'Role', details: 'Updated Staff role permissions - added export', createdAt: '2025-06-14T16:00:00Z', user: { firstName: 'Rajesh', lastName: 'Sharma' } },
+    { id: 'log-5', action: 'Engagement Created', entity: 'Engagement', details: 'Created Tax Audit - TCS FY 2024-25', createdAt: '2025-06-14T11:30:00Z', user: { firstName: 'Sanjay', lastName: 'Mehta' } },
+    { id: 'log-6', action: 'User Deactivated', entity: 'User', details: 'Deactivated user Vikram Singh (Article training ended)', createdAt: '2025-06-10T10:00:00Z', user: { firstName: 'Rajesh', lastName: 'Sharma' } },
+  ],
+
+  // ─── Admin: Permissions ───
+  permissions: [
+    { id: 'p-1', module: 'dashboard', action: 'view' },
+    { id: 'p-2', module: 'engagements', action: 'view' },
+    { id: 'p-3', module: 'engagements', action: 'create' },
+    { id: 'p-4', module: 'engagements', action: 'edit' },
+    { id: 'p-5', module: 'engagements', action: 'delete' },
+    { id: 'p-6', module: 'workpapers', action: 'view' },
+    { id: 'p-7', module: 'workpapers', action: 'create' },
+    { id: 'p-8', module: 'workpapers', action: 'edit' },
+    { id: 'p-9', module: 'workpapers', action: 'approve' },
+    { id: 'p-10', module: 'workpapers', action: 'delete' },
+    { id: 'p-11', module: 'documents', action: 'view' },
+    { id: 'p-12', module: 'documents', action: 'upload' },
+    { id: 'p-13', module: 'documents', action: 'delete' },
+    { id: 'p-14', module: 'reports', action: 'view' },
+    { id: 'p-15', module: 'reports', action: 'create' },
+    { id: 'p-16', module: 'reports', action: 'export' },
+    { id: 'p-17', module: 'attendance', action: 'view' },
+    { id: 'p-18', module: 'attendance', action: 'manage' },
+    { id: 'p-19', module: 'copilot', action: 'view' },
+    { id: 'p-20', module: 'settings', action: 'view' },
+    { id: 'p-21', module: 'settings', action: 'manage' },
+    { id: 'p-22', module: 'clients', action: 'view' },
+    { id: 'p-23', module: 'clients', action: 'create' },
+    { id: 'p-24', module: 'clients', action: 'edit' },
   ],
 };
 
