@@ -25,12 +25,12 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid())
-  module      String   // dashboard, engagements, workpapers, documents, reports, attendance, copilot, settings
-  action      String   // view, create, edit, delete, approve, export
+  id          String  @id @default(uuid())
+  module      String // dashboard, engagements, workpapers, documents, reports, attendance, copilot, settings
+  action      String // view, create, edit, delete, approve, export
   description String?
 
-  roles       RolePermission[]
+  roles RolePermission[]
 
   @@unique([module, action])
 }
@@ -43,436 +43,1262 @@ model RolePermission {
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
+  @@index([permissionId])
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  passwordHash  String
-  firstName     String
-  lastName      String
-  initials      String
-  role          String   @default("Staff") // Legacy field for JWT backward compat
-  phone         String?
-  designation   String?  // CA Rajesh Sharma, Article Clerk, etc.
-  isActive      Boolean  @default(true)
-  twoFactorEnabled Boolean @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String   @id @default(uuid())
+  email            String   @unique
+  passwordHash     String
+  firstName        String
+  lastName         String
+  initials         String
+  role             String   @default("Staff") // Legacy field for JWT backward compat
+  phone            String?
+  designation      String? // CA Rajesh Sharma, Article Clerk, etc.
+  isActive         Boolean  @default(true)
+  presenceStatus   String   @default("online") // online | offline | maintenance | degraded
+  presenceUpdatedAt DateTime?
+  twoFactorEnabled Boolean  @default(false)
+  refreshToken     String?  @db.Text
+  emailVerified              Boolean   @default(false)
+  emailVerificationToken     String?   @unique
+  emailVerificationExpires   DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // RBAC relation
-  roleId        String?
-  roleRef       Role?    @relation(fields: [roleId], references: [id])
+  roleId  String?
+  roleRef Role?   @relation(fields: [roleId], references: [id])
+
+  // Employee hierarchy
+  reportsToId  String?
+  reportsTo    User?   @relation("EmployeeHierarchy", fields: [reportsToId], references: [id])
+  subordinates User[]  @relation("EmployeeHierarchy")
 
   // Relations
-  firmId        String?
-  firm          Firm?    @relation(fields: [firmId], references: [id])
+  firmId            String?
+  firm              Firm?              @relation(fields: [firmId], references: [id])
+  employeeProfile   EmployeeProfile?
   engagementMembers EngagementMember[]
-  workpapers    Workpaper[]
-  reviewComments ReviewComment[]
-  signoffs      SignOff[]
-  documents     Document[]
-  timeEntries   TimeEntry[]
-  notifications Notification[]
-  attendances   Attendance[]
-  leaveRequests LeaveRequest[]
-  leaveApprovals LeaveRequest[] @relation("LeaveApprover")
-  auditLogs     AuditLog[]
-  copilotMessages CopilotMessage[]
-  copilotSessions CopilotSession[]
+  workpapers        Workpaper[]
+  reviewComments    ReviewComment[]
+  signoffs          SignOff[]
+  documents         Document[]
+  timeEntries       TimeEntry[]
+  notifications     Notification[]
+  attendances       Attendance[]
+  leaveRequests     LeaveRequest[]
+  leaveApprovals    LeaveRequest[]     @relation("LeaveApprover")
+  auditLogs         AuditLog[]
+  copilotMessages   CopilotMessage[]
+  copilotSessions   CopilotSession[]
+
+  // Chat relations
+  chatParticipants ChatParticipant[]
+  chatMessages     ChatMessage[]
+
+  // Approval relations
+  approvalRequests ApprovalRequest[] @relation("ApprovalRequester")
+  approvalActions  ApprovalStep[]
+
+  // Onboarding / Workflow / Time / Vault
+  kycVerified          KycDocument[]            @relation("KycVerifier")
+  stageHistoryActions  EngagementStageHistory[] @relation("StageActor")
+  tasksAssigned        Task[]                   @relation("TaskAssignee")
+  tasksCreated         Task[]                   @relation("TaskCreator")
+  stipends             StipendRecord[]
+  articleship          ArticleshipRecord?
+  vaultViews           VaultAccessLog[]
+  passwordVaultCreated PasswordVaultEntry[]     @relation("VaultCreator")
+  udinIssued           UdinLog[]                @relation("UdinIssuer")
+  invoicesCreated      Invoice[]                @relation("InvoiceCreator")
+  clientStopwatches    ClientStopwatch[]
+
+  @@index([firmId])
+  @@index([roleId])
+  @@index([role])
+  @@index([reportsToId])
 }
 
 model Firm {
-  id            String   @id @default(uuid())
-  name          String
+  id             String   @id @default(uuid())
+  name           String
   registrationNo String?
-  pan           String?
-  gstin         String?
-  address       String?
-  city          String?
-  state         String?
-  pincode       String?
-  phone         String?
-  email         String?
-  website       String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  pan            String?
+  gstin          String?
+  address        String?
+  city           String?
+  state          String?
+  pincode        String?
+  phone          String?
+  email          String?
+  website        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  users         User[]
-  clients       Client[]
-  engagements   Engagement[]
-  offices       Office[]
+  users       User[]
+  clients     Client[]
+  engagements Engagement[]
+  offices     Office[]
 }
 
 // ─── PRD 5.1: Engagement & Client Management ───
 
 model Client {
-  id            String   @id @default(uuid())
-  name          String
-  cin           String?  // Company Identification Number
-  pan           String?
-  gstin         String?
-  category      String?  // Private Ltd, Public Ltd, LLP, Trust, Sole Prop
-  industry      String?
-  address       String?
-  city          String?
-  state         String?
-  contactName   String?
-  contactEmail  String?
-  contactPhone  String?
-  turnover      String?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String    @id @default(uuid())
+  name                String
+  legalName           String? // Full legal name (may differ from trading name)
+  cin                 String? // Company Identification Number
+  pan                 String?
+  gstin               String?
+  category            String? // Private Ltd, Public Ltd, LLP, Trust, Sole Prop
+  industry            String?
+  address             String?
+  city                String?
+  state               String?
+  contactName         String?
+  contactEmail        String?
+  contactPhone        String?
+  turnover            String?
+  isActive            Boolean   @default(true)
+  // Onboarding fields
+  status              String    @default("Prospect") // Active | Inactive | Prospect
+  conflictOfInterest  Boolean   @default(false)
+  conflictNotes       String?   @db.Text
+  conflictCheckedById String?
+  conflictCheckedAt   DateTime?
+  onboardedAt         DateTime?
+  folderPath          String? // Auto-created folder path /ClientName/Year/...
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   firmId        String
-  firm          Firm     @relation(fields: [firmId], references: [id])
+  firm          Firm                 @relation(fields: [firmId], references: [id])
   engagements   Engagement[]
+  contacts      ClientContact[]
+  directors     ClientDirector[]
+  documents     ClientDocument[]
+  kycDocuments  KycDocument[]
+  passwordVault PasswordVaultEntry[]
+  invoices      Invoice[]
+  portalUsers   ClientPortalUser[]
+  commsLog      CommsLog[]
+
+  @@index([firmId])
+  @@index([status])
 }
 
 model Engagement {
-  id            String   @id @default(uuid())
-  title         String
-  type          String   // Statutory | Tax (44AB) | GST | Internal | Special
-  financialYear String   // e.g., 2024-25
-  status        String   @default("Planning") // Planning | Fieldwork | Under Review | Reporting | Closed
-  progress      Int      @default(0)
-  scope         String?  @db.Text
-  startDate     DateTime?
-  deadline      DateTime?
-  billingType   String?  // Fixed | Hourly | Retainer
-  billingAmount Float?
-  notes         String?  @db.Text
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  title              String
+  type               String // Statutory | Tax (44AB) | GST | Internal | Special
+  financialYear      String // e.g., 2024-25
+  status             String    @default("Planning") // Planning | Fieldwork | Under Review | Reporting | Closed
+  progress           Int       @default(0)
+  scope              String?   @db.Text
+  scopeIncluded      String?   @db.Text // EL: included items
+  scopeExcluded      String?   @db.Text // EL: excluded items
+  startDate          DateTime?
+  deadline           DateTime?
+  billingType        String? // Fixed | Hourly | Retainer
+  billingAmount      Float?
+  notes              String?   @db.Text
+  // Workflow stage tracking
+  currentStage       String    @default("Data Pending") // Data Pending | Data Received | Execution (WIP) | Draft Ready | Review with Manager | Partner Review | Client Discussion | UDIN Generated | Filed | Archived
+  udin               String? // Unique Document Identification Number — required before Filed
+  filedAt            DateTime?
+  archivedAt         DateTime?
+  // Engagement Letter
+  elGenerated        Boolean   @default(false)
+  elSignedAt         DateTime?
+  elSignedById       String?
+  elStoragePath      String? // Path to generated EL PDF
+  // Resource allocation
+  partnerInChargeId  String?
+  managerId          String?
+  articleAssistantId String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  clientId      String
-  client        Client   @relation(fields: [clientId], references: [id])
-  firmId        String
-  firm          Firm     @relation(fields: [firmId], references: [id])
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id])
+  firmId   String
+  firm     Firm   @relation(fields: [firmId], references: [id])
 
-  members       EngagementMember[]
-  workpapers    Workpaper[]
-  documents     Document[]
+  members          EngagementMember[]
+  workpapers       Workpaper[]
+  documents        Document[]
   documentRequests DocumentRequest[]
-  observations  Observation[]
-  signoffs      SignOff[]
-  timeEntries   TimeEntry[]
-  reports       Report[]
-  copilotSessions CopilotSession[]
-  deadlines     Deadline[]
+  observations     Observation[]
+  signoffs         SignOff[]
+  timeEntries      TimeEntry[]
+  reports          Report[]
+  copilotSessions  CopilotSession[]
+  deadlines        Deadline[]
+  stageHistory     EngagementStageHistory[]
+  checklistItems   DataChecklistItem[]
+  tasks            Task[]
+  invoices         Invoice[]
+  udinEntries      UdinLog[]
+  commsLog         CommsLog[]
+
+  @@index([clientId])
+  @@index([firmId])
+  @@index([status])
+  @@index([currentStage])
+  @@index([partnerInChargeId])
+  @@index([managerId])
+  @@index([articleAssistantId])
 }
 
 model EngagementMember {
-  id            String   @id @default(uuid())
-  role          String   // Lead | Reviewer | Preparer
-  assignedAt    DateTime @default(now())
+  id         String   @id @default(uuid())
+  role       String // Lead | Reviewer | Preparer
+  assignedAt DateTime @default(now())
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
 
   @@unique([engagementId, userId])
+  @@index([userId])
 }
 
 // ─── PRD 5.2: Document & Evidence Management ───
 
 model Document {
-  id            String   @id @default(uuid())
-  fileName      String
-  originalName  String
-  mimeType      String
-  size          Int
-  storagePath   String
-  category      String?  // Bank Statement | Invoice | Ledger | TDS Cert | Other
-  folder        String   @default("Current File") // Permanent File | Current File | Correspondence | Reports
-  version       Int      @default(1)
-  parentId      String?  // For version tracking — points to previous version
-  isOcrProcessed Boolean @default(false)
-  ocrText       String?  @db.LongText
-  createdAt     DateTime @default(now())
+  id             String   @id @default(uuid())
+  fileName       String
+  originalName   String
+  mimeType       String
+  size           Int
+  storagePath    String
+  category       String? // Bank Statement | Invoice | Ledger | TDS Cert | Other
+  folder         String   @default("Current File") // Permanent File | Current File | Correspondence | Reports
+  version        Int      @default(1)
+  parentId       String? // For version tracking — points to previous version
+  isOcrProcessed Boolean  @default(false)
+  ocrText        String?  @db.LongText
+  createdAt      DateTime @default(now())
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
-  uploadedById  String
-  uploadedBy    User     @relation(fields: [uploadedById], references: [id])
-  workpaperId   String?
-  workpaper     Workpaper? @relation(fields: [workpaperId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  uploadedById String
+  uploadedBy   User       @relation(fields: [uploadedById], references: [id])
+  workpaperId  String?
+  workpaper    Workpaper? @relation(fields: [workpaperId], references: [id])
+
+  @@index([engagementId])
+  @@index([uploadedById])
+  @@index([workpaperId])
 }
 
 model DocumentRequest {
-  id            String   @id @default(uuid())
-  title         String
-  description   String?  @db.Text
-  status        String   @default("Pending") // Pending | Received | Rejected | Overdue
-  dueDate       DateTime?
-  clientNotes   String?  @db.Text
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String    @id @default(uuid())
+  title       String
+  description String?   @db.Text
+  status      String    @default("Pending") // Pending | Received | Rejected | Overdue
+  dueDate     DateTime?
+  clientNotes String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+
+  @@index([engagementId])
 }
 
 // ─── PRD 5.3: Audit Workpapers & Fieldwork ───
 
 model Workpaper {
-  id            String   @id @default(uuid())
-  reference     String   // e.g., WP-01, WP-02
-  title         String
-  section       String   // Revenue | Expenses | Fixed Assets | Bank | Payroll | etc.
-  type          String   @default("Standard") // Standard | CARO | SA | GST | TDS | Lead Schedule
-  content       String?  @db.LongText // Rich text / JSON content of the workpaper
-  status        String   @default("Draft") // Draft | Prepared | Under Review | Reviewed | Approved | Needs Revision
-  conclusion    String?  @db.Text
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default(uuid())
+  reference  String // e.g., WP-01, WP-02
+  title      String
+  section    String // Revenue | Expenses | Fixed Assets | Bank | Payroll | etc.
+  type       String   @default("Standard") // Standard | CARO | SA | GST | TDS | Lead Schedule
+  content    String?  @db.LongText // Rich text / JSON content of the workpaper
+  status     String   @default("Draft") // Draft | Prepared | Under Review | Reviewed | Approved | Needs Revision
+  conclusion String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
-  preparedById  String
-  preparedBy    User     @relation(fields: [preparedById], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  preparedById String
+  preparedBy   User       @relation(fields: [preparedById], references: [id])
 
-  auditSteps    AuditStep[]
+  auditSteps     AuditStep[]
   reviewComments ReviewComment[]
-  documents     Document[]
-  signoffs      SignOff[]
+  documents      Document[]
+  signoffs       SignOff[]
+
+  @@index([engagementId])
+  @@index([preparedById])
 }
 
 model AuditStep {
-  id            String   @id @default(uuid())
-  stepNumber    Int
-  description   String   @db.Text
-  procedure     String?  @db.Text
-  isCompleted   Boolean  @default(false)
-  result        String?  @db.Text
-  notes         String?  @db.Text
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(uuid())
+  stepNumber  Int
+  description String   @db.Text
+  procedure   String?  @db.Text
+  isCompleted Boolean  @default(false)
+  result      String?  @db.Text
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  workpaperId   String
-  workpaper     Workpaper @relation(fields: [workpaperId], references: [id])
+  workpaperId String
+  workpaper   Workpaper @relation(fields: [workpaperId], references: [id])
+
+  @@index([workpaperId])
 }
 
 // ─── PRD 5.4: Review & Approval Workflow ───
 
 model ReviewComment {
-  id            String   @id @default(uuid())
-  content       String   @db.Text
-  isResolved    Boolean  @default(false)
-  parentId      String?  // For threaded replies
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default(uuid())
+  content    String   @db.Text
+  isResolved Boolean  @default(false)
+  parentId   String? // For threaded replies
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  workpaperId   String
-  workpaper     Workpaper @relation(fields: [workpaperId], references: [id])
-  authorId      String
-  author        User     @relation(fields: [authorId], references: [id])
+  workpaperId String
+  workpaper   Workpaper @relation(fields: [workpaperId], references: [id])
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+
+  @@index([workpaperId])
+  @@index([authorId])
 }
 
 model SignOff {
-  id            String   @id @default(uuid())
-  type          String   // Preparer | Manager | Partner
-  status        String   @default("Pending") // Pending | Approved | Rejected
-  comments      String?  @db.Text
-  signedAt      DateTime?
-  createdAt     DateTime @default(now())
+  id        String    @id @default(uuid())
+  type      String // Preparer | Manager | Partner
+  status    String    @default("Pending") // Pending | Approved | Rejected
+  comments  String?   @db.Text
+  signedAt  DateTime?
+  createdAt DateTime  @default(now())
 
-  workpaperId   String?
-  workpaper     Workpaper? @relation(fields: [workpaperId], references: [id])
-  engagementId  String?
-  engagement    Engagement? @relation(fields: [engagementId], references: [id])
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  workpaperId  String?
+  workpaper    Workpaper?  @relation(fields: [workpaperId], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+
+  @@index([workpaperId])
+  @@index([engagementId])
+  @@index([userId])
 }
 
 // ─── PRD 5.5: Reporting & Output Generation ───
 
 model Observation {
-  id            String   @id @default(uuid())
-  title         String
-  severity      String   @default("Moderate") // Critical | Moderate | Low
-  criteria      String?  @db.Text // What should be (the standard)
-  condition     String?  @db.Text // What is (the finding)
-  cause         String?  @db.Text
-  effect        String?  @db.Text
-  recommendation String? @db.Text
-  managementResponse String? @db.Text
-  status        String   @default("Open") // Open | Resolved | Disputed
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  title              String
+  severity           String   @default("Moderate") // Critical | Moderate | Low
+  criteria           String?  @db.Text // What should be (the standard)
+  condition          String?  @db.Text // What is (the finding)
+  cause              String?  @db.Text
+  effect             String?  @db.Text
+  recommendation     String?  @db.Text
+  managementResponse String?  @db.Text
+  status             String   @default("Open") // Open | Resolved | Disputed
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+
+  @@index([engagementId])
 }
 
 model Report {
-  id            String   @id @default(uuid())
-  type          String   // Statutory Audit | Tax Audit (3CD) | Management Letter | LLP | Trust | Custom
-  title         String
-  content       String?  @db.LongText // JSON or rich text content of the report
-  status        String   @default("Draft") // Draft | Under Review | Final | Signed
-  version       Int      @default(1)
-  generatedAt   DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(uuid())
+  type        String // Statutory Audit | Tax Audit (3CD) | Management Letter | LLP | Trust | Custom
+  title       String
+  content     String?  @db.LongText // JSON or rich text content of the report
+  status      String   @default("Draft") // Draft | Under Review | Final | Signed
+  version     Int      @default(1)
+  sharedWithClient Boolean @default(false)
+  sharedWithClientAt DateTime?
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
 
-  form3cdData   Form3CDClause[]
+  form3cdData Form3CDClause[]
+
+  @@index([engagementId])
 }
 
 model Form3CDClause {
-  id            String   @id @default(uuid())
-  clauseNumber  Int
-  clauseTitle   String
-  response      String?  @db.Text
-  remarks       String?  @db.Text
-  isApplicable  Boolean  @default(true)
-  isCompleted   Boolean  @default(false)
+  id           String  @id @default(uuid())
+  clauseNumber Int
+  clauseTitle  String
+  response     String? @db.Text
+  remarks      String? @db.Text
+  isApplicable Boolean @default(true)
+  isCompleted  Boolean @default(false)
 
-  reportId      String
-  report        Report   @relation(fields: [reportId], references: [id])
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id])
+
+  @@index([reportId])
 }
 
 // ─── PRD 5.6: Time, Billing & Practice Management ───
 
 model TimeEntry {
-  id            String   @id @default(uuid())
-  date          DateTime
-  hours         Float
-  description   String?  @db.Text
-  isBillable    Boolean  @default(true)
-  createdAt     DateTime @default(now())
+  id          String    @id @default(uuid())
+  date        DateTime
+  hours       Float
+  workType    String? // Audit | GST Filing | IT Filing | Consultation | Internal | Other
+  description String?   @db.Text
+  notes       String?   @db.Text
+  isBillable  Boolean   @default(true)
+  source      String    @default("manual") // manual | stopwatch
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+
+  @@index([engagementId])
+  @@index([userId])
+  @@index([date])
 }
 
 model Deadline {
-  id            String   @id @default(uuid())
-  title         String
-  type          String   // Statutory | Tax | GST | Internal | MCA
-  dueDate       DateTime
-  status        String   @default("On Track") // On Track | At Risk | Overdue | Completed
-  assignedTo    String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default(uuid())
+  title      String
+  type       String // Statutory | Tax | GST | Internal | MCA
+  dueDate    DateTime
+  status     String   @default("On Track") // On Track | At Risk | Overdue | Completed
+  assignedTo String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  engagementId  String
-  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+
+  @@index([engagementId])
 }
 
 // ─── PRD 5.7: Notifications ───
 
 model Notification {
-  id            String   @id @default(uuid())
-  title         String
-  message       String   @db.Text
-  type          String   @default("info") // info | warning | success | danger
-  isRead        Boolean  @default(false)
-  link          String?
-  createdAt     DateTime @default(now())
+  id        String   @id @default(uuid())
+  title     String
+  message   String   @db.Text
+  type      String   @default("info") // info | warning | success | danger
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
 
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 // ─── PRD 5.8: Facial Recognition Attendance Module ───
 
 model Office {
-  id            String   @id @default(uuid())
-  name          String
-  address       String?
-  latitude      Float?
-  longitude     Float?
+  id             String  @id @default(uuid())
+  name           String
+  address        String?
+  latitude       Float?
+  longitude      Float?
   geofenceRadius Int     @default(200) // meters
 
-  firmId        String
-  firm          Firm     @relation(fields: [firmId], references: [id])
+  firmId String
+  firm   Firm   @relation(fields: [firmId], references: [id])
 
-  attendances   Attendance[]
+  attendances Attendance[]
+
+  @@index([firmId])
 }
 
 model Attendance {
-  id            String   @id @default(uuid())
-  date          DateTime
-  checkIn       DateTime?
-  checkOut      DateTime?
-  status        String   @default("present") // present | late | absent | leave | half-day
-  location      String?  // Office | Client Site | Remote
-  gpsLat        Float?
-  gpsLng        Float?
-  method        String   @default("face") // face | otp | manual
-  createdAt     DateTime @default(now())
+  id        String    @id @default(uuid())
+  date      DateTime
+  checkIn   DateTime?
+  checkOut  DateTime?
+  status    String    @default("present") // present | late | absent | leave | half-day
+  location  String? // Office | Client Site | Remote
+  gpsLat    Float?
+  gpsLng    Float?
+  method    String    @default("face") // face | otp | manual
+  createdAt DateTime  @default(now())
 
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
-  officeId      String?
-  office        Office?  @relation(fields: [officeId], references: [id])
+  userId   String
+  user     User    @relation(fields: [userId], references: [id])
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id])
+
+  @@index([userId])
+  @@index([officeId])
 }
 
 model LeaveRequest {
-  id            String   @id @default(uuid())
-  type          String   // Casual | Sick | Earned | Holiday
-  fromDate      DateTime
-  toDate        DateTime
-  days          Int
-  reason        String?  @db.Text
-  status        String   @default("Pending") // Pending | Approved | Rejected
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String    @id @default(uuid())
+  type              String // Casual | Sick | Earned | Holiday | Exam (Foundation/Intermediate/Final) | Study
+  examLevel         String? // For Exam leaves: Foundation | Intermediate | Final
+  fromDate          DateTime
+  toDate            DateTime
+  days              Int
+  reason            String?   @db.Text
+  // Two-step approval: Manager then Partner
+  status            String    @default("Pending") // Pending | Manager Approved | Approved | Rejected
+  managerApprovedAt DateTime?
+  managerApprovedBy String?
+  partnerApprovedAt DateTime?
+  partnerApprovedBy String?
+  rejectedAt        DateTime?
+  rejectedBy        String?
+  rejectionReason   String?   @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
-  approverId    String?
-  approver      User?    @relation("LeaveApprover", fields: [approverId], references: [id])
+  userId     String
+  user       User    @relation(fields: [userId], references: [id])
+  approverId String?
+  approver   User?   @relation("LeaveApprover", fields: [approverId], references: [id])
+
+  @@index([userId])
+  @@index([approverId])
+  @@index([status])
 }
 
 // ─── PRD 6: AI Copilot ───
 
 model CopilotSession {
-  id            String   @id @default(uuid())
-  title         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        String   @id @default(uuid())
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
-  engagementId  String?
-  engagement    Engagement? @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
 
-  messages      CopilotMessage[]
+  messages CopilotMessage[]
+
+  @@index([userId])
+  @@index([engagementId])
 }
 
 model CopilotMessage {
-  id            String   @id @default(uuid())
-  role          String   // user | assistant
-  content       String   @db.LongText
-  citations     String?  @db.Text // JSON array of source citations
-  wasAccepted   Boolean? // For AI outputs: accepted/edited/rejected tracking
-  createdAt     DateTime @default(now())
+  id          String   @id @default(uuid())
+  role        String // user | assistant
+  content     String   @db.LongText
+  citations   String?  @db.Text // JSON array of source citations
+  wasAccepted Boolean? // For AI outputs: accepted/edited/rejected tracking
+  createdAt   DateTime @default(now())
 
-  sessionId     String
-  session       CopilotSession @relation(fields: [sessionId], references: [id])
-  userId        String?
-  user          User?    @relation(fields: [userId], references: [id])
+  sessionId String
+  session   CopilotSession @relation(fields: [sessionId], references: [id])
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id])
+
+  @@index([sessionId])
+  @@index([userId])
 }
 
 // ─── PRD 7.2: Full audit log ───
 
 model AuditLog {
-  id            String   @id @default(uuid())
-  action        String   // CREATE | UPDATE | DELETE | LOGIN | SIGNOFF | AI_USAGE
-  entity        String   // User | Client | Engagement | Workpaper | Document | etc.
-  entityId      String?
-  details       String?  @db.Text // JSON with change details
-  ipAddress     String?
-  createdAt     DateTime @default(now())
+  id        String   @id @default(uuid())
+  action    String // CREATE | UPDATE | DELETE | LOGIN | SIGNOFF | AI_USAGE
+  entity    String // User | Client | Engagement | Workpaper | Document | etc.
+  entityId  String?
+  details   String?  @db.LongText // JSON with change details
+  ipAddress String?
+  createdAt DateTime @default(now())
 
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entity, entityId])
+}
+
+// ─── Employee Statutory Data ───
+
+model EmployeeProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Personal
+  dateOfBirth   DateTime?
+  gender        String? // Male | Female | Other
+  bloodGroup    String?
+  maritalStatus String?
+  fatherName    String?
+
+  // Identity documents
+  pan        String?
+  aadhaar    String? // Stored encrypted
+  passportNo String?
+  uanNumber  String? // Universal Account Number (EPF)
+
+  // Address
+  currentAddress   String? @db.Text
+  currentCity      String?
+  currentState     String?
+  currentPincode   String?
+  permanentAddress String? @db.Text
+  permanentCity    String?
+  permanentState   String?
+  permanentPincode String?
+
+  // Bank details
+  bankName      String?
+  bankBranch    String?
+  accountNumber String? // Stored encrypted
+  ifscCode      String?
+
+  // Emergency contact
+  emergencyName     String?
+  emergencyRelation String?
+  emergencyPhone    String?
+
+  // Employment
+  joiningDate    DateTime?
+  department     String?
+  employeeCode   String?
+  employmentType String? // Full-time | Part-time | Contract | Intern
+  probationEnd   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salaryStructure   SalaryStructure?
+  employeeDocuments EmployeeDocument[]
+}
+
+model SalaryStructure {
+  id                String          @id @default(uuid())
+  employeeProfileId String          @unique
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  basicSalary      Float @default(0)
+  hra              Float @default(0)
+  da               Float @default(0)
+  specialAllowance Float @default(0)
+  conveyance       Float @default(0)
+  medicalAllowance Float @default(0)
+  otherAllowances  Float @default(0)
+
+  // Deductions
+  pf              Float @default(0) // Employee PF contribution
+  esi             Float @default(0)
+  professionalTax Float @default(0)
+  tds             Float @default(0)
+  otherDeductions Float @default(0)
+
+  ctc           Float    @default(0) // Cost to company (annual)
+  effectiveFrom DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmployeeDocument {
+  id                String          @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   EmployeeProfile @relation(fields: [employeeProfileId], references: [id], onDelete: Cascade)
+
+  docType      String // PAN Card | Aadhaar | Passport | Offer Letter | Relieving Letter | Payslip | Other
+  fileName     String
+  originalName String
+  mimeType     String
+  size         Int
+  storagePath  String
+  uploadedAt   DateTime @default(now())
+
+  @@index([employeeProfileId])
+}
+
+// ─── Client Statutory Data (Extended) ───
+
+model ClientContact {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  name        String
+  designation String?
+  email       String?
+  phone       String?
+  isPrimary   Boolean @default(false)
+  department  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+model ClientDirector {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  din             String? // Director Identification Number
+  name            String
+  designation     String? // Managing Director | Director | Independent Director | Whole-time Director
+  pan             String?
+  aadhaar         String?
+  email           String?
+  phone           String?
+  appointmentDate DateTime?
+  isActive        Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+model ClientDocument {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  docType       String // COI | MOA | AOA | PAN Card | GST Certificate | Board Resolution | Financial Statement | Other
+  fileName      String
+  originalName  String
+  mimeType      String
+  size          Int
+  storagePath   String
+  financialYear String? // For financial statements
+  uploadedAt    DateTime @default(now())
+
+  @@index([clientId])
+}
+
+// ─── Generic Approval Workflow Engine ───
+
+model ApprovalWorkflow {
+  id          String  @id @default(uuid())
+  name        String // e.g., "Leave Approval", "Document Sign-off", "Expense Approval"
+  entityType  String // leave | document | expense | workpaper | engagement
+  description String?
+  isActive    Boolean @default(true)
+  firmId      String
+
+  steps    ApprovalWorkflowStep[]
+  requests ApprovalRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([firmId])
+  @@index([entityType])
+}
+
+model ApprovalWorkflowStep {
+  id         String           @id @default(uuid())
+  workflowId String
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  stepOrder        Int
+  approverRole     String? // Role name: Partner | Manager | Staff
+  approverUserId   String? // Specific user, or null for role-based
+  autoEscalateDays Int? // Auto-escalate after N days
+
+  @@unique([workflowId, stepOrder])
+  @@index([workflowId])
+}
+
+model ApprovalRequest {
+  id         String           @id @default(uuid())
+  workflowId String
+  workflow   ApprovalWorkflow @relation(fields: [workflowId], references: [id])
+
+  entityType  String // leave | document | expense | workpaper
+  entityId    String // ID of the entity being approved
+  title       String
+  description String? @db.Text
+  status      String  @default("Pending") // Pending | In Progress | Approved | Rejected | Escalated
+  currentStep Int     @default(1)
+  priority    String  @default("Normal") // Low | Normal | High | Urgent
+
+  requesterId String
+  requester   User   @relation("ApprovalRequester", fields: [requesterId], references: [id])
+
+  steps ApprovalStep[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workflowId])
+  @@index([requesterId])
+  @@index([entityType, entityId])
+  @@index([status])
+}
+
+model ApprovalStep {
+  id        String          @id @default(uuid())
+  requestId String
+  request   ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  stepOrder Int
+  status    String    @default("Pending") // Pending | Approved | Rejected | Skipped
+  comments  String?   @db.Text
+  actionAt  DateTime?
+
+  approverId String?
+  approver   User?   @relation(fields: [approverId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([approverId])
+}
+
+// ─── Chat & Messaging System ───
+
+model ChatRoom {
+  id           String  @id @default(uuid())
+  name         String? // null for DMs
+  type         String  @default("direct") // direct | group | engagement
+  description  String?
+  engagementId String? // Link to engagement for engagement chats
+  isArchived   Boolean @default(false)
+
+  participants   ChatParticipant[]
+  messages       ChatMessage[]
+  pinnedMessages ChatPinnedMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([engagementId])
+  @@index([type])
+}
+
+model ChatParticipant {
+  id     String   @id @default(uuid())
+  roomId String
+  room   ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId String
+  user   User     @relation(fields: [userId], references: [id])
+
+  role       String   @default("member") // admin | member
+  lastReadAt DateTime @default(now())
+  isMuted    Boolean  @default(false)
+  joinedAt   DateTime @default(now())
+
+  @@unique([roomId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id       String   @id @default(uuid())
+  roomId   String
+  room     ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  senderId String
+  sender   User     @relation(fields: [senderId], references: [id])
+
+  content          String  @db.Text
+  messageType      String  @default("text") // text | file | system
+  fileName         String?
+  fileOriginalName String?
+  fileMimeType     String?
+  fileSize         Int?
+  fileData         Bytes?  @db.LongBlob
+
+  parentId  String? // Reply to a message
+  forwardedFromMessageId String?
+  forwardedFromSenderName String?
+  isEdited  Boolean @default(false)
+  isDeleted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pinnedMessages ChatPinnedMessage[]
+
+  @@index([roomId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model ChatPinnedMessage {
+  id        String      @id @default(uuid())
+  roomId    String
+  room      ChatRoom    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedAt  DateTime    @default(now())
+
+  @@unique([roomId, messageId])
+  @@index([roomId])
+}
+
+// ─── Document Sharing (File Management Enhancement) ───
+
+model DocumentShare {
+  id               String    @id @default(uuid())
+  documentId       String
+  shareToken       String    @unique @default(uuid())
+  sharedById       String
+  sharedWithEmail  String? // Email for external shares
+  sharedWithUserId String? // For internal shares
+  permission       String    @default("view") // view | download | edit
+  password         String? // Optional password protection (hashed)
+  expiresAt        DateTime?
+  accessCount      Int       @default(0)
+  maxAccess        Int? // Max number of times link can be accessed
+  isActive         Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+  @@index([sharedById])
+  @@index([shareToken])
+}
+
+// ─── Client Onboarding: KYC Documents Checklist ───
+
+model KycDocument {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  docType      String // PAN | GST Certificate | CIN | MOA | AOA | Address Proof | Board Resolution | Other
+  status       String    @default("Pending") // Pending | Received | Verified
+  storagePath  String? // Optional file path if uploaded
+  fileName     String?
+  notes        String?   @db.Text
+  receivedAt   DateTime?
+  verifiedAt   DateTime?
+  verifiedById String?
+  verifiedBy   User?     @relation("KycVerifier", fields: [verifiedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+}
+
+// ─── Workflow Stage History ───
+
+model EngagementStageHistory {
+  id           String     @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  fromStage String?
+  toStage   String
+  notes     String? @db.Text
+  actorId   String
+  actor     User    @relation("StageActor", fields: [actorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([engagementId])
+  @@index([actorId])
+}
+
+// ─── Data Checklist per Engagement ───
+
+model DataChecklistItem {
+  id           String     @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  title          String
+  description    String?   @db.Text
+  status         String    @default("Requested") // Requested | Received | Missing
+  requestedAt    DateTime  @default(now())
+  receivedAt     DateTime?
+  lastFollowupAt DateTime?
+  followupCount  Int       @default(0)
+  escalatedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([engagementId])
+  @@index([status])
+}
+
+// ─── Tasks (Today's To-Do) ───
+
+model Task {
+  id          String    @id @default(uuid())
+  title       String
+  description String?   @db.Text
+  priority    String    @default("Normal") // Low | Normal | High | Urgent
+  status      String    @default("Open") // Open | In Progress | Done | Cancelled
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  assigneeId   String
+  assignee     User        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById  String
+  createdBy    User        @relation("TaskCreator", fields: [createdById], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ─── Live Client Stopwatch (open timers per user) ───
+
+model ClientStopwatch {
+  id           String   @id @default(uuid())
+  userId       String   @unique // one open timer per user
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  engagementId String
+  workType     String   @default("Audit")
+  startedAt    DateTime @default(now())
+  notes        String?  @db.Text
+
+  @@index([userId])
+}
+
+// ─── Stipend Tracking (ICAI Articleship) ───
+
+model StipendRecord {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  month       Int // 1-12
+  year        Int
+  articleYear Int // 1 | 2 | 3 (year of articleship)
+  amount      Float
+  status      String    @default("Pending") // Pending | Paid
+  paidAt      DateTime?
+  notes       String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, month, year])
+  @@index([userId])
+  @@index([status])
+}
+
+model ArticleshipRecord {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  registrationNo  String?
+  startDate       DateTime
+  expectedEndDate DateTime
+  actualEndDate   DateTime?
+  // ICAI leave allowances (consumed counters)
+  examLeaveUsed   Int       @default(0) // out of 175 days
+  casualLeaveUsed Int       @default(0)
+  sickLeaveUsed   Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Password Vault (encrypted at rest) ───
+
+model PasswordVaultEntry {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  portalName  String // Income Tax | GST | MCA | TAN | TRACES | Other
+  username    String
+  // AES-256-GCM encrypted password — stored as base64(iv:authTag:ciphertext)
+  passwordEnc String  @db.Text
+  notes       String? @db.Text
+
+  createdById String
+  createdBy   User             @relation("VaultCreator", fields: [createdById], references: [id])
+  accessLog   VaultAccessLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+model VaultAccessLog {
+  id      String             @id @default(uuid())
+  entryId String
+  entry   PasswordVaultEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  action    String  @default("view") // view | reveal | edit | delete
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entryId])
+  @@index([userId])
+}
+
+// ─── UDIN Log ───
+
+model UdinLog {
+  id           String      @id @default(uuid())
+  udin         String      @unique
+  caName       String // CA who generated
+  caUserId     String
+  caUser       User        @relation("UdinIssuer", fields: [caUserId], references: [id])
+  clientId     String
+  documentType String // Tax Audit | Statutory Audit | GST Annual Return | Certification | Other
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
+  generatedAt  DateTime    @default(now())
+  status       String      @default("Active") // Active | Revoked
+  revokedAt    DateTime?
+  revokeReason String?     @db.Text
+
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([status])
+}
+
+// ─── Invoices & Payments ───
+
+model Invoice {
+  id           String      @id @default(uuid())
+  invoiceNo    String      @unique
+  clientId     String
+  client       Client      @relation(fields: [clientId], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
+
+  amount      Float
+  tax         Float    @default(0) // GST amount
+  totalAmount Float
+  currency    String   @default("INR")
+  description String?  @db.Text
+  issueDate   DateTime @default(now())
+  dueDate     DateTime
+  status      String   @default("Unpaid") // Unpaid | Partial | Paid | Overdue | Cancelled
+  paidAmount  Float    @default(0)
+
+  createdById String
+  createdBy   User   @relation("InvoiceCreator", fields: [createdById], references: [id])
+
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model Payment {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount    Float
+  method    String? // Cash | Bank Transfer | UPI | Cheque
+  reference String? // Txn ID, cheque no, etc.
+  paidAt    DateTime @default(now())
+  notes     String?  @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+}
+
+// ─── Client Portal Users (separate from staff users) ───
+
+model ClientPortalUser {
+  id       String @id @default(uuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId   String? @unique
+
+  email        String    @unique
+  passwordHash String
+  fullName     String
+  mobile       String?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  refreshToken String?   @db.Text
+
+  otps OtpVerification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+}
+
+model OtpVerification {
+  id                 String            @id @default(uuid())
+  clientPortalUserId String?
+  clientPortalUser   ClientPortalUser? @relation(fields: [clientPortalUserId], references: [id], onDelete: Cascade)
+
+  mobile     String?
+  email      String?
+  purpose    String // e-verification | login | password-reset
+  otpHash    String // hashed OTP
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  attempts   Int       @default(0)
+  reference  String? // engagementId or other reference
+
+  createdAt DateTime @default(now())
+
+  @@index([clientPortalUserId])
+  @@index([purpose])
+}
+
+// ─── Communications Log (emails sent) ───
+
+model CommsLog {
+  id           String      @id @default(uuid())
+  clientId     String?
+  client       Client?     @relation(fields: [clientId], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
+
+  channel      String    @default("email") // email | sms | inapp
+  templateKey  String // welcome | document-followup | deadline-reminder | filing-confirmation | other
+  toAddress    String
+  ccAddress    String?
+  subject      String
+  body         String    @db.LongText
+  status       String    @default("queued") // queued | sent | failed
+  errorMessage String?   @db.Text
+  sentAt       DateTime?
+  metadata     String?   @db.Text // JSON
+
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([status])
+  @@index([templateKey])
 }
