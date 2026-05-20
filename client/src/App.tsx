@@ -32,6 +32,24 @@ const Copilot = lazyRetry(() => import('./pages/Copilot'));
 const Attendance = lazyRetry(() => import('./pages/Attendance'));
 const Reports = lazyRetry(() => import('./pages/Reports'));
 const Settings = lazyRetry(() => import('./pages/Settings'));
+const ClientPortal = lazyRetry(() => import('./pages/ClientPortal'));
+const VerifyEmail = lazyRetry(() => import('./pages/VerifyEmail'));
+const AuditLog = lazyRetry(() => import('./pages/AuditLog'));
+const Observations = lazyRetry(() => import('./pages/Observations'));
+const Form3CD = lazyRetry(() => import('./pages/Form3CD'));
+const TimeBilling = lazyRetry(() => import('./pages/TimeBilling'));
+const Unauthorized = lazyRetry(() => import('./pages/Unauthorized'));
+const Messages = lazyRetry(() => import('./pages/Messages'));
+const Employees = lazyRetry(() => import('./pages/Employees'));
+const ClientMaster = lazyRetry(() => import('./pages/ClientMaster'));
+const Approvals = lazyRetry(() => import('./pages/Approvals'));
+const Onboarding = lazyRetry(() => import('./pages/Onboarding'));
+const WorkflowBoard = lazyRetry(() => import('./pages/WorkflowBoard'));
+const TimeTracker = lazyRetry(() => import('./pages/TimeTracker'));
+const PasswordVault = lazyRetry(() => import('./pages/PasswordVault'));
+const ManagementReports = lazyRetry(() => import('./pages/ManagementReports'));
+const LeaveStipend = lazyRetry(() => import('./pages/LeaveStipend'));
+const EngagementDetail = lazyRetry(() => import('./pages/EngagementDetail'));
 
 // Error boundary to catch render errors and prevent blank screen
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -48,14 +66,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   render() {
     if (this.state.hasError) {
       return (
-        <div className="h-screen flex items-center justify-center bg-white">
+        <div className="h-screen flex items-center justify-center bg-surface">
           <div className="text-center space-y-4">
             <img src="/logo.png" alt="AuditIQ" className="h-14 w-auto mx-auto object-contain" />
-            <h2 className="text-lg font-semibold text-gray-800">Something went wrong</h2>
-            <p className="text-sm text-gray-500">Please refresh the page to continue.</p>
+            <h2 className="text-lg font-semibold text-foreground">Something went wrong</h2>
+            <p className="text-sm text-foreground-muted">Please refresh the page to continue.</p>
             <button
               onClick={() => window.location.reload()}
-              className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              className="btn-primary"
             >
               Refresh Page
             </button>
@@ -92,6 +110,23 @@ function ProtectedRoute() {
   return user ? <Outlet /> : <Navigate to="/login" replace />;
 }
 
+/** Route guard that checks user role against a whitelist */
+function RoleRoute({ roles }: { roles: string[] }) {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  if (!roles.includes(user.role)) {
+    if (user.role === 'Client') return <Navigate to="/client/dashboard" replace />;
+    return <Navigate to="/" replace />;
+  }
+  return <Outlet />;
+}
+
+function ClientRedirect() {
+  const { user } = useAuth();
+  if (user?.role === 'Client') return <Navigate to="/client/dashboard" replace />;
+  return <Dashboard />;
+}
+
 function PublicRoute() {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -109,19 +144,61 @@ export default function App() {
             <Route element={<PublicRoute />}>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/verify-email" element={<VerifyEmail />} />
             </Route>
 
-            {/* Protected routes */}
+            {/* Unauthorized page (no layout) */}
+            <Route path="/unauthorized" element={<Unauthorized />} />
+
+            {/* Protected routes — all authenticated users */}
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route index element={<Dashboard />} />
-                <Route path="/engagements" element={<Engagements />} />
-                <Route path="/workpapers" element={<Workpapers />} />
+                <Route index element={<ClientRedirect />} />
                 <Route path="/documents" element={<Documents />} />
-                <Route path="/copilot" element={<Copilot />} />
-                <Route path="/attendance" element={<Attendance />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/settings" element={<Settings />} />
+
+                {/* Partner / Admin / Manager / Staff only — audit workflows */}
+                <Route element={<RoleRoute roles={['Partner', 'Admin', 'Manager', 'Staff']} />}>
+                  <Route path="/engagements" element={<Engagements />} />
+                  <Route path="/engagements/:id" element={<EngagementDetail />} />
+                  <Route path="/workflow" element={<WorkflowBoard />} />
+                  <Route path="/workpapers" element={<Workpapers />} />
+                  <Route path="/copilot" element={<Copilot />} />
+                  <Route path="/attendance" element={<Attendance />} />
+                  <Route path="/reports" element={<Reports />} />
+                  <Route path="/observations" element={<Observations />} />
+                  <Route path="/form3cd" element={<Form3CD />} />
+                  <Route path="/time-billing" element={<TimeBilling />} />
+                  <Route path="/time-tracker" element={<TimeTracker />} />
+                  <Route path="/leave-stipend" element={<LeaveStipend />} />
+                  <Route path="/messages" element={<Messages />} />
+                  <Route path="/employees" element={<Employees />} />
+                  <Route path="/client-master" element={<ClientMaster />} />
+                  <Route path="/approvals" element={<Approvals />} />
+                </Route>
+
+                {/* Partner / Admin / Manager only */}
+                <Route element={<RoleRoute roles={['Partner', 'Admin', 'Manager']} />}>
+                  <Route path="/onboarding" element={<Onboarding />} />
+                  <Route path="/vault" element={<PasswordVault />} />
+                </Route>
+
+                {/* Partner / Admin only — management reports */}
+                <Route element={<RoleRoute roles={['Partner', 'Admin']} />}>
+                  <Route path="/management-reports" element={<ManagementReports />} />
+                </Route>
+
+                {/* Partner / Admin only — administration */}
+                <Route element={<RoleRoute roles={['Partner', 'Admin']} />}>
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/audit-log" element={<AuditLog />} />
+                </Route>
+
+                {/* Client portal — Client role */}
+                <Route element={<RoleRoute roles={['Client']} />}>
+                  <Route path="/client/dashboard" element={<ClientPortal />} />
+                  <Route path="/client/messages" element={<Messages />} />
+                  <Route path="/portal" element={<Navigate to="/client/dashboard" replace />} />
+                </Route>
               </Route>
             </Route>
 
