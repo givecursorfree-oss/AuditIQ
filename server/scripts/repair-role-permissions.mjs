@@ -1,34 +1,18 @@
 /**
- * Repair system role permissions and user→role links (safe to re-run).
- * Creates missing Role rows (Admin/Partner/…) — required after fresh db push.
- *
- * Usage: npm run db:repair-role-permissions
- * Docker: node scripts/repair-role-permissions.mjs  (see sibling .mjs)
+ * Production repair (no tsx). Creates Role rows + permissions + links users.
+ *   node scripts/repair-role-permissions.mjs
  */
-import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 const MODULES = [
-  'dashboard',
-  'engagements',
-  'workpapers',
-  'documents',
-  'reports',
-  'attendance',
-  'leave',
-  'employees',
-  'messages',
-  'settings',
-  'clients',
-  'invoices',
-  'vault',
-  'approvals',
+  'dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance',
+  'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals',
 ];
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
 
-const ROLE_META: Record<string, string> = {
+const ROLE_META = {
   Admin: 'Firm administrator — sanctions leave; cannot apply leave',
   Partner: 'Senior partner with full audit oversight',
   Manager: 'Audit manager with review and approval rights',
@@ -56,7 +40,7 @@ async function ensureAllPermissions() {
   return prisma.permission.findMany();
 }
 
-async function setRolePermissions(roleName: string, permissionIds: string[]) {
+async function setRolePermissions(roleName, permissionIds) {
   const description = ROLE_META[roleName] || roleName;
   const role = await prisma.role.upsert({
     where: { name: roleName },
@@ -69,14 +53,10 @@ async function setRolePermissions(roleName: string, permissionIds: string[]) {
       data: permissionIds.map((permissionId) => ({ roleId: role.id, permissionId })),
     });
   }
-  console.log(`✅ ${roleName}: ${permissionIds.length} permission(s)`);
+  console.log(`OK ${roleName}: ${permissionIds.length} permission(s)`);
 }
 
-function pick(
-  all: { id: string; module: string; action: string }[],
-  mods: string[],
-  acts: string[]
-) {
+function pick(all, mods, acts) {
   return all.filter((p) => mods.includes(p.module) && acts.includes(p.action)).map((p) => p.id);
 }
 
@@ -86,28 +66,25 @@ async function syncUserRoleIds() {
   const users = await prisma.user.findMany({
     select: { id: true, email: true, role: true, roleId: true, roleRef: { select: { name: true } } },
   });
-
   let fixed = 0;
   for (const u of users) {
     const expectedId = roleByName[u.role];
     if (!expectedId) {
-      console.warn(`⚠️  No Role row for user ${u.email} (role="${u.role}")`);
+      console.warn(`No Role for ${u.email} (role=${u.role})`);
       continue;
     }
     if (u.roleId !== expectedId || u.roleRef?.name !== u.role) {
       await prisma.user.update({ where: { id: u.id }, data: { roleId: expectedId } });
-      console.log(`✅ Linked ${u.email} → ${u.role} (was ${u.roleRef?.name ?? 'unlinked'})`);
+      console.log(`Linked ${u.email} → ${u.role}`);
       fixed += 1;
     }
   }
-  if (fixed === 0) console.log('✅ All users already linked to matching role rows');
+  if (fixed === 0) console.log('All users already linked');
 }
 
 async function main() {
-  console.log('🔧 Repairing role permissions...\n');
   const allPerms = await ensureAllPermissions();
   const allIds = allPerms.map((p) => p.id);
-
   await setRolePermissions(
     'Admin',
     allPerms.filter((p) => !(p.module === 'leave' && p.action === 'apply')).map((p) => p.id)
@@ -116,52 +93,34 @@ async function main() {
   await setRolePermissions(
     'Manager',
     pick(allPerms, MODULES.filter((m) => m !== 'settings'), [
-      'view',
-      'create',
-      'edit',
-      'approve',
-      'export',
-      'apply',
-      'manage',
+      'view', 'create', 'edit', 'approve', 'export', 'apply', 'manage',
     ])
   );
   await setRolePermissions(
     'Staff',
     pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages'], [
-      'view',
-      'create',
-      'edit',
-      'apply',
+      'view', 'create', 'edit', 'apply',
     ])
   );
   await setRolePermissions(
     'Intern',
     pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'], [
-      'view',
-      'apply',
+      'view', 'apply',
     ])
   );
-  await setRolePermissions(
-    'Client',
-    pick(allPerms, ['dashboard', 'documents', 'reports', 'messages'], ['view'])
-  );
+  await setRolePermissions('Client', pick(allPerms, ['dashboard', 'documents', 'reports', 'messages'], ['view']));
   await setRolePermissions(
     'HR',
     pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages'], [
-      'view',
-      'manage',
-      'export',
-      'apply',
+      'view', 'manage', 'export', 'apply',
     ])
   );
   await setRolePermissions(
     'Accounts',
     pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages'], ['view', 'create', 'edit', 'export'])
   );
-
-  console.log('');
   await syncUserRoleIds();
-  console.log('\n✅ Role permission repair complete');
+  console.log('Role permission repair complete');
 }
 
 main()

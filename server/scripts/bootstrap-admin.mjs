@@ -57,6 +57,7 @@ async function main() {
     console.log(`Created admin: ${EMAIL}`);
   }
   console.log('OK — sign in with that email and password.');
+  console.log('Next: node scripts/repair-role-permissions.mjs  (grants Admin dashboard access)');
 }
 
 main()

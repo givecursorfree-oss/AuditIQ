@@ -12,7 +12,7 @@ import {
 } from '@/lib/presence';
 import { usePresenceOptional } from '@/context/PresenceContext';
 import { resolveAvatarUrl } from '@/lib/branding';
-import { avatarGradientClass, avatarGradientUrl } from '@/lib/avatarGradient';
+import { avatarGradientClass } from '@/lib/avatarGradient';
 import { cn } from '@/lib/utils';
 
 type UserPresenceAvatarProps = {
@@ -60,11 +60,9 @@ export default function UserPresenceAvatar({
 
   return (
     <Avatar className={cn(sizeClasses[size], 'border-2 border-card', className)} title={name}>
-      <AvatarImage
-        src={photo || avatarGradientUrl(seed)}
-        alt={name ?? initials}
-        className="object-cover"
-      />
+      {photo ? (
+        <AvatarImage src={photo} alt={name ?? initials} className="object-cover" />
+      ) : null}
       <AvatarFallback className={cn('text-white font-semibold', avatarGradientClass(seed))}>
         {initials}
       </AvatarFallback>

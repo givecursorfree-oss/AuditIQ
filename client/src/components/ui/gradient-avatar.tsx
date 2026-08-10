@@ -1,5 +1,5 @@
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { avatarGradientClass, avatarGradientUrl } from '@/lib/avatarGradient';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { avatarGradientClass } from '@/lib/avatarGradient';
 import { cn } from '@/lib/utils';
 
 interface GradientAvatarProps {
@@ -19,7 +19,7 @@ export function GradientAvatar({ seed, initials, className, size = 'md' }: Gradi
   const fallback = (initials || seed).slice(0, 2).toUpperCase();
   return (
     <Avatar className={cn(sizeMap[size], 'border-2 border-card shrink-0', className)}>
-      <AvatarImage src={avatarGradientUrl(seed)} alt={seed} />
+      {/* Local CSS gradient only — no external dicebear (blocked by CSP img-src) */}
       <AvatarFallback
         className={cn(
           'text-white font-semibold border-0',
