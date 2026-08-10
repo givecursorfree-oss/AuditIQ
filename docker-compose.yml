@@ -83,6 +83,7 @@ services:
     environment:
       # Set after certbot (e.g. audit.example.com) to enable HTTPS template
       DOMAIN: ${DOMAIN:-}
+      API_DOMAIN: ${API_DOMAIN:-}
     volumes:
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot
