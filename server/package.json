@@ -12,6 +12,7 @@
     "db:reset": "tsx prisma/reset-db.ts",
     "db:reset:force": "tsx prisma/reset-db.ts -- --force",
     "db:seed": "tsx prisma/seed.ts",
+    "db:bootstrap-admin": "tsx prisma/bootstrap-admin.ts",
     "db:sync-permissions": "tsx scripts/sync-nav-permissions.ts",
     "db:repair-role-permissions": "tsx scripts/repair-role-permissions.ts",
     "db:backfill-roles": "node scripts/backfill-user-roles.mjs",

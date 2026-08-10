@@ -8,7 +8,7 @@ import { isAttendanceEligible } from '../lib/attendancePopup';
 import AuditIQLogo from '@/components/brand/AuditIQLogo';
 
 const LOGIN_FEATURE_IMAGES = {
-  auditLifecycle: '/feature-audit-lifecycle.png',
+  auditLifecycle: '/feature-audit-lifecycle.avif',
   documentSearch: '/feature-document-search.png',
 } as const;
 
