@@ -1,86 +1,112 @@
-# AuditIQ — Vercel (frontend) + VPS (API)
+# AuditIQ — Vercel (frontend) + VPS (MySQL + API only)
 
-Recommended DNS:
+| Host | Where |
+|------|--------|
+| `auditiq.mkdandeker.com` | **Vercel** (React) |
+| `api.mkdandeker.com` | **VPS** (nginx → Node + MySQL) |
 
-| Host | Points to |
-|------|-----------|
-| `app.auditiq.mkdandeker.com` | Vercel |
-| `api.auditiq.mkdandeker.com` | VPS IP |
+No React/`client` container on the VPS.
 
-## 1. VPS (API only)
+## DNS
+
+| Type | Host | Value |
+|------|------|--------|
+| A | `api` | VPS IP |
+| CNAME or A | `auditiq` | Vercel (as Vercel dashboard shows) |
+
+## 1. Clean VPS → API only
+
+SSH in, then paste:
 
 ```bash
 cd /opt/auditiq
-git pull
-cp .env.api.example .env.api
-nano .env.api   # set secrets + CLIENT_URL + DOMAIN
+git remote set-url origin https://github.com/givecursorfree-oss/AuditIQ.git
+git pull origin main
+
+# Stop ALL old stacks (app+api together)
+docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 down 2>/dev/null || true
+docker compose down 2>/dev/null || true
+docker compose -f docker-compose.yml down 2>/dev/null || true
+
+# Optional: free unused images (keeps MySQL volume / data)
+docker image prune -f
+
+# API env
+cp -n .env.api.example .env.api
+nano .env.api
 ```
 
-Stop the all-in-one stack if it is running:
+Set at least:
 
 ```bash
-docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 down
-# or: docker compose down
+CLIENT_URL=https://auditiq.mkdandeker.com
+DOMAIN=api.mkdandeker.com
+COOKIE_DOMAIN=.mkdandeker.com
+GOOGLE_REDIRECT_URI=https://api.mkdandeker.com/api/integrations/google-drive/callback
+# + your real MYSQL_ROOT_PASSWORD, JWT_SECRET, VAULT_ENCRYPTION_KEY, TYPESENSE_API_KEY
 ```
 
-Start API stack:
+If you already have `.env.kvm2` secrets, copy those password values into `.env.api` (same DB volume name `mysql_data` is reused only if project name matches — see note below).
+
+Start backend only:
 
 ```bash
 docker compose -f docker-compose.api.yml --env-file .env.api up -d --build
+docker compose -f docker-compose.api.yml --env-file .env.api ps
 ```
 
-HTTPS for API host (after DNS A record for `api.…` is live):
+HTTPS for API (DNS `api` must point here first):
 
 ```bash
-docker compose -f docker-compose.api.yml --env-file .env.api run --rm certbot certonly \
-  --webroot -w /var/www/certbot -d api.auditiq.mkdandeker.com \
+docker compose -f docker-compose.api.yml --env-file .env.api --profile ssl run --rm certbot certonly \
+  --webroot -w /var/www/certbot -d api.mkdandeker.com \
   --email you@mkdandeker.com --agree-tos --no-eff-email
-docker compose -f docker-compose.api.yml --env-file .env.api up -d nginx
+
+# Switch nginx to HTTPS config
+cp ops/nginx-api.https.conf ops/nginx-api.conf
+docker compose -f docker-compose.api.yml --env-file .env.api up -d --force-recreate nginx
 ```
 
-Bootstrap admin + permissions (once):
+Admin + permissions (once):
 
 ```bash
 docker compose -f docker-compose.api.yml --env-file .env.api exec -T server node scripts/bootstrap-admin.mjs
 docker compose -f docker-compose.api.yml --env-file .env.api exec -T server node scripts/repair-role-permissions.mjs
 ```
 
-## 2. Vercel (frontend)
-
-1. Import GitHub repo `auditiq8-cell/AuditIQ` into Vercel.
-2. Framework: Vite. Root: repo root (uses `vercel.json`).
-3. Environment variable (Production):
-
-```
-VITE_API_URL=https://api.auditiq.mkdandeker.com
-```
-
-4. Add domain `app.auditiq.mkdandeker.com` in Vercel → set DNS CNAME as Vercel shows.
-5. Deploy.
-
-## 3. VPS `.env.api` must match
-
-```
-CLIENT_URL=https://app.auditiq.mkdandeker.com
-DOMAIN=api.auditiq.mkdandeker.com
-GOOGLE_REDIRECT_URI=https://api.auditiq.mkdandeker.com/api/integrations/google-drive/callback
-```
-
-Rebuild server after env change:
+Check:
 
 ```bash
-docker compose -f docker-compose.api.yml --env-file .env.api up -d server
+curl -s https://api.mkdandeker.com/api/health
 ```
 
-## 4. Smoke test
+## 2. Vercel (frontend)
 
-1. Open `https://app.auditiq.mkdandeker.com/login`
-2. Login → dashboard loads (no Access denied)
-3. Chat / workpapers (WebSocket) work
-4. DevTools → Network: API calls go to `api.…`, cookies set
+1. Import GitHub: `givecursorfree-oss/AuditIQ`
+2. Root uses `vercel.json` (Vite → `client/dist`)
+3. Environment → Production:
 
-## Notes
+```
+VITE_API_URL=https://api.mkdandeker.com
+```
 
-- Do **not** use `*.vercel.app` as the main app URL if you can avoid it (cookies need `COOKIE_SAMESITE=none`).
-- Sibling subdomains under `mkdandeker.com` use `SameSite=Lax` automatically.
-- Keep using kvm2 all-in-one (`docker-compose.kvm2.yml`) until DNS + Vercel are ready.
+4. Domain: add `auditiq.mkdandeker.com` → set DNS as Vercel instructs  
+5. Deploy
+
+## 3. Smoke test
+
+1. https://auditiq.mkdandeker.com/login  
+2. Login works; Network tab shows calls to `api.mkdandeker.com`  
+3. Chat / sockets work  
+
+## MySQL data note
+
+`docker compose … down` **without** `-v` keeps the `mysql_data` volume.  
+`down -v` **wipes the database** — only use if you want a fresh DB.
+
+## Rollback to all-in-one VPS (if needed)
+
+```bash
+docker compose -f docker-compose.api.yml --env-file .env.api down
+docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
+```

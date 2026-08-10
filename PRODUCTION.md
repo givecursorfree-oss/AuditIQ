@@ -18,9 +18,15 @@ GitHub **Deploy** workflow is **manual only** (Actions → Deploy → Run workfl
 
 When you have **16 GB+**, you can switch to full `docker-compose.yml` (Typesense + Tika).
 
-## Vercel frontend + VPS API
+## Vercel frontend + VPS API only
 
-See [docs/VERCEL_SPLIT.md](docs/VERCEL_SPLIT.md). Use `docker-compose.api.yml` on the VPS and deploy `client` to Vercel with `VITE_API_URL`.
+App on Vercel (`auditiq.mkdandeker.com`), API on VPS (`api.mkdandeker.com`).
+
+See [docs/VERCEL_SPLIT.md](docs/VERCEL_SPLIT.md). On the VPS:
+
+```bash
+bash scripts/vps-api-only.sh
+```
 
 ## Required environment variables
 

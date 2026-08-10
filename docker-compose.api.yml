@@ -4,7 +4,7 @@
 #   docker compose -f docker-compose.api.yml --env-file .env.api up -d --build
 #
 # Exposes nginx on 80/443 → Node server. No React client container.
-# Set DOMAIN=api.auditiq.mkdandeker.com and CLIENT_URL=https://app.auditiq.mkdandeker.com
+# DOMAIN=api.mkdandeker.com  CLIENT_URL=https://auditiq.mkdandeker.com (Vercel)
 
 services:
   db:
