@@ -42,7 +42,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1280M
 
   tika:
     image: apache/tika:3.3.0.0-full
@@ -50,7 +50,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
 
   server:
     build: ./server

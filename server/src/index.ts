@@ -396,26 +396,38 @@ httpServer.listen(PORT, () => {
 });
 
 async function initSemanticSearch(): Promise<void> {
-  try {
-    const { isTypesenseReachable } = await import('./lib/searchServices.js');
-    if (!(await isTypesenseReachable())) {
-      logger.info('Semantic search: Typesense unreachable — using MySQL fallback until search:up');
+  const maxAttempts = 12;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { isTypesenseReachable } = await import('./lib/searchServices.js');
+      if (!(await isTypesenseReachable())) {
+        logger.info('Semantic search: waiting for Typesense', { attempt, maxAttempts });
+        await new Promise((r) => setTimeout(r, 5000));
+        continue;
+      }
+      const { migrateAllFirmCollections } = await import('./lib/typesense.js');
+      const { reindexFirmDocuments } = await import('./lib/documentIndexer.js');
+      const firms = await prisma.firm.findMany({ select: { id: true } });
+      const upgraded = await migrateAllFirmCollections(firms.map((f) => f.id));
+      for (const firmId of upgraded) {
+        const count = await reindexFirmDocuments(firmId);
+        logger.info('Semantic search: re-queued firm documents after index upgrade', { firmId, count });
+      }
+      if (upgraded.length > 0) {
+        logger.info(`Semantic search: upgraded ${upgraded.length} firm collection(s) to hybrid embeddings`);
+      } else {
+        logger.info('Semantic search: Typesense reachable');
+      }
       return;
+    } catch (err) {
+      logger.warn('Semantic search init attempt failed', {
+        attempt,
+        error: (err as Error).message,
+      });
+      await new Promise((r) => setTimeout(r, 5000));
     }
-    const { migrateAllFirmCollections } = await import('./lib/typesense.js');
-    const { reindexFirmDocuments } = await import('./lib/documentIndexer.js');
-    const firms = await prisma.firm.findMany({ select: { id: true } });
-    const upgraded = await migrateAllFirmCollections(firms.map((f) => f.id));
-    for (const firmId of upgraded) {
-      const count = await reindexFirmDocuments(firmId);
-      logger.info('Semantic search: re-queued firm documents after index upgrade', { firmId, count });
-    }
-    if (upgraded.length > 0) {
-      logger.info(`Semantic search: upgraded ${upgraded.length} firm collection(s) to hybrid embeddings`);
-    }
-  } catch (err) {
-    logger.warn('Semantic search init skipped', { error: (err as Error).message });
   }
+  logger.info('Semantic search: Typesense unreachable after retries — using MySQL fallback');
 }
 
 async function backfillDocumentFirmIds(): Promise<void> {
