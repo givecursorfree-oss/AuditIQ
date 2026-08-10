@@ -141,7 +141,7 @@ export function ClientPortalTrackingTab() {
                   <ClientActivationNotice variant="compact" engagementName={engagementDetail.name} />
                 )}
 
-                {engagementDetail.checklist.length > 0 && (
+                {engagementDetail.checklist && engagementDetail.checklist.length > 0 && (
                   <div>
                     <h4 className="text-sm font-medium text-foreground mb-2">Document checklist</h4>
                     <ul className="space-y-2">
@@ -199,7 +199,7 @@ export function ClientPortalTrackingTab() {
                   </div>
                 )}
 
-                {engagementDetail.sharedReports.length > 0 && (
+                {engagementDetail.sharedReports && engagementDetail.sharedReports.length > 0 && (
                   <div>
                     <h4 className="text-sm font-medium text-foreground mb-2">Reports shared with you</h4>
                     <ul className="space-y-3">
@@ -252,7 +252,7 @@ export function ClientPortalTrackingTab() {
                   </div>
                 )}
 
-                {engagementDetail.invoices.length > 0 && (
+                {engagementDetail.invoices && engagementDetail.invoices.length > 0 && (
                   <div>
                     <h4 className="text-sm font-medium text-foreground mb-2">Invoices</h4>
                     <ul className="space-y-2">

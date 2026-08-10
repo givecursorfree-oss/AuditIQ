@@ -60,10 +60,12 @@ export function DashboardActionQueue({ queue, loading }: DashboardActionQueuePro
     );
   }
 
-  if (!queue || queue.summary.total === 0) return null;
+  const items = Array.isArray(queue?.items) ? queue!.items : [];
+  const summary = queue?.summary;
+  if (!queue || !summary || summary.total === 0) return null;
 
-  const actionable = queue.items.filter((i) => i.kind !== 'awaiting_signature');
-  const waiting = queue.items.filter((i) => i.kind === 'awaiting_signature');
+  const actionable = items.filter((i) => i.kind !== 'awaiting_signature');
+  const waiting = items.filter((i) => i.kind === 'awaiting_signature');
 
   const go = async (item: ActionQueueItem) => {
     await ackForItem(item.kind);
@@ -76,8 +78,8 @@ export function DashboardActionQueue({ queue, loading }: DashboardActionQueuePro
       title="Client requests"
       action={
         <div className="flex items-center gap-2">
-          {queue.summary.actionable > 0 && (
-            <NavCountBadge count={queue.summary.actionable} className="ml-0" />
+          {summary.actionable > 0 && (
+            <NavCountBadge count={summary.actionable} className="ml-0" />
           )}
           <Button
             type="button"

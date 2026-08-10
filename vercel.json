@@ -3,7 +3,13 @@
   "outputDirectory": "client/dist",
   "framework": "vite",
   "installCommand": "echo skip-root-install",
+  "env": {
+    "VITE_API_URL": "https://api.mkdandeker.com"
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }

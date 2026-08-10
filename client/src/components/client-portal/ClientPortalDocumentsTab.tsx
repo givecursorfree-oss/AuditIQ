@@ -43,7 +43,7 @@ export function ClientPortalDocumentsTab() {
         <ClientActivationNotice engagementName={selectedUploadEngagement?.name} />
       )}
 
-      {engagementDetail && engagementDetail.isActivated && engagementDetail.checklist.length > 0 && (
+      {engagementDetail && engagementDetail.isActivated && (engagementDetail.checklist?.length ?? 0) > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Upload by checklist item</CardTitle>

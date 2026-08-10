@@ -200,8 +200,8 @@ export function ClientPortalProvider({ children }: { children: ReactNode }) {
     setServiceRequestsLoading(true);
     try {
       const { data } = await api.get<ServiceRequestRow[]>('/client/requests');
-      setServiceRequests(data);
-      return data;
+      setServiceRequests(Array.isArray(data) ? data : []);
+      return Array.isArray(data) ? data : [];
     } catch {
       setServiceRequests([]);
       return [] as ServiceRequestRow[];
@@ -278,12 +278,12 @@ export function ClientPortalProvider({ children }: { children: ReactNode }) {
         api.get<ClientPreferences>('/client/preferences').catch(() => ({ data: null })),
         api.get('/client/engagement-letters/inbox').catch(() => ({ data: { awaitingSignature: [], inPreparation: [] } })),
       ]);
-      setEngagements(engRes.data);
-      setDocuments(docRes.data);
-      setDocRequests(reqRes.data);
-      setInvoices(invRes.data);
-      setReports(repRes.data);
-      setPreferences(prefRes.data);
+      setEngagements(Array.isArray(engRes.data) ? engRes.data : []);
+      setDocuments(Array.isArray(docRes.data) ? docRes.data : []);
+      setDocRequests(Array.isArray(reqRes.data) ? reqRes.data : []);
+      setInvoices(Array.isArray(invRes.data) ? invRes.data : []);
+      setReports(Array.isArray(repRes.data) ? repRes.data : []);
+      setPreferences(prefRes.data && typeof prefRes.data === 'object' ? prefRes.data : null);
       const inbox = lettersRes.data as {
         awaitingSignature?: PendingLetter[];
         inPreparation?: LetterInPreparation[];
@@ -292,8 +292,10 @@ export function ClientPortalProvider({ children }: { children: ReactNode }) {
       setLettersInPreparation(inbox.inPreparation ?? []);
       await loadServiceRequests();
       const preferredEngagement =
-        urlEngagementId && engRes.data.some((e) => e.id === urlEngagementId) ? urlEngagementId : null;
-      if (engRes.data.length > 0) {
+        urlEngagementId && Array.isArray(engRes.data) && engRes.data.some((e) => e.id === urlEngagementId)
+          ? urlEngagementId
+          : null;
+      if (Array.isArray(engRes.data) && engRes.data.length > 0) {
         const pick =
           preferredEngagement ??
           engRes.data.find((e) => e.isActivated)?.id ??

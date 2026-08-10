@@ -73,13 +73,13 @@ const LateHoursClaimForm = lazyRetry(() => import('./pages/claims/LateHoursClaim
 const DeptVisitClaimForm = lazyRetry(() => import('./pages/claims/DeptVisitClaimForm').then((m) => ({ default: m.DeptVisitClaimForm })));
 
 // Error boundary to catch render errors and prevent blank screen
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
   constructor(props: { children: ReactNode }) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, message: '' };
   }
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error?.message || 'Unknown error' };
   }
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('App error boundary caught:', error, info);
@@ -88,10 +88,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
     if (this.state.hasError) {
       return (
         <div className="h-screen flex items-center justify-center bg-surface">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-4 max-w-md px-4">
             <AuditIQLogo className="h-14 w-auto mx-auto object-contain" />
             <h2 className="text-lg font-semibold text-foreground">Something went wrong</h2>
             <p className="text-sm text-foreground-muted">Please refresh the page to continue.</p>
+            {this.state.message ? (
+              <p className="text-xs text-foreground-muted break-words font-mono bg-muted/40 rounded-md px-3 py-2 text-left">
+                {this.state.message}
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => window.location.reload()}

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { clearStoredUser } from '@/lib/userStorage';
-import { resolveApiBaseUrl } from '@/lib/apiBase';
+import { looksLikeSpaHtml, resolveApiBaseUrl } from '@/lib/apiBase';
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
@@ -21,6 +21,19 @@ api.interceptors.request.use((config) => {
     }
   }
   return config;
+});
+
+// Vercel SPA rewrite returns index.html for /api/* when VITE_API_URL is missing.
+api.interceptors.response.use((response) => {
+  const ct = String(response.headers?.['content-type'] || '');
+  if (ct.includes('text/html') || looksLikeSpaHtml(response.data)) {
+    return Promise.reject(
+      new Error(
+        'API returned HTML instead of JSON. Set VITE_API_URL to your VPS API (e.g. https://api.mkdandeker.com) and redeploy.'
+      )
+    );
+  }
+  return response;
 });
 
 let isRefreshing = false;

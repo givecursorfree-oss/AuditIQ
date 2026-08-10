@@ -94,7 +94,7 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
   const load = useCallback(async () => {
     try {
       const r = await api.get<StaffStatusRow[]>('/staff/statuses');
-      setRows(r.data);
+      setRows(Array.isArray(r.data) ? r.data : []);
     } catch {
       setRows([]);
     } finally {
@@ -117,7 +117,7 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
     from.setHours(0, 0, 0, 0);
     void api
       .get(`/time-entries?userId=${selectedStaffId}&from=${from.toISOString()}`)
-      .then((r) => setStaffLog(r.data))
+      .then((r) => setStaffLog(Array.isArray(r.data) ? r.data : []))
       .catch(() => setStaffLog([]));
   }, [selectedStaffId]);
 

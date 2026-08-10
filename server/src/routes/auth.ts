@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../index.js';
-import { getEnv } from '../lib/env.js';
+import { getEnv, needsCrossSiteCookies } from '../lib/env.js';
 import { isEmailVerificationRequired } from '../lib/emailVerification.js';
 import logger from '../lib/logger.js';
 import { isDatabaseUnreachableError, DATABASE_UNAVAILABLE_MESSAGE } from '../lib/dbErrors.js';
@@ -33,15 +33,17 @@ function setTokensCookie(res: Response, accessToken: string, refreshToken?: stri
   // cookies are dropped by the browser → login looks OK then /auth/me is 401.
   const env = getEnv();
   const clientUrl = env.CLIENT_URL;
-  const useSecure = clientUrl.startsWith('https://');
+  const useSecure = clientUrl.startsWith('https://') || needsCrossSiteCookies(env);
 
   let sameSite: 'strict' | 'lax' | 'none' = 'lax';
   if (env.COOKIE_SAMESITE) {
     sameSite = env.COOKIE_SAMESITE;
+  } else if (needsCrossSiteCookies(env)) {
+    // vercel.app ↔ api.mkdandeker.com is cross-site
+    sameSite = 'none';
   } else {
     try {
       const host = new URL(clientUrl).hostname;
-      // vercel.app ↔ custom API is cross-site; sibling subdomains under one eTLD+1 are same-site (Lax OK)
       if (useSecure && host.endsWith('.vercel.app')) sameSite = 'none';
     } catch {
       if (useSecure) sameSite = 'none';
@@ -51,11 +53,15 @@ function setTokensCookie(res: Response, accessToken: string, refreshToken?: stri
     sameSite = 'lax'; // browsers reject SameSite=None without Secure
   }
 
+  // Cross-site SPA cannot use a parent Domain on the API host cookie.
+  const domain =
+    sameSite === 'none' ? undefined : env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {};
+
   const base = {
     httpOnly: true as const,
-    secure: useSecure,
+    secure: useSecure || sameSite === 'none',
     sameSite,
-    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+    ...domain,
   };
 
   res.cookie(COOKIE_NAME, accessToken, {
@@ -959,9 +965,15 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response): Pr
     });
   }
   const env = getEnv();
+  const clearDomain =
+    needsCrossSiteCookies(env) || env.COOKIE_SAMESITE === 'none'
+      ? {}
+      : env.COOKIE_DOMAIN
+        ? { domain: env.COOKIE_DOMAIN }
+        : {};
   const clearOpts = {
     path: '/',
-    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+    ...clearDomain,
   };
   res.clearCookie(COOKIE_NAME, clearOpts);
   res.clearCookie('auditiq_refresh', { ...clearOpts, path: '/api/auth/refresh' });

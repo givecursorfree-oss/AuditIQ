@@ -20,6 +20,15 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3001),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
+  /**
+   * Extra browser origins allowed for CORS (comma-separated), e.g.
+   * `https://audit-iq-one.vercel.app,https://auditiq.mkdandeker.com`
+   * Always includes CLIENT_URL.
+   */
+  CLIENT_ORIGINS: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.string().optional()
+  ),
   /** Optional cookie Domain for split deploy, e.g. `.mkdandeker.com` (leading dot). */
   COOKIE_DOMAIN: z.preprocess(
     (v) => (v === '' || v == null ? undefined : v),
@@ -173,4 +182,25 @@ export function getEnv(): Env {
     return validateEnv();
   }
   return _env;
+}
+
+/** Deduped list of allowed SPA origins (CLIENT_URL + CLIENT_ORIGINS). */
+export function getClientOrigins(env: Env = getEnv()): string[] {
+  const extra = (env.CLIENT_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const primary = env.CLIENT_URL.replace(/\/$/, '');
+  return [...new Set([primary, ...extra])];
+}
+
+/** True when any allowed SPA origin is cross-site vs a typical custom API host (needs SameSite=None). */
+export function needsCrossSiteCookies(env: Env = getEnv()): boolean {
+  return getClientOrigins(env).some((origin) => {
+    try {
+      return new URL(origin).hostname.endsWith('.vercel.app');
+    } catch {
+      return false;
+    }
+  });
 }

@@ -84,20 +84,41 @@ curl -s https://api.mkdandeker.com/api/health
 
 1. Import GitHub: `givecursorfree-oss/AuditIQ`
 2. Root uses `vercel.json` (Vite → `client/dist`)
-3. Environment → Production:
+3. Production API URL is baked via `client/.env.production`:
 
 ```
 VITE_API_URL=https://api.mkdandeker.com
 ```
 
+   You may also set the same key in Vercel → Project → Settings → Environment Variables (overrides file).
 4. Domain: add `auditiq.mkdandeker.com` → set DNS as Vercel instructs  
 5. Deploy
 
+**Why the crash happened:** without `VITE_API_URL`, the SPA called `https://audit-iq-one.vercel.app/api/...`. Vercel’s SPA rewrite returned `index.html` (HTTP 200), and React blew up reading `.length` on non-JSON data.
+
+## 2b. VPS CORS for `*.vercel.app`
+
+On the VPS `.env.api`, allow the Vercel host (in addition to your custom domain):
+
+```bash
+CLIENT_URL=https://auditiq.mkdandeker.com
+CLIENT_ORIGINS=https://audit-iq-one.vercel.app
+COOKIE_SAMESITE=none
+COOKIE_DOMAIN=
+```
+
+Then recreate the API container:
+
+```bash
+docker compose -f docker-compose.api.yml --env-file .env.api up -d --force-recreate server
+```
+
 ## 3. Smoke test
 
-1. https://auditiq.mkdandeker.com/login  
-2. Login works; Network tab shows calls to `api.mkdandeker.com`  
-3. Chat / sockets work  
+1. https://audit-iq-one.vercel.app/login (or https://auditiq.mkdandeker.com/login)  
+2. Network tab shows calls to `api.mkdandeker.com` (not same-origin `/api`)  
+3. `curl -s https://api.mkdandeker.com/api/health` returns JSON  
+4. Chat / sockets work  
 
 ## MySQL data note
 

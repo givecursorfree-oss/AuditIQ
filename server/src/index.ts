@@ -9,7 +9,7 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import prisma from './lib/prisma.js';
 import logger from './lib/logger.js';
-import { validateEnv } from './lib/env.js';
+import { validateEnv, getClientOrigins } from './lib/env.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import authRoutes from './routes/auth.js';
 import clientRoutes from './routes/clients.js';
@@ -73,13 +73,14 @@ import { staffApi } from './middleware/staffApi.js';
 
 dotenv.config();
 const env = validateEnv();
+const clientOrigins = getClientOrigins(env);
 
 export { prisma };
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: env.CLIENT_URL,
+    origin: clientOrigins,
     credentials: true,
   }
 });
@@ -251,9 +252,15 @@ app.use(generalLimiter);
 // Request logging
 app.use(requestLogger);
 
-// CORS
+// CORS — allow Vercel preview + custom app domain(s)
 app.use(cors({
-  origin: env.CLIENT_URL,
+  origin(origin, cb) {
+    if (!origin || clientOrigins.includes(origin)) {
+      cb(null, true);
+      return;
+    }
+    cb(null, false);
+  },
   credentials: true,
 }));
 app.use(cookieParser());

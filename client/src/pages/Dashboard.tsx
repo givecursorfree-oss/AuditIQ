@@ -100,20 +100,30 @@ export default function Dashboard() {
     Promise.all(fetches)
       .then((results) => {
         const [dashRes, dlRes, chartRes, ...extras] = results;
-        setData(dashRes.data);
+        setData(dashRes.data && typeof dashRes.data === 'object' ? dashRes.data : null);
         setDeadlines(Array.isArray(dlRes.data) ? dlRes.data : []);
         setChartData(Array.isArray(chartRes.data) ? chartRes.data : []);
         let ei = 0;
         if (isPartnerAdmin) {
-          setBriefing(extras[ei]?.data ?? null);
+          const briefingData = extras[ei]?.data;
+          setBriefing(briefingData && typeof briefingData === 'object' ? briefingData : null);
           ei += 1;
         }
         if (isFirmLeadership) {
-          setActionQueue(extras[ei]?.data ?? null);
+          const q = extras[ei]?.data;
+          setActionQueue(
+            q && typeof q === 'object' && Array.isArray(q.items) && q.summary ? q : null
+          );
           ei += 1;
         }
         if (isFirmStaff) {
-          setMyTasks(extras[ei]?.data?.tasks || extras[ei]?.data || []);
+          const taskPayload = extras[ei]?.data;
+          const tasks = Array.isArray(taskPayload?.tasks)
+            ? taskPayload.tasks
+            : Array.isArray(taskPayload)
+              ? taskPayload
+              : [];
+          setMyTasks(tasks);
           ei += 1;
         }
         if (showCompliance) {

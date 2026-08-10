@@ -11,6 +11,7 @@ __pycache__/
 .env.*
 !.env.example
 !.env.*.example
+!.env.production
 server/.env
 cookies.txt
 

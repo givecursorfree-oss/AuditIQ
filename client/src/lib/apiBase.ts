@@ -1,10 +1,15 @@
 /**
  * API origin for axios + Socket.IO.
  * - Same-origin (VPS nginx): leave VITE_API_URL unset → `/api` + current origin for sockets
- * - Vercel split: set VITE_API_URL=https://api.auditiq.mkdandeker.com (no trailing slash)
+ * - Vercel split: set VITE_API_URL=https://api.mkdandeker.com (no trailing slash)
+ *   (also shipped via client/.env.production for Vercel builds)
  */
+function configuredApiOrigin(): string {
+  return (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+}
+
 export function resolveApiOrigin(): string {
-  const raw = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+  const raw = configuredApiOrigin();
   if (raw) return raw;
   if (typeof window !== 'undefined' && window.location.origin.includes('localhost:5173')) {
     return 'http://localhost:3001';
@@ -15,7 +20,7 @@ export function resolveApiOrigin(): string {
 
 /** Axios baseURL — always ends with `/api` */
 export function resolveApiBaseUrl(): string {
-  const origin = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+  const origin = configuredApiOrigin();
   if (origin) return `${origin}/api`;
   return '/api';
 }
@@ -28,4 +33,11 @@ export function apiAbsoluteUrl(path: string): string {
     return p.startsWith('/api') ? p : `/api${p}`;
   }
   return p.startsWith('/api') ? `${origin}${p}` : `${origin}/api${p}`;
+}
+
+/** True when a response body looks like the Vite SPA index (Vercel rewrite miss). */
+export function looksLikeSpaHtml(data: unknown): boolean {
+  if (typeof data !== 'string') return false;
+  const s = data.slice(0, 200).toLowerCase();
+  return s.includes('<!doctype html') || s.includes('<html');
 }
