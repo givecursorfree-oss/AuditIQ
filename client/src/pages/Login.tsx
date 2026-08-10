@@ -91,10 +91,12 @@ export default function Login() {
       return 'Too many requests — wait a minute, refresh the page, or restart the dev server, then try again.';
     }
     const data = axErr?.response?.data as { error?: string; code?: string } | undefined;
-    return data?.error
-      || (axErr?.code === 'ERR_NETWORK' ? 'Cannot connect to server. Please ensure the backend is running on port 3001.' : '')
-      || axErr?.message
-      || 'Login failed';
+    if (axErr?.code === 'ERR_NETWORK' || axErr?.message === 'Network Error') {
+      return import.meta.env.PROD
+        ? 'Cannot reach the API server. Check that https://api.mkdandeker.com is up (nginx 502 usually means the Node container is still starting or crashed).'
+        : 'Cannot connect to server. Please ensure the backend is running on port 3001.';
+    }
+    return data?.error || axErr?.message || 'Login failed';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
