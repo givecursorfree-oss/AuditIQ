@@ -1,0 +1,10 @@
+# Staff import template — fill and return (or use Google Form, then export CSV)
+# Required: first_name, last_name, email, role
+# Optional: phone, designation, date_of_joining, pan, employee_id, reports_to_manager_name, notes
+# Roles (exact): Partner | Admin | Manager | Staff | Intern
+# Do NOT put passwords in this file — admin sets temp passwords in AuditIQ Settings
+
+first_name,last_name,email,phone,role,designation,date_of_joining,pan,employee_id,reports_to_manager_name,notes
+Ravi,Sharma,ravi.sharma@mkdandeker.com,9876543210,Partner,Partner,,,,,
+Priya,Mehta,priya.mehta@mkdandeker.com,9876543211,Manager,Audit Manager,,,EMP002,Ravi Sharma,
+Ankit,Patel,ankit.patel@mkdandeker.com,9876543212,Staff,Audit Executive,,,EMP003,Priya Mehta,

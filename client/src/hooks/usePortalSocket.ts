@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
+import { resolveApiOrigin } from '@/lib/apiBase';
 
 export type PortalNotificationPayload = {
   title: string;
@@ -8,15 +9,6 @@ export type PortalNotificationPayload = {
   link?: string;
   type?: 'info' | 'success' | 'warning';
 };
-
-function apiOrigin() {
-  return (
-    import.meta.env.VITE_API_URL ||
-    (window.location.origin.includes('localhost:5173')
-      ? 'http://localhost:3001'
-      : window.location.origin)
-  );
-}
 
 /**
  * Listens on the authenticated user's personal socket room for portal pushes
@@ -30,7 +22,7 @@ export function usePortalSocket(onNotification: (payload: PortalNotificationPayl
   useEffect(() => {
     if (!user) return;
 
-    const socket: Socket = io(apiOrigin(), { withCredentials: true });
+    const socket: Socket = io(resolveApiOrigin(), { withCredentials: true });
     const onPush = (payload: PortalNotificationPayload) => handlerRef.current?.(payload);
     socket.on('portal-notification', onPush);
 

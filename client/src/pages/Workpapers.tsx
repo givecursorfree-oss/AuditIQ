@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { resolveApiOrigin } from '@/lib/apiBase';
 import {
   Plus, MagnifyingGlass as Search, FileText as FileCheck, CaretDown as ChevronDown, CaretRight as ChevronRight, CheckCircle as CheckCircle2,
   Clock, WarningCircle as AlertCircle, X, ChatCircle as MessageSquare, PaperPlaneTilt as Send
@@ -50,9 +51,7 @@ export default function Workpapers() {
   const [activeUsers, setActiveUsers] = useState<string[]>([]); // simplified for the active expanded workpaper
 
   useEffect(() => {
-    const apiOrigin = import.meta.env.VITE_API_URL
-      || (window.location.origin.includes('localhost:5173') ? 'http://localhost:3001' : window.location.origin);
-    const newSocket = io(apiOrigin, {
+    const newSocket = io(resolveApiOrigin(), {
       withCredentials: true,
     });
     setSocket(newSocket);

@@ -1,8 +1,8 @@
 {
-  "buildCommand": "cd client && npm install && npm run build",
+  "buildCommand": "cd client && npm ci && npm run build",
   "outputDirectory": "client/dist",
   "framework": "vite",
-  "installCommand": "echo skip",
+  "installCommand": "echo skip-root-install",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

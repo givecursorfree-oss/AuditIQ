@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '@/context/AuthContext';
+import { resolveApiOrigin } from '@/lib/apiBase';
 
 export type TaskCompletedPayload = {
   engagementId: string;
@@ -10,15 +11,6 @@ export type TaskCompletedPayload = {
   completedByName?: string;
   createdById?: string | null;
 };
-
-function apiOrigin() {
-  return (
-    import.meta.env.VITE_API_URL ||
-    (window.location.origin.includes('localhost:5173')
-      ? 'http://localhost:3001'
-      : window.location.origin)
-  );
-}
 
 /** Join engagement room and listen for task lifecycle events */
 export function useEngagementTasksSocket(
@@ -32,7 +24,7 @@ export function useEngagementTasksSocket(
   useEffect(() => {
     if (!engagementId || !user) return;
 
-    const socket: Socket = io(apiOrigin(), { withCredentials: true });
+    const socket: Socket = io(resolveApiOrigin(), { withCredentials: true });
 
     const onCompleted = (payload: TaskCompletedPayload) => {
       handlerRef.current?.(payload);

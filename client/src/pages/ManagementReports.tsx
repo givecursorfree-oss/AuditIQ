@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChartBar, Calendar, FileText, CurrencyInr, UsersThree, Download } from '@phosphor-icons/react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../services/api';
+import { apiAbsoluteUrl } from '@/lib/apiBase';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
 
@@ -147,7 +148,9 @@ function UdinLog() {
       .then(r => setLogs(r.data))
       .catch(() => setLogs([]));
   }, [q]);
-  function download() { window.open(`/api/udin?format=csv${q ? `&q=${encodeURIComponent(q)}` : ''}`, '_blank'); }
+  function download() {
+    window.open(apiAbsoluteUrl(`/api/udin?format=csv${q ? `&q=${encodeURIComponent(q)}` : ''}`), '_blank');
+  }
   return (
     <div className="space-y-4">
       <div className="flex gap-2">

@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext';
 import type { ChatMessage } from '../lib/chatHelpers';
 import { mapApiMessage } from '../lib/chatMessageUtils';
+import { resolveApiOrigin } from '@/lib/apiBase';
 
 export type TypingUser = { userId: string; name: string };
 
@@ -34,11 +35,7 @@ export function useChatSocket({
   onRoomsUpdatedRef.current = onRoomsUpdated;
   onReactionRef.current = onReaction;
 
-  const apiOrigin =
-    import.meta.env.VITE_API_URL ||
-    (window.location.origin.includes('localhost:5173')
-      ? 'http://localhost:3001'
-      : window.location.origin);
+  const apiOrigin = resolveApiOrigin();
 
   useEffect(() => {
     const socket = io(apiOrigin, { withCredentials: true });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import api from '@/services/api';
+import { apiAbsoluteUrl } from '@/lib/apiBase';
 
 
 
@@ -292,7 +293,10 @@ export function useEngagementLetter(engagementId: string) {
 
 
 
-  const docxUrl = letter?.id && letter.id !== 'optimistic' ? `/api/engagement-letters/${letter.id}/docx` : null;
+  const docxUrl =
+    letter?.id && letter.id !== 'optimistic'
+      ? apiAbsoluteUrl(`/api/engagement-letters/${letter.id}/docx`)
+      : null;
 
 
 

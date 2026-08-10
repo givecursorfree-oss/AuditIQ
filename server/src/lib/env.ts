@@ -20,6 +20,16 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3001),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
+  /** Optional cookie Domain for split deploy, e.g. `.mkdandeker.com` (leading dot). */
+  COOKIE_DOMAIN: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.string().optional()
+  ),
+  /** Force SameSite=None for cross-site SPA (e.g. vercel.app → custom API). Default auto. */
+  COOKIE_SAMESITE: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.enum(['lax', 'none', 'strict']).optional()
+  ),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   LOG_DIR: z.string().default('logs'),
 
@@ -101,6 +111,11 @@ export function validateEnv(): Env {
   if (_env) return _env;
 
   loadDotenv();
+  // Empty optional cookie fields → unset (compose may pass "")
+  if (process.env.COOKIE_DOMAIN === '') delete process.env.COOKIE_DOMAIN;
+  if (process.env.COOKIE_SAMESITE === '') delete process.env.COOKIE_SAMESITE;
+  if (process.env.GOOGLE_REDIRECT_URI === '') delete process.env.GOOGLE_REDIRECT_URI;
+
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
@@ -129,7 +144,10 @@ export function validateEnv(): Env {
       process.exit(1);
     }
 
-    if (_env.TYPESENSE_API_KEY === 'auditiq-typesense-dev-key') {
+    if (
+      _env.SEMANTIC_SEARCH_ENABLED &&
+      _env.TYPESENSE_API_KEY === 'auditiq-typesense-dev-key'
+    ) {
       console.error(
         '\n❌ TYPESENSE_API_KEY is still the development default. Set a unique key in production.\n'
       );

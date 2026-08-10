@@ -11,6 +11,7 @@ import { PanelCard } from '../components/layout/PanelCard';
 import { EmptyState } from '../components/layout/StatePanels';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
+import { apiAbsoluteUrl } from '@/lib/apiBase';
 
 interface LeaveRequest {
   id: string;
@@ -158,7 +159,7 @@ export default function LeaveStipend() {
   }
 
   function downloadEDiary() {
-    window.open('/api/articleship/e-diary/export', '_blank');
+    window.open(apiAbsoluteUrl('/api/articleship/e-diary/export'), '_blank');
   }
 
   const pageTitle = canManage && !canApply ? 'Leave management' : isIntern ? 'Leave & Stipend' : 'Apply for leave';

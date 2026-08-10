@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { clearStoredUser } from '@/lib/userStorage';
+import { resolveApiBaseUrl } from '@/lib/apiBase';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: resolveApiBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true, // Send httpOnly cookies with every request
 });
@@ -40,8 +41,8 @@ const processQueue = (error: any, token: string | null = null) => {
 async function refreshSession(): Promise<void> {
   if (refreshPromise) return refreshPromise;
   isRefreshing = true;
-  refreshPromise = axios
-    .post('/api/auth/refresh', {}, { withCredentials: true })
+  refreshPromise = api
+    .post('/auth/refresh', {})
     .then(() => {
       processQueue(null, 'refreshed');
     })

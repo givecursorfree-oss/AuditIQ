@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { EngagementLetterPreview } from '@/components/mkd/EngagementLetterPreview';
 import { X } from '@phosphor-icons/react';
 import { useClientPortal } from './ClientPortalContext';
+import { apiAbsoluteUrl } from '@/lib/apiBase';
 
 export function ClientPortalLetterModal() {
   const {
@@ -57,7 +58,11 @@ export function ClientPortalLetterModal() {
             <>
               <EngagementLetterPreview
                 content={reviewLetterContent}
-                docxUrl={reviewLetterId ? `/api/client/engagement-letters/${reviewLetterId}/docx` : null}
+                docxUrl={
+                  reviewLetterId
+                    ? apiAbsoluteUrl(`/api/client/engagement-letters/${reviewLetterId}/docx`)
+                    : null
+                }
               />
               <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/20">
                 <p className="text-sm font-medium text-foreground">Sign & accept</p>

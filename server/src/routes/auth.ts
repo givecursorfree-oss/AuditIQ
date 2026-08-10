@@ -31,21 +31,43 @@ const TWO_FA_ROLES = ['Partner', 'Admin'];
 function setTokensCookie(res: Response, accessToken: string, refreshToken?: string): void {
   // Secure cookies only work over HTTPS. On HTTP (VPS IP before SSL), Secure
   // cookies are dropped by the browser → login looks OK then /auth/me is 401.
-  const useSecure = getEnv().CLIENT_URL.startsWith('https://');
-  res.cookie(COOKIE_NAME, accessToken, {
-    httpOnly: true,
+  const env = getEnv();
+  const clientUrl = env.CLIENT_URL;
+  const useSecure = clientUrl.startsWith('https://');
+
+  let sameSite: 'strict' | 'lax' | 'none' = 'lax';
+  if (env.COOKIE_SAMESITE) {
+    sameSite = env.COOKIE_SAMESITE;
+  } else {
+    try {
+      const host = new URL(clientUrl).hostname;
+      // vercel.app ↔ custom API is cross-site; sibling subdomains under one eTLD+1 are same-site (Lax OK)
+      if (useSecure && host.endsWith('.vercel.app')) sameSite = 'none';
+    } catch {
+      if (useSecure) sameSite = 'none';
+    }
+  }
+  if (sameSite === 'none' && !useSecure) {
+    sameSite = 'lax'; // browsers reject SameSite=None without Secure
+  }
+
+  const base = {
+    httpOnly: true as const,
     secure: useSecure,
-    sameSite: useSecure ? 'strict' : 'lax',
-    maxAge: 15 * 60 * 1000, // 15 mins
+    sameSite,
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+  };
+
+  res.cookie(COOKIE_NAME, accessToken, {
+    ...base,
     path: '/',
+    maxAge: 15 * 60 * 1000,
   });
   if (refreshToken) {
     res.cookie('auditiq_refresh', refreshToken, {
-      httpOnly: true,
-      secure: useSecure,
-      sameSite: useSecure ? 'strict' : 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      ...base,
       path: '/api/auth/refresh',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
   }
 }
@@ -936,8 +958,13 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response): Pr
       },
     });
   }
-  res.clearCookie(COOKIE_NAME, { path: '/' });
-  res.clearCookie('auditiq_refresh', { path: '/api/auth/refresh' });
+  const env = getEnv();
+  const clearOpts = {
+    path: '/',
+    ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+  };
+  res.clearCookie(COOKIE_NAME, clearOpts);
+  res.clearCookie('auditiq_refresh', { ...clearOpts, path: '/api/auth/refresh' });
   res.json({ message: 'Logged out' });
 });
 
