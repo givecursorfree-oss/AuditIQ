@@ -56,7 +56,19 @@ npm run dev
 curl -X POST http://localhost:3001/api/search/reindex -H "Cookie: auditiq_token=..." 
 ```
 
-Check status: `GET /api/config` → `documentSearch.mode` should be `"hybrid"`.
+## Production (Vercel + VPS API)
+
+API-only compose includes **Typesense + Tika**:
+
+```bash
+# On VPS — ensure .env.api has a unique TYPESENSE_API_KEY (not the dev default)
+docker compose -f docker-compose.api.yml --env-file .env.api up -d --build
+curl -s https://api.mkdandeker.com/api/health   # typesense/tika should become ok after first boot
+```
+
+First Typesense boot may download the ONNX embedding model (1–3 minutes). Then Partner/Admin can **Reindex** documents from the UI (or `POST /api/search/reindex`).
+
+If you intentionally skip search containers, set `SEMANTIC_SEARCH_ENABLED=false` — the SPA shows “Database search (limited)” instead of a broken hybrid mode.
 
 ## Environment
 

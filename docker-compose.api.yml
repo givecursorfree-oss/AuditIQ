@@ -29,12 +29,39 @@ services:
         limits:
           memory: 2G
 
+  typesense:
+    image: typesense/typesense:29.0
+    restart: unless-stopped
+    environment:
+      TYPESENSE_DATA_DIR: /data
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:?TYPESENSE_API_KEY must be set}
+      TYPESENSE_ENABLE_CORS: "true"
+    volumes:
+      - typesense_data:/data
+    command: "--data-dir /data --api-key=${TYPESENSE_API_KEY} --enable-cors"
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  tika:
+    image: apache/tika:3.3.0.0-full
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
   server:
     build: ./server
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+      typesense:
+        condition: service_started
+      tika:
+        condition: service_started
     environment:
       DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/auditiq
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
@@ -47,10 +74,10 @@ services:
       LOG_LEVEL: info
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-25}
       VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:?VAULT_ENCRYPTION_KEY must be set}
-      SEMANTIC_SEARCH_ENABLED: "false"
-      TYPESENSE_HOST: http://127.0.0.1:8108
-      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-unused-on-api-only}
-      TIKA_URL: http://127.0.0.1:9998
+      SEMANTIC_SEARCH_ENABLED: ${SEMANTIC_SEARCH_ENABLED:-true}
+      TYPESENSE_HOST: http://typesense:8108
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:?TYPESENSE_API_KEY must be set}
+      TIKA_URL: http://tika:9998
       ALLOW_STAFF_REGISTRATION: ${ALLOW_STAFF_REGISTRATION:-false}
       SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-true}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -94,6 +121,7 @@ services:
 
 volumes:
   mysql_data:
+  typesense_data:
   server_logs:
   document_uploads:
   certbot_conf:
