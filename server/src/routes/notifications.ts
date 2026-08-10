@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
+import logger from '../lib/logger.js';
 
 const router = Router();
 router.use(authenticate);
@@ -15,7 +16,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     });
     res.json(notifications);
   } catch (err) {
-    console.error('List notifications error:', err);
+    logger.error('List notifications error:', err);
     res.status(500).json({ error: 'Failed to fetch notifications' });
   }
 });
@@ -28,7 +29,7 @@ router.get('/unread-count', async (req: AuthRequest, res: Response): Promise<voi
     });
     res.json({ count });
   } catch (err) {
-    console.error('Unread count error:', err);
+    logger.error('Unread count error:', err);
     res.status(500).json({ error: 'Failed to fetch count' });
   }
 });
@@ -36,13 +37,18 @@ router.get('/unread-count', async (req: AuthRequest, res: Response): Promise<voi
 // PATCH /api/notifications/:id/read
 router.patch('/:id/read', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const notification = await prisma.notification.update({
-      where: { id: req.params.id },
+    const notification = await prisma.notification.updateMany({
+      where: { id: String(req.params.id), userId: req.user!.id },
       data: { isRead: true },
     });
-    res.json(notification);
+    if (notification.count === 0) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+    const updated = await prisma.notification.findUnique({ where: { id: String(req.params.id) } });
+    res.json(updated);
   } catch (err) {
-    console.error('Mark read error:', err);
+    logger.error('Mark read error:', err);
     res.status(500).json({ error: 'Failed to mark as read' });
   }
 });
@@ -56,7 +62,7 @@ router.post('/mark-all-read', async (req: AuthRequest, res: Response): Promise<v
     });
     res.json({ message: 'All notifications marked as read' });
   } catch (err) {
-    console.error('Mark all read error:', err);
+    logger.error('Mark all read error:', err);
     res.status(500).json({ error: 'Failed to update notifications' });
   }
 });

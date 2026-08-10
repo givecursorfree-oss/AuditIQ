@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
+import { getEnv } from '../lib/env.js';
+import logger from '../lib/logger.js';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -13,26 +13,57 @@ export interface AuthRequest extends Request {
   };
 }
 
-export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
+export async function authenticate(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const token =
+    req.cookies?.auditiq_token ||
+    (req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : null);
+
+  if (!token) {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }
 
-  const token = authHeader.slice(7);
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      res.status(500).json({ error: 'Server configuration error' });
+    const payload = jwt.verify(token, getEnv().JWT_SECRET) as NonNullable<AuthRequest['user']>;
+    const user = await prisma.user.findUnique({
+      where: { id: payload.id },
+      select: { id: true, email: true, role: true, firmId: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
-    const payload = jwt.verify(token, secret) as AuthRequest['user'];
-    req.user = payload;
+
+    req.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      firmId: user.firmId,
+    };
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
+
+/** Block Client-role users from internal staff APIs. */
+export function requireStaff(req: AuthRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (req.user.role === 'Client') {
+    res.status(403).json({ error: 'Staff access required' });
+    return;
+  }
+  next();
 }
 
 // Legacy role-based authorization (checks role name string)
@@ -93,7 +124,7 @@ export function requirePermission(module: string, action: string) {
 
       next();
     } catch (err) {
-      console.error('Permission check error:', err);
+      logger.error('Permission check error', { error: (err as Error).message });
       res.status(500).json({ error: 'Permission check failed' });
     }
   };

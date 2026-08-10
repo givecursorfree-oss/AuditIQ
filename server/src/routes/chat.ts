@@ -1,15 +1,55 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import path from 'path';
 import multer from 'multer';
-import { prisma } from '../index.js';
+import prisma from '../lib/prisma.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
-import { resolveClientIdForPortalUser } from '../lib/clientScope.js';
 import { isIndianBusinessHours, AFTER_HOURS_AUTO_REPLY } from '../lib/businessHours.js';
+import {
+  broadcastRoomsUpdated,
+  CHAT_REACTIONS,
+  emitChatRoom,
+  notifyMentions,
+  touchLastSeen,
+} from '../lib/chatRealtime.js';
+import {
+  formatChatRoom,
+  formatMessagePayload,
+  messageInclude,
+  roomInclude,
+  type RoomWithParticipants,
+} from '../lib/chatFormat.js';
+import {
+  canStaffChatWithUser,
+  collectEngagementTeamUserIds,
+  getClientEngagementIds,
+  requireChatRoomAccess,
+} from '../lib/chatAccess.js';
+import { listAccessibleEngagementIds, requireEngagementAccess } from '../lib/engagementAccess.js';
+import { isPrivilegedRole } from '../lib/permissions.js';
+import { validateBufferSignature } from '../lib/fileSignature.js';
 
 const router = Router();
-// No fileSize cap — attachments stored in DB (LongBlob, up to ~4GB MySQL limit)
-const upload = multer({ storage: multer.memoryStorage() });
+// 25MB cap — attachments buffer in memory before DB write; unbounded uploads
+// would allow trivial memory-exhaustion DoS.
+const CHAT_MAX_FILE_BYTES = 25 * 1024 * 1024;
+const CHAT_BLOCKED_EXTS = new Set([
+  '.exe', '.dll', '.bat', '.cmd', '.com', '.msi', '.scr', '.js', '.html', '.htm',
+  '.svg', '.xml', '.xhtml', '.ps1', '.vbs', '.sh',
+]);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: CHAT_MAX_FILE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (CHAT_BLOCKED_EXTS.has(ext)) {
+      cb(new Error('This file type is not allowed in chat'));
+      return;
+    }
+    cb(null, true);
+  },
+});
 
 router.use(authenticate);
 
@@ -25,98 +65,13 @@ const roomSchema = z.object({
   participantIds: z.array(z.string().uuid()).min(1),
 });
 
-type RoomWithParticipants = {
-  id: string;
-  name: string | null;
-  type: string;
-  engagementId: string | null;
-  updatedAt: Date;
-  participants: {
-    userId: string;
-    role: string;
-    lastReadAt: Date;
-    user: { id: string; firstName: string; lastName: string; initials: string };
-  }[];
-  messages?: {
-    id: string;
-    content: string;
-    createdAt: Date;
-    sender: { firstName: string; lastName: string };
-  }[];
-};
-
-async function formatChatRoom(room: RoomWithParticipants, userId: string) {
-  const participant = room.participants.find((p) => p.userId === userId);
-  const lastRead = participant?.lastReadAt || new Date(0);
-  const unreadCount = await prisma.chatMessage.count({
-    where: {
-      roomId: room.id,
-      createdAt: { gt: lastRead },
-      senderId: { not: userId },
-    },
+async function emitRoomRefresh(roomId: string) {
+  const parts = await prisma.chatParticipant.findMany({
+    where: { roomId },
+    select: { userId: true },
   });
-  const last = room.messages?.[0];
-  return {
-    id: room.id,
-    name: room.name,
-    type: room.type === 'group' && room.engagementId ? 'CHANNEL' : room.type === 'direct' ? 'DM' : 'GROUP',
-    engagementId: room.engagementId,
-    participants: room.participants.map((p) => ({
-      userId: p.user.id,
-      user: {
-        id: p.user.id,
-        name: `${p.user.firstName} ${p.user.lastName}`,
-        email: '',
-        initials: p.user.initials,
-        presenceStatus: p.user.presenceStatus || 'online',
-      },
-      role: p.role,
-    })),
-    lastMessage: last
-      ? {
-          id: last.id,
-          content: last.content,
-          createdAt: last.createdAt.toISOString(),
-          type: 'TEXT' as const,
-          sender: {
-            id: '',
-            name: `${last.sender.firstName} ${last.sender.lastName}`,
-            email: '',
-            initials: '',
-          },
-          senderId: '',
-        }
-      : null,
-    unreadCount,
-    updatedAt: room.updatedAt.toISOString(),
-  };
+  broadcastRoomsUpdated(parts.map((p) => p.userId));
 }
-
-const roomInclude = {
-  participants: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          initials: true,
-          presenceStatus: true,
-        },
-      },
-    },
-  },
-  messages: {
-    orderBy: { createdAt: 'desc' as const },
-    take: 1,
-    select: {
-      id: true,
-      content: true,
-      createdAt: true,
-      sender: { select: { firstName: true, lastName: true } },
-    },
-  },
-};
 
 // GET /api/chat/rooms — list rooms the user is in
 router.get('/rooms', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -130,63 +85,47 @@ router.get('/rooms', async (req: AuthRequest, res: Response): Promise<void> => {
         where: { id: userId },
         select: { email: true, firmId: true },
       });
-      const scope = await resolveClientIdForPortalUser(userId, user?.email ?? '', user?.firmId ?? null);
-      if (!scope.clientId) {
+      clientEngagementIds = await getClientEngagementIds(
+        userId,
+        user?.email ?? '',
+        user?.firmId ?? null
+      );
+      if (clientEngagementIds.length === 0) {
         res.json([]);
         return;
       }
-      const engagements = await prisma.engagement.findMany({
-        where: { clientId: scope.clientId },
-        select: { id: true },
-      });
-      clientEngagementIds = engagements.map((e) => e.id);
     }
+
+    const includeArchived = req.query.includeArchived === '1';
 
     const rooms = await prisma.chatRoom.findMany({
       where: {
-        participants: { some: { userId } },
+        participants: {
+          some: { userId },
+        },
         ...(isClient
           ? {
               engagementId: { in: clientEngagementIds ?? [] },
+              type: { not: 'direct' },
             }
           : {}),
       },
-      include: {
-        participants: {
-          include: {
-            user: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          initials: true,
-          presenceStatus: true,
-        },
-      },
-          },
-        },
-        messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            content: true,
-            createdAt: true,
-            sender: { select: { firstName: true, lastName: true } },
-          },
-        },
-        _count: {
-          select: { messages: true },
-        },
-      },
+      include: roomInclude,
       orderBy: { updatedAt: 'desc' },
     });
 
-    const result = await Promise.all(
+    const formatted = await Promise.all(
       rooms.map((room) => formatChatRoom(room as RoomWithParticipants, userId))
     );
 
-    res.json(result);
+    const list = formatted
+      .filter((r) => includeArchived || !r.isArchived)
+      .sort((a, b) => {
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+
+    res.json(list);
   } catch (err) {
     logger.error('Failed to list chat rooms', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to list rooms' });
@@ -202,6 +141,18 @@ router.post('/rooms', async (req: AuthRequest, res: Response): Promise<void> => 
     }
     const data = roomSchema.parse(req.body);
     const userId = req.user!.id;
+    const role = req.user!.role;
+    const firmId = req.user!.firmId ?? null;
+
+    for (const otherId of data.participantIds) {
+      const allowed = await canStaffChatWithUser(userId, role, firmId, otherId);
+      if (!allowed) {
+        res.status(403).json({
+          error: 'You can only start chats with firm members, or clients on your assigned engagements',
+        });
+        return;
+      }
+    }
 
     // For direct messages, check if a DM room already exists
     if (data.type === 'direct' && data.participantIds.length === 1) {
@@ -259,50 +210,60 @@ router.get('/rooms/:roomId/messages', async (req: AuthRequest, res: Response): P
     const cursor = req.query.cursor as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
 
-    // Verify user is participant
-    const participant = await prisma.chatParticipant.findUnique({
-      where: { roomId_userId: { roomId, userId: req.user!.id } },
-    });
-    if (!participant) {
-      res.status(403).json({ error: 'Not a member of this room' });
-      return;
-    }
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
+
+    const q = (req.query.q as string | undefined)?.trim();
 
     const messages = await prisma.chatMessage.findMany({
-      where: { roomId },
+      where: {
+        roomId,
+        ...(q
+          ? {
+              OR: [
+                { content: { contains: q } },
+                { fileName: { contains: q } },
+                { fileOriginalName: { contains: q } },
+              ],
+            }
+          : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: limit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       omit: { fileData: true },
-      include: {
-        sender: { select: { id: true, firstName: true, lastName: true, initials: true } },
-      },
+      include: messageInclude,
     });
 
-    const pins = await prisma.chatPinnedMessage.findMany({
-      where: { roomId },
-      select: { messageId: true },
-    });
+    const [pins, stars] = await Promise.all([
+      prisma.chatPinnedMessage.findMany({
+        where: { roomId },
+        select: { messageId: true },
+      }),
+      prisma.chatMessageStar.findMany({
+        where: { roomId, userId: req.user!.id },
+        select: { messageId: true },
+      }),
+    ]);
     const pinnedIds = new Set(pins.map((p) => p.messageId));
+    const starredIds = new Set(stars.map((s) => s.messageId));
 
     const hasMore = messages.length > limit;
     if (hasMore) messages.pop();
 
-    // Update last read
     await prisma.chatParticipant.update({
       where: { roomId_userId: { roomId, userId: req.user!.id } },
       data: { lastReadAt: new Date() },
     });
+    await touchLastSeen(req.user!.id);
 
     res.json({
-      messages: messages.reverse().map((m) => ({
-        ...m,
-        isPinned: pinnedIds.has(m.id),
-        content: m.isDeleted ? '' : m.content,
-        fileName: m.isDeleted ? null : m.fileName,
-        fileSize: m.isDeleted ? null : m.fileSize,
-        fileMimeType: m.isDeleted ? null : m.fileMimeType,
-      })),
+      messages: messages.reverse().map((m) =>
+        formatMessagePayload(m, {
+          isPinned: pinnedIds.has(m.id),
+          starredByMe: starredIds.has(m.id),
+        })
+      ),
       hasMore,
       nextCursor: hasMore ? messages[0]?.id : null,
     });
@@ -320,19 +281,40 @@ router.post('/rooms/:roomId/messages', async (req: AuthRequest, res: Response): 
 
     const msgSchema = z.object({
       content: z.string().min(1).max(5000),
-      messageType: z.enum(['text', 'file', 'system']).default('text'),
+      messageType: z.enum(['text', 'file', 'system', 'voice']).default('text'),
       parentId: z.string().uuid().optional(),
     });
 
     const data = msgSchema.parse(req.body);
 
-    // Verify membership
-    const participant = await prisma.chatParticipant.findUnique({
-      where: { roomId_userId: { roomId, userId } },
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
+
+    const roomWithParticipants = await prisma.chatRoom.findUnique({
+      where: { id: roomId },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: { id: true, firstName: true, lastName: true, role: true },
+            },
+          },
+        },
+      },
     });
-    if (!participant) {
-      res.status(403).json({ error: 'Not a member of this room' });
+    if (!roomWithParticipants) {
+      res.status(404).json({ error: 'Room not found' });
       return;
+    }
+
+    if (data.parentId) {
+      const parent = await prisma.chatMessage.findFirst({
+        where: { id: data.parentId, roomId },
+      });
+      if (!parent) {
+        res.status(400).json({ error: 'Reply target not found in this room' });
+        return;
+      }
     }
 
     const message = await prisma.chatMessage.create({
@@ -343,21 +325,37 @@ router.post('/rooms/:roomId/messages', async (req: AuthRequest, res: Response): 
         messageType: data.messageType,
         parentId: data.parentId,
       },
-      include: {
-        sender: { select: { id: true, firstName: true, lastName: true, initials: true } },
-      },
+      include: messageInclude,
     });
 
-    // Update room timestamp
     await prisma.chatRoom.update({
       where: { id: roomId },
       data: { updatedAt: new Date() },
     });
 
-    // Update sender's last read
     await prisma.chatParticipant.update({
       where: { roomId_userId: { roomId, userId } },
       data: { lastReadAt: new Date() },
+    });
+
+    await touchLastSeen(userId);
+
+    const senderName = `${message.sender.firstName} ${message.sender.lastName}`.trim();
+    const payload = formatMessagePayload(message);
+    emitChatRoom(roomId, 'chat-message', payload);
+    await emitRoomRefresh(roomId);
+
+    await notifyMentions({
+      roomId,
+      senderId: userId,
+      senderName,
+      content: data.content,
+      messageId: message.id,
+      participants: roomWithParticipants.participants.map((p) => ({
+        userId: p.userId,
+        user: p.user,
+      })),
+      isClient: req.user!.role === 'Client',
     });
 
     // After-hours auto-reply for client messages
@@ -384,7 +382,7 @@ router.post('/rooms/:roomId/messages', async (req: AuthRequest, res: Response): 
       });
     }
 
-    res.status(201).json(message);
+    res.status(201).json(payload);
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -403,32 +401,26 @@ router.post('/rooms/:roomId/messages/file', upload.single('file'), async (req: A
     const file = req.file;
 
     if (!file) { res.status(400).json({ error: 'No file uploaded' }); return; }
+    const signatureError = validateBufferSignature(file.buffer, file.originalname);
+    if (signatureError) { res.status(400).json({ error: signatureError }); return; }
 
-    // Verify membership
-    const participant = await prisma.chatParticipant.findUnique({
-      where: { roomId_userId: { roomId, userId } },
-    });
-    if (!participant) {
-      res.status(403).json({ error: 'Not a member of this room' });
-      return;
-    }
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
 
-    // Store file directly in chat message
+    const isVoice = file.mimetype.startsWith('audio/');
     const message = await prisma.chatMessage.create({
       data: {
         roomId,
         senderId: userId,
-        content: file.originalname,
-        messageType: 'file',
+        content: isVoice ? 'Voice message' : file.originalname,
+        messageType: isVoice ? 'voice' : 'file',
         fileName: file.originalname,
         fileOriginalName: file.originalname,
         fileMimeType: file.mimetype,
         fileSize: file.size,
-        fileData: file.buffer,
+        fileData: file.buffer as unknown as Uint8Array<ArrayBuffer>,
       },
-      include: {
-        sender: { select: { id: true, firstName: true, lastName: true, initials: true } },
-      },
+      include: messageInclude,
     });
 
     await prisma.chatRoom.update({
@@ -436,10 +428,12 @@ router.post('/rooms/:roomId/messages/file', upload.single('file'), async (req: A
       data: { updatedAt: new Date() },
     });
 
-    res.status(201).json({
-      ...message,
-      fileData: undefined,
-    });
+    await touchLastSeen(userId);
+    const payload = formatMessagePayload(message);
+    emitChatRoom(roomId, 'chat-message', payload);
+    await emitRoomRefresh(roomId);
+
+    res.status(201).json(payload);
   } catch (err) {
     logger.error('Failed to send file message', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to send file' });
@@ -454,13 +448,8 @@ router.get('/rooms/:roomId/messages/:msgId/file', async (req: AuthRequest, res: 
     const disposition =
       req.query.disposition === 'inline' ? 'inline' : 'attachment';
 
-    const participant = await prisma.chatParticipant.findUnique({
-      where: { roomId_userId: { roomId, userId } },
-    });
-    if (!participant) {
-      res.status(403).json({ error: 'Not a member of this room' });
-      return;
-    }
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
 
     const message = await prisma.chatMessage.findFirst({
       where: { id: msgId, roomId, messageType: 'file', isDeleted: false },
@@ -479,10 +468,14 @@ router.get('/rooms/:roomId/messages/:msgId/file', async (req: AuthRequest, res: 
 
     const filename = message.fileOriginalName || message.fileName || 'attachment';
     const safeName = filename.replace(/[^\w.\-() ]/g, '_');
-    res.setHeader('Content-Type', message.fileMimeType || 'application/octet-stream');
+    const mime = message.fileMimeType || 'application/octet-stream';
+    const safeInline = /^(image\/(png|jpeg|jpg|gif|webp)|application\/pdf|audio\/)/i.test(mime);
+    const useInline = disposition === 'inline' && safeInline;
+    res.setHeader('Content-Type', useInline ? mime : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Disposition',
-      `${disposition}; filename="${encodeURIComponent(safeName)}"`
+      `${useInline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(safeName)}"`
     );
     res.send(Buffer.from(message.fileData));
   } catch (err) {
@@ -498,13 +491,8 @@ router.delete('/rooms/:roomId/messages/:msgId', async (req: AuthRequest, res: Re
     const userId = req.user!.id;
     const role = req.user!.role;
 
-    const participant = await prisma.chatParticipant.findUnique({
-      where: { roomId_userId: { roomId, userId } },
-    });
-    if (!participant) {
-      res.status(403).json({ error: 'Not a member of this room' });
-      return;
-    }
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
 
     const message = await prisma.chatMessage.findFirst({
       where: { id: msgId, roomId },
@@ -551,19 +539,10 @@ router.post('/rooms/:roomId/messages/:msgId/forward', async (req: AuthRequest, r
       return;
     }
 
-    const [sourceParticipant, targetParticipant] = await Promise.all([
-      prisma.chatParticipant.findUnique({
-        where: { roomId_userId: { roomId, userId } },
-      }),
-      prisma.chatParticipant.findUnique({
-        where: { roomId_userId: { roomId: targetRoomId, userId } },
-      }),
-    ]);
-
-    if (!sourceParticipant || !targetParticipant) {
-      res.status(403).json({ error: 'Not a member of one or both conversations' });
-      return;
-    }
+    const sourceParticipant = await requireChatRoomAccess(req, res, roomId);
+    if (!sourceParticipant) return;
+    const targetParticipant = await requireChatRoomAccess(req, res, targetRoomId);
+    if (!targetParticipant) return;
 
     const source = await prisma.chatMessage.findFirst({
       where: { id: msgId, roomId, isDeleted: false },
@@ -694,8 +673,11 @@ router.get('/rooms/:roomId/pinned', async (req: AuthRequest, res: Response): Pro
 // ─── Mark as read ───
 router.post('/rooms/:roomId/read', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const participant = await requireChatRoomAccess(req, res, req.params.roomId);
+    if (!participant) return;
+
     await prisma.chatParticipant.update({
-      where: { roomId_userId: { roomId: req.params.roomId, userId: req.user!.id } },
+      where: { id: participant.id },
       data: { lastReadAt: new Date() },
     });
     res.json({ success: true });
@@ -705,15 +687,52 @@ router.post('/rooms/:roomId/read', async (req: AuthRequest, res: Response): Prom
   }
 });
 
-// GET /api/chat/users — list users available for chat (firm members)
+// GET /api/chat/users — staff: firm members (+ clients on shared engagements). Admin/Partner: everyone in firm.
 router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (req.user!.role === 'Client') {
       res.status(403).json({ error: 'Access denied' });
       return;
     }
+
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.json([]);
+      return;
+    }
+
+    const userId = req.user!.id;
+    const role = req.user!.role;
+
+    let where = {
+      firmId,
+      isActive: true,
+    } as { firmId: string; isActive: boolean; OR?: object[] };
+
+    if (!isPrivilegedRole(role)) {
+      const engIds = await listAccessibleEngagementIds(userId, role, firmId);
+      const portalRows = await prisma.clientPortalUser.findMany({
+        where: {
+          isActive: true,
+          userId: { not: null },
+          client: { engagements: { some: { id: { in: engIds } } } },
+        },
+        select: { userId: true },
+      });
+      const clientUserIds = portalRows.map((r) => r.userId!).filter(Boolean);
+
+      where = {
+        firmId,
+        isActive: true,
+        OR: [
+          { role: { not: 'Client' } },
+          ...(clientUserIds.length > 0 ? [{ id: { in: clientUserIds } }] : []),
+        ],
+      };
+    }
+
     const users = await prisma.user.findMany({
-      where: { firmId: req.user!.firmId, isActive: true },
+      where,
       select: {
         id: true,
         firstName: true,
@@ -752,46 +771,32 @@ router.post('/engagement-room', async (req: AuthRequest, res: Response): Promise
       return;
     }
 
+    if (!(await requireEngagementAccess(req, res, engagementId))) return;
+
     const engagement = await prisma.engagement.findFirst({
       where: { id: engagementId, firmId: req.user!.firmId! },
-      select: {
-        id: true, title: true, clientId: true,
-        partnerInChargeId: true, managerId: true, articleAssistantId: true,
-      },
+      select: { id: true, title: true },
     });
     if (!engagement) {
       res.status(404).json({ error: 'Engagement not found' });
       return;
     }
 
-    // Check if an engagement room already exists
     const existing = await prisma.chatRoom.findFirst({
       where: { engagementId },
+      include: roomInclude,
     });
     if (existing) {
-      res.json(existing);
+      res.json(await formatChatRoom(existing as RoomWithParticipants, req.user!.id));
       return;
     }
 
-    // Build participant list: assigned team + client portal users
-    const participantIds = new Set<string>();
-    if (engagement.partnerInChargeId) participantIds.add(engagement.partnerInChargeId);
-    if (engagement.managerId) participantIds.add(engagement.managerId);
-    if (engagement.articleAssistantId) participantIds.add(engagement.articleAssistantId);
+    const participantIds = new Set(await collectEngagementTeamUserIds(engagementId));
     participantIds.add(req.user!.id);
-
-    // Find client portal user(s) for this client
-    const portalUsers = await prisma.clientPortalUser.findMany({
-      where: { clientId: engagement.clientId, isActive: true },
-      select: { userId: true },
-    });
-    for (const pu of portalUsers) {
-      if (pu.userId) participantIds.add(pu.userId);
-    }
 
     const room = await prisma.chatRoom.create({
       data: {
-        name: `📂 ${engagement.title}`,
+        name: engagement.title,
         type: 'group',
         engagementId,
         participants: {
@@ -805,6 +810,340 @@ router.post('/engagement-room', async (req: AuthRequest, res: Response): Promise
   } catch (err) {
     logger.error('Engagement room creation error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to create engagement room' });
+  }
+});
+
+// PATCH /api/chat/rooms/:roomId/settings — mute, pin conversation, archive
+router.patch('/rooms/:roomId/settings', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user!.id;
+    const schema = z.object({
+      isMuted: z.boolean().optional(),
+      isPinned: z.boolean().optional(),
+      isArchived: z.boolean().optional(),
+    });
+    const data = schema.parse(req.body);
+
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
+
+    const updateData: { isMuted?: boolean; isPinned?: boolean; isArchived?: boolean } = {};
+    if (data.isMuted !== undefined) updateData.isMuted = data.isMuted;
+    if (data.isPinned !== undefined) updateData.isPinned = data.isPinned;
+    if (data.isArchived !== undefined) updateData.isArchived = data.isArchived;
+
+    let updated;
+    try {
+      updated = await prisma.chatParticipant.update({
+        where: { id: participant.id },
+        data: updateData,
+      });
+    } catch (updateErr) {
+      const msg = (updateErr as Error).message || '';
+      if (msg.includes('isPinned') || msg.includes('isArchived')) {
+        const fallback: { isMuted?: boolean } = {};
+        if (data.isMuted !== undefined) fallback.isMuted = data.isMuted;
+        updated = await prisma.chatParticipant.update({
+          where: { id: participant.id },
+          data: fallback,
+        });
+      } else {
+        throw updateErr;
+      }
+    }
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation failed', details: err.errors });
+      return;
+    }
+    logger.error('Failed to update chat settings', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// GET /api/chat/search?q= — global search across user's rooms
+router.get('/search', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const q = (req.query.q as string | undefined)?.trim();
+    if (!q || q.length < 2) {
+      res.json({ rooms: [], messages: [] });
+      return;
+    }
+    const userId = req.user!.id;
+    const isClient = req.user!.role === 'Client';
+
+    const myRooms = await prisma.chatParticipant.findMany({
+      where: { userId },
+      select: { roomId: true, room: { select: { engagementId: true, type: true } } },
+    });
+
+    let roomIds = myRooms.map((r) => r.roomId);
+
+    if (isClient) {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true, firmId: true },
+      });
+      const allowedEngagements = await getClientEngagementIds(
+        userId,
+        dbUser?.email ?? '',
+        dbUser?.firmId ?? null
+      );
+      roomIds = myRooms
+        .filter(
+          (r) =>
+            r.room.engagementId &&
+            allowedEngagements.includes(r.room.engagementId) &&
+            r.room.type !== 'direct'
+        )
+        .map((r) => r.roomId);
+    }
+    if (roomIds.length === 0) {
+      res.json({ rooms: [], messages: [] });
+      return;
+    }
+
+    const [roomHits, messageHits] = await Promise.all([
+      prisma.chatRoom.findMany({
+        where: {
+          id: { in: roomIds },
+          OR: [{ name: { contains: q } }],
+        },
+        include: roomInclude,
+        take: 10,
+      }),
+      prisma.chatMessage.findMany({
+        where: {
+          roomId: { in: roomIds },
+          isDeleted: false,
+          OR: [
+            { content: { contains: q } },
+            { fileName: { contains: q } },
+            { fileOriginalName: { contains: q } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+        omit: { fileData: true },
+        include: {
+          sender: { select: { firstName: true, lastName: true } },
+          room: { select: { id: true, name: true, type: true, engagementId: true } },
+        },
+      }),
+    ]);
+
+    const rooms = await Promise.all(
+      roomHits.map((r) => formatChatRoom(r as RoomWithParticipants, userId))
+    );
+
+    res.json({
+      rooms,
+      messages: messageHits.map((m) => ({
+        id: m.id,
+        roomId: m.roomId,
+        roomName: m.room.name,
+        content: m.content,
+        createdAt: m.createdAt.toISOString(),
+        senderName: `${m.sender.firstName} ${m.sender.lastName}`.trim(),
+      })),
+    });
+  } catch (err) {
+    logger.error('Chat global search failed', { error: (err as Error).message });
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// GET /api/chat/starred — user's starred messages (WhatsApp-style)
+router.get('/starred', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const stars = await prisma.chatMessageStar.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { starredAt: 'desc' },
+      take: 100,
+      include: {
+        message: {
+          omit: { fileData: true },
+          include: messageInclude,
+        },
+      },
+    });
+    res.json(
+      stars.map((s) => ({
+        roomId: s.roomId,
+        starredAt: s.starredAt.toISOString(),
+        message: formatMessagePayload(s.message, { starredByMe: true }),
+      }))
+    );
+  } catch (err) {
+    logger.error('Failed to list starred messages', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to list starred messages' });
+  }
+});
+
+// GET /api/chat/rooms/:roomId/media?tab=photos|docs|links
+router.get('/rooms/:roomId/media', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId } = req.params;
+    const tab = (req.query.tab as string) || 'photos';
+    const userId = req.user!.id;
+
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
+
+    const messages = await prisma.chatMessage.findMany({
+      where: {
+        roomId,
+        isDeleted: false,
+        messageType: { in: ['file', 'voice'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      omit: { fileData: true },
+      include: { sender: { select: { firstName: true, lastName: true } } },
+    });
+
+    const urlRe = /https?:\/\/[^\s]+/gi;
+    const items: {
+      id: string;
+      tab: string;
+      fileName?: string;
+      mimeType?: string;
+      createdAt: string;
+      senderName: string;
+    }[] = [];
+
+    for (const m of messages) {
+      const senderName = `${m.sender.firstName} ${m.sender.lastName}`.trim();
+      const mime = m.fileMimeType || '';
+      if (tab === 'photos' && mime.startsWith('image/')) {
+        items.push({
+          id: m.id,
+          tab,
+          fileName: m.fileOriginalName || m.fileName || undefined,
+          mimeType: mime,
+          createdAt: m.createdAt.toISOString(),
+          senderName,
+        });
+      } else if (
+        tab === 'docs' &&
+        (mime.startsWith('application/') || mime.includes('pdf') || mime.includes('document'))
+      ) {
+        items.push({
+          id: m.id,
+          tab,
+          fileName: m.fileOriginalName || m.fileName || undefined,
+          mimeType: mime,
+          createdAt: m.createdAt.toISOString(),
+          senderName,
+        });
+      }
+    }
+
+    if (tab === 'links') {
+      const textMsgs = await prisma.chatMessage.findMany({
+        where: { roomId, isDeleted: false, messageType: 'text' },
+        orderBy: { createdAt: 'desc' },
+        take: 300,
+        select: { id: true, content: true, createdAt: true, sender: { select: { firstName: true, lastName: true } } },
+      });
+      for (const m of textMsgs) {
+        const links = m.content.match(urlRe);
+        if (links) {
+          for (const link of links) {
+            items.push({
+              id: m.id,
+              tab: 'links',
+              fileName: link,
+              createdAt: m.createdAt.toISOString(),
+              senderName: `${m.sender.firstName} ${m.sender.lastName}`.trim(),
+            });
+          }
+        }
+      }
+    }
+
+    res.json({ items });
+  } catch (err) {
+    logger.error('Failed to get chat media', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to get media' });
+  }
+});
+
+// POST /api/chat/rooms/:roomId/messages/:msgId/reactions
+router.post('/rooms/:roomId/messages/:msgId/reactions', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId, msgId } = req.params;
+    const userId = req.user!.id;
+    const { emoji } = z.object({ emoji: z.enum(CHAT_REACTIONS) }).parse(req.body);
+
+    const participant = await requireChatRoomAccess(req, res, roomId);
+    if (!participant) return;
+
+    const reaction = await prisma.chatMessageReaction.upsert({
+      where: { messageId_userId: { messageId: msgId, userId } },
+      create: { messageId: msgId, userId, emoji },
+      update: { emoji },
+      include: { user: { select: { firstName: true, lastName: true } } },
+    });
+
+    emitChatRoom(roomId, 'chat-reaction', { messageId: msgId, roomId, reaction });
+    res.status(201).json(reaction);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation failed', details: err.errors });
+      return;
+    }
+    logger.error('Failed to add reaction', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to add reaction' });
+  }
+});
+
+router.delete('/rooms/:roomId/messages/:msgId/reactions', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId, msgId } = req.params;
+    const userId = req.user!.id;
+
+    await prisma.chatMessageReaction.deleteMany({
+      where: { messageId: msgId, userId },
+    });
+
+    emitChatRoom(roomId, 'chat-reaction', { messageId: msgId, roomId, removed: true, userId });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to remove reaction', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to remove reaction' });
+  }
+});
+
+router.post('/rooms/:roomId/messages/:msgId/star', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId, msgId } = req.params;
+    const userId = req.user!.id;
+
+    await prisma.chatMessageStar.upsert({
+      where: { messageId_userId: { messageId: msgId, userId } },
+      create: { messageId: msgId, userId, roomId },
+      update: {},
+    });
+    res.status(201).json({ success: true });
+  } catch (err) {
+    logger.error('Failed to star message', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to star message' });
+  }
+});
+
+router.delete('/rooms/:roomId/messages/:msgId/star', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { roomId: _roomId, msgId } = req.params;
+    await prisma.chatMessageStar.deleteMany({
+      where: { messageId: msgId, userId: req.user!.id },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to unstar message', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to unstar message' });
   }
 });
 

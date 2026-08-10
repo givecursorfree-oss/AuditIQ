@@ -1,143 +1,299 @@
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useMemo } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { appConfirm } from '@/context/AppDialogContext';
+import { isAttendanceEligible } from '@/lib/attendancePopup';
+import type { LucideIcon } from 'lucide-react';
 import {
+  Search,
+  Bell,
   LayoutDashboard,
   Briefcase,
+  Kanban,
+  Building2,
   FileText,
   FolderOpen,
-  Bot,
+  CheckSquare,
+  Timer,
   Clock,
+  Calendar,
+  GraduationCap,
+  Users,
   BarChart3,
+  Receipt,
+  PieChart,
+  Lock,
+  Settings,
   LogOut,
-  Settings as SettingsIcon,
-  ChevronLeft,
-  ChevronRight,
+  MessageSquare,
   X,
+  ChevronsLeft,
+  ChevronsRight,
+  ClipboardList,
+  FileStack,
+  CalendarClock,
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLayoutChrome } from '../../context/LayoutChromeContext';
+import { useNavBadges } from '../../context/NavBadgesContext';
+import { NavCountBadge } from '../ui/nav-count-badge';
+import { CHROME_NOTIFICATIONS_BADGE_KEY } from '../../lib/navBadgeMap';
+import { formatRoleLabel } from '../../lib/roleLabels';
+import { navItemHref, type NavCatalogItem } from '../../lib/navCatalog';
+import { groupNavCatalog } from '../../lib/navAccess';
+import { NAV_ONBOARD_ATTR } from '../../lib/productTour';
+import SidebarUserMenu from './SidebarUserMenu';
+import AuditIQLogo from '../brand/AuditIQLogo';
+import { cn } from '@/lib/utils';
+import { Button } from '../ui/button';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  useSidebar,
+} from '../ui/sidebar';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/engagements', icon: Briefcase, label: 'Engagements' },
-  { to: '/workpapers', icon: FileText, label: 'Workpapers' },
-  { to: '/documents', icon: FolderOpen, label: 'Documents' },
-  { to: '/copilot', icon: Bot, label: 'AI Copilot' },
-  { to: '/attendance', icon: Clock, label: 'Attendance' },
-  { to: '/reports', icon: BarChart3, label: 'Reports' },
-  { to: '/settings', icon: SettingsIcon, label: 'Settings' },
-];
+const iconByPath: Record<string, { icon: LucideIcon; iconColor: string }> = {
+  '/': { icon: LayoutDashboard, iconColor: 'text-foreground' },
+  '/engagements/workflow': { icon: Kanban, iconColor: 'text-teal-500' },
+  '/workflow': { icon: Kanban, iconColor: 'text-emerald-500' },
+  '/services': { icon: ClipboardList, iconColor: 'text-teal-500' },
+  '/requests': { icon: ClipboardList, iconColor: 'text-blue-500' },
+  '/document-library': { icon: FileStack, iconColor: 'text-violet-500' },
+  '/admin/scheduler': { icon: CalendarClock, iconColor: 'text-amber-500' },
+  '/engagements': { icon: Briefcase, iconColor: 'text-emerald-500' },
+  '/clients': { icon: Building2, iconColor: 'text-blue-500' },
+  '/workpapers': { icon: FileText, iconColor: 'text-violet-500' },
+  '/documents': { icon: FolderOpen, iconColor: 'text-cyan-500' },
+  '/approvals': { icon: CheckSquare, iconColor: 'text-amber-500' },
+  '/time-tracker': { icon: Timer, iconColor: 'text-orange-500' },
+  '/attendance': { icon: Clock, iconColor: 'text-orange-500' },
+  '/leave-stipend': { icon: Calendar, iconColor: 'text-pink-500' },
+  '/employees': { icon: Users, iconColor: 'text-rose-500' },
+  '/reports': { icon: BarChart3, iconColor: 'text-rose-500' },
+  '/billing': { icon: Receipt, iconColor: 'text-amber-500' },
+  '/management-reports': { icon: PieChart, iconColor: 'text-violet-500' },
+  '/vault': { icon: Lock, iconColor: 'text-muted-foreground' },
+  '/settings': { icon: Settings, iconColor: 'text-muted-foreground' },
+  '/messages': { icon: MessageSquare, iconColor: 'text-cyan-500' },
+  '/client/dashboard': { icon: Building2, iconColor: 'text-blue-500' },
+  '/client/messages': { icon: MessageSquare, iconColor: 'text-cyan-500' },
+};
 
-interface SidebarProps {
-  mobileOpen: boolean;
-  onMobileClose: () => void;
+const iconByNavId: Record<string, { icon: LucideIcon; iconColor: string }> = {
+  stipend: { icon: GraduationCap, iconColor: 'text-pink-500' },
+  'leave-manage': { icon: Calendar, iconColor: 'text-pink-500' },
+  'leave-apply': { icon: Calendar, iconColor: 'text-pink-500' },
+};
+
+interface ChromeItem {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  iconColor: string;
+  action: 'search' | 'notifications';
 }
 
-export default function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+const chromeItems: ChromeItem[] = [
+  { to: '#search', icon: Search, label: 'Search', iconColor: 'text-muted-foreground', action: 'search' },
+  { to: '#notifications', icon: Bell, label: 'Notification', iconColor: 'text-amber-500', action: 'notifications' },
+];
+
+function navIcon(item: NavCatalogItem) {
+  return iconByNavId[item.id] ?? iconByPath[item.path] ?? { icon: LayoutDashboard, iconColor: 'text-foreground' };
+}
+
+export default function AppSidebar() {
   const { user, logout } = useAuth();
+  const { focusSearch, toggleNotifications } = useLayoutChrome();
+  const { getNavBadge, badges } = useNavBadges();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { pathname, search } = useLocation();
+  const { setOpenMobile, isMobile, toggleSidebar, open } = useSidebar();
 
-  // Auto-close mobile sidebar on route change
   useEffect(() => {
-    onMobileClose();
-  }, [location.pathname]);
+    if (isMobile) setOpenMobile(false);
+  }, [pathname, search, isMobile, setOpenMobile]);
 
-  const handleLogout = () => {
-    logout();
+  const filteredGroups = useMemo(() => groupNavCatalog(user), [user]);
+
+  const filteredChrome = useMemo(() => {
+    if (!user || user.role === 'Client') return [];
+    return chromeItems;
+  }, [user]);
+
+  const handleLogout = async () => {
+    const needsCheckout = user && isAttendanceEligible(user.role);
+    if (needsCheckout) {
+      const ok = await appConfirm({
+        title: 'Sign out?',
+        message:
+          'Are you sure you want to sign out? Your attendance will be marked as check-out for today.',
+        confirmLabel: 'Sign out & check out',
+        cancelLabel: 'Stay signed in',
+        destructive: true,
+      });
+      if (!ok) return;
+    } else {
+      const ok = await appConfirm({
+        title: 'Sign out?',
+        message: 'Are you sure you want to sign out?',
+        confirmLabel: 'Sign out',
+        cancelLabel: 'Cancel',
+      });
+      if (!ok) return;
+    }
+    await logout();
     navigate('/login');
   };
 
+  const isActive = (item: NavCatalogItem) => {
+    const href = navItemHref(item);
+    const [path, query] = href.split('?');
+    if (path === '/') return pathname === '/';
+    const pathMatch = pathname === path || pathname.startsWith(path + '/');
+    if (!pathMatch) return false;
+    if (query) {
+      const tab = new URLSearchParams(query).get('tab');
+      const currentTab = new URLSearchParams(search).get('tab');
+      return tab === currentTab;
+    }
+    if (item.path === '/leave-stipend' && !item.tab) return false;
+    return !search.includes('tab=') || item.path !== '/leave-stipend';
+  };
+
+  const renderNavButton = (item: NavCatalogItem) => {
+    const meta = navIcon(item);
+    const Icon = meta.icon;
+    const href = navItemHref(item);
+    const active = isActive(item);
+
+    const onboardAttr = NAV_ONBOARD_ATTR[item.id];
+
+    const badgeCount = getNavBadge(item.id);
+
+    return (
+      <SidebarMenuButton asChild isActive={active} className="h-9">
+        <Link to={href} {...(onboardAttr ? { 'data-onboard': onboardAttr } : {})}>
+          <span className="relative shrink-0">
+            <Icon className={cn('size-4', active ? 'text-primary' : meta.iconColor)} />
+            <span className="group-data-[collapsible=icon]:block hidden">
+              <NavCountBadge count={badgeCount} compact />
+            </span>
+          </span>
+          <span className="text-sm">{item.label}</span>
+          <span className="group-data-[collapsible=icon]:hidden">
+            <NavCountBadge count={badgeCount} />
+          </span>
+        </Link>
+      </SidebarMenuButton>
+    );
+  };
+
+  const renderChromeButton = (item: ChromeItem) => {
+    const Icon = item.icon;
+    if (item.action === 'search') {
+      return (
+        <SidebarMenuButton className="h-9" onClick={focusSearch} data-onboard="sidebar-search" aria-label="Search">
+          <Icon className={cn('size-4 shrink-0', item.iconColor)} />
+          <span className="text-sm">Search</span>
+          <span className="ml-auto flex size-5 items-center justify-center rounded bg-muted text-[10px] font-medium text-muted-foreground">
+            /
+          </span>
+        </SidebarMenuButton>
+      );
+    }
+    const notifCount = badges[CHROME_NOTIFICATIONS_BADGE_KEY] ?? 0;
+    return (
+      <SidebarMenuButton className="h-9" onClick={toggleNotifications} aria-label="Notifications">
+        <span className="relative shrink-0">
+          <Icon className={cn('size-4', item.iconColor)} />
+          <span className="group-data-[collapsible=icon]:block hidden">
+            <NavCountBadge count={notifCount} compact />
+          </span>
+        </span>
+        <span className="text-sm">{item.label}</span>
+        <span className="group-data-[collapsible=icon]:hidden">
+          <NavCountBadge count={notifCount} />
+        </span>
+      </SidebarMenuButton>
+    );
+  };
+
   return (
-    <>
-      {/* Mobile backdrop */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={onMobileClose}
-        />
-      )}
-
-      <aside
-        className={`
-          fixed top-0 left-0 h-screen bg-card border-r border-border flex flex-col z-50
-          transition-all duration-300 ease-in-out
-          ${collapsed ? 'lg:w-16' : 'lg:w-60'}
-          w-64 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
-        `}
-      >
-        {/* Logo */}
-        <div className="flex items-center justify-between px-4 h-14 border-b border-border">
-          <div className="flex items-center gap-2">
-            {collapsed ? (
-              <img src="/logo.png" alt="AuditIQ" className="h-10 w-10 object-contain shrink-0 dark:brightness-0 dark:invert" />
-            ) : (
-              <img src="/logo.png" alt="AuditIQ" className="h-11 w-auto object-contain dark:brightness-0 dark:invert" />
-            )}
-          </div>
-          {/* Mobile close button */}
-          <button
-            onClick={onMobileClose}
-            className="lg:hidden p-1.5 rounded-lg text-foreground-muted hover:text-foreground hover:bg-hover-bg"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-foreground-muted hover:text-foreground hover:bg-hover-bg'
-                }`
-              }
-            >
-              <item.icon size={18} className="shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* User & Collapse */}
-        <div className="border-t border-border p-2 space-y-1">
-          {!collapsed && user && (
-            <div className="flex items-center gap-2 px-3 py-2">
-              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold">
-                {user.initials}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
-                  {user.firstName} {user.lastName}
-                </p>
-                <p className="text-xs text-foreground-muted truncate">{user.role}</p>
-              </div>
-            </div>
+    <Sidebar collapsible="icon" className="!border-r-0">
+      <SidebarHeader className="border-b border-sidebar-border/60">
+        <div className="flex items-center justify-between gap-2 px-1 py-1">
+          <Link to="/" className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+            <AuditIQLogo className="h-9 w-auto max-w-full object-contain group-data-[collapsible=icon]:h-8" />
+          </Link>
+          {isMobile && (
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 lg:hidden" onClick={() => setOpenMobile(false)} aria-label="Close menu">
+              <X className="size-4" />
+            </Button>
           )}
-
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-foreground-muted hover:text-danger hover:bg-danger/10 w-full transition-colors"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden h-8 w-8 shrink-0 lg:flex"
+            onClick={toggleSidebar}
+            title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+            aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
           >
-            <LogOut size={18} className="shrink-0" />
-            {!collapsed && <span>Logout</span>}
-          </button>
-
-          {/* Desktop-only collapse toggle */}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="hidden lg:flex items-center justify-center w-full p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-hover-bg transition-colors"
-          >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </button>
+            {open ? <ChevronsLeft className="size-4" /> : <ChevronsRight className="size-4" />}
+          </Button>
         </div>
-      </aside>
-    </>
+      </SidebarHeader>
+
+      <SidebarContent>
+        {filteredChrome.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {filteredChrome.map((item) => (
+                  <SidebarMenuItem key={item.action}>{renderChromeButton(item)}</SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {filteredGroups.map((group) => (
+          <SidebarGroup key={group.label} label={group.label} collapsible defaultOpen={group.label !== 'Administration'}>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.id}>{renderNavButton(item)}</SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+      </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border/60">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarUserMenu />
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton className="h-9 text-sidebar-muted hover:text-destructive" onClick={() => void handleLogout()}>
+              <LogOut className="size-4 shrink-0" />
+              <span className="text-sm">Sign out</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        {user && (
+          <p className="px-2 pb-1 text-[10px] text-sidebar-muted group-data-[collapsible=icon]:hidden">
+            {formatRoleLabel(user.role)}
+          </p>
+        )}
+      </SidebarFooter>
+    </Sidebar>
   );
 }

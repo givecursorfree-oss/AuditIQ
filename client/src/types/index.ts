@@ -5,15 +5,22 @@ export interface User {
   firstName: string;
   lastName: string;
   initials: string;
-  role: string;
+  role: 'Partner' | 'Admin' | 'Manager' | 'Staff' | 'Intern' | 'Client';
   roleId?: string;
   roleRef?: { id: string; name: string };
   designation?: string;
+  hierarchyLevel?: { id: string; code: string; title: string } | null;
   phone?: string;
   avatar?: string;
   firmId: string;
+  firm?: { id: string; name: string };
   isActive: boolean;
+  presenceStatus?: 'online' | 'offline';
+  presenceUpdatedAt?: string;
+  twoFactorEnabled?: boolean;
   createdAt?: string;
+  /** `module:action` keys from RBAC; `*` for Admin/Partner */
+  permissions?: string[];
 }
 
 // ─── RBAC: Roles & Permissions ───
@@ -50,26 +57,7 @@ export interface Firm {
   website?: string;
 }
 
-export interface AuthState {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  loading: boolean;
-}
 
-export interface LoginPayload {
-  email: string;
-  password: string;
-}
-
-export interface RegisterPayload {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-  firmName?: string;
-}
 
 // ─── Client (Audit Client Entity) ───
 export interface Client {
@@ -92,7 +80,7 @@ export interface Client {
 
 // ─── Engagement ───
 export type EngagementType = 'Statutory' | 'Tax (44AB)' | 'GST' | 'Internal' | 'Special';
-export type EngagementStatus = 'Planning' | 'Fieldwork' | 'Review' | 'Completed' | 'Archived';
+export type EngagementStatus = 'Planning' | 'Fieldwork' | 'Under Review' | 'Reporting' | 'Closed';
 
 export interface Engagement {
   id: string;
@@ -106,6 +94,11 @@ export interface Engagement {
   billingAmount?: number;
   scope?: string;
   progress?: number;
+  currentStage?: string;
+  workflowDomain?: 'DT' | 'IDT' | 'AUDIT';
+  serviceCode?: string;
+  isRecurring?: boolean;
+  letterStatus?: string;
   clientId: string;
   client?: Client;
   members?: EngagementMember[];
@@ -190,9 +183,38 @@ export interface Document {
   category: string;
   folder: string;
   version: number;
-  engagementId: string;
+  engagementId?: string;
+  parentId?: string;
+  source?: 'UPLOAD' | 'GOOGLE_DRIVE';
+  visibility?: 'ENGAGEMENT' | 'FIRM';
+  indexStatus?: 'PENDING' | 'INDEXED' | 'FAILED' | 'SKIPPED';
   uploadedBy?: Pick<User, 'firstName' | 'lastName' | 'initials'>;
   createdAt: string;
+}
+
+export interface DocumentSearchHit {
+  id: string;
+  title: string;
+  subtitle: string;
+  highlight?: string;
+  visibility?: string;
+  source?: string;
+  engagementId?: string;
+}
+
+export interface SyncFolder {
+  id: string;
+  name: string;
+}
+
+export interface GoogleDriveStatus {
+  configured: boolean;
+  connected: boolean;
+  googleEmail: string | null;
+  folderIds: string[];
+  folders?: SyncFolder[];
+  defaultEngagementId: string | null;
+  lastSyncAt: string | null;
 }
 
 // ─── Observation (ICAI format) ───
@@ -208,6 +230,7 @@ export interface Observation {
   severity: string;
   status: string;
   saReference?: string;
+  engagementId?: string;
   reportedBy?: Pick<User, 'firstName' | 'lastName' | 'initials'>;
   createdAt: string;
 }
@@ -219,6 +242,7 @@ export interface Report {
   type: string;
   content: string;
   status: string;
+  version?: number;
   engagementId: string;
   engagement?: { title: string; client?: { name: string } };
   generatedBy?: Pick<User, 'firstName' | 'lastName'>;
@@ -269,6 +293,7 @@ export interface Deadline {
   dueDate: string;
   status: string;
   type: string;
+  completed: boolean;
   engagementId: string;
   engagement?: { title: string; client?: { name: string } };
   isOverdue?: boolean;
@@ -283,6 +308,7 @@ export interface DashboardStats {
   overdueDeadlines: number;
   teamMembers: number;
   monthlyHours: number;
+  openClientQueries?: number;
 }
 
 export interface DashboardData {
@@ -303,35 +329,95 @@ export interface ActivityItem {
   createdAt: string;
 }
 
-// ─── Copilot ───
-export interface CopilotSession {
+// ─── Audit Log ───
+export interface AuditLogEntry {
   id: string;
-  title: string;
-  engagementId?: string;
-  messageCount?: number;
-  _count?: { messages: number };
-  updatedAt: string;
-}
-
-export interface CopilotMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  sessionId?: string;
+  action: string;
+  entity: string;
+  entityId?: string;
+  details?: string;
+  ipAddress?: string;
+  userId: string;
+  user?: Pick<User, 'firstName' | 'lastName' | 'initials'>;
   createdAt: string;
 }
 
-// ─── Deadline ───
-export interface Deadline {
+// ─── Time Entry ───
+export interface TimeEntry {
+  id: string;
+  date: string;
+  hours: number;
+  description?: string;
+  isBillable: boolean;
+  engagementId: string;
+  engagement?: { title: string; client?: { name: string } };
+  userId: string;
+  user?: Pick<User, 'firstName' | 'lastName' | 'initials'>;
+  createdAt: string;
+}
+
+// ─── Form 3CD ───
+export interface Form3CDClause {
+  id: string;
+  clauseNumber: number;
+  clauseTitle: string;
+  response?: string;
+  remarks?: string;
+  isApplicable: boolean;
+  isCompleted: boolean;
+  reportId: string;
+}
+
+// ─── Document Request ───
+export interface DocumentRequest {
   id: string;
   title: string;
-  dueDate: string;
-  type: string;
-  completed: boolean;
-  isOverdue?: boolean;
-  daysRemaining?: number;
-  engagement?: {
-    title: string;
-    client?: { name: string };
+  description?: string;
+  status: string;
+  dueDate?: string;
+  clientNotes?: string;
+  engagementId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Workload Summary ───
+export interface WorkloadSummary {
+  id: string;
+  firstName: string;
+  lastName: string;
+  initials: string;
+  role: string;
+  designation?: string;
+  activeEngagements: number;
+  stageDistribution: Record<string, number>;
+  upcomingDeadlines: number;
+  billableHoursThisWeek: number;
+  availability: 'Available' | 'Engaged' | 'On Leave';
+  highWorkload: boolean;
+  isOnLeave: boolean;
+}
+
+// ─── Admin Briefing ───
+export interface AdminBriefing {
+  engagementsAtRisk: { id: string; title: string; currentStage: string; deadline: string; client: { name: string } }[];
+  pendingDocuments: { id: string; title: string; engagement: { id: string; title: string; client: { name: string } } }[];
+  inactiveEmployees: { id: string; firstName: string; lastName: string; role: string }[];
+  udinPending: { id: string; title: string; client: { name: string } }[];
+  uninvoicedClosures: { id: string; title: string; client: { name: string } }[];
+  summary: {
+    atRiskCount: number;
+    pendingDocsCount: number;
+    inactiveCount: number;
+    udinPendingCount: number;
+    uninvoicedCount: number;
   };
+}
+
+// ─── Stage Gate Check ───
+export interface StageGateCheck {
+  allowed: boolean;
+  blockers: string[];
+  currentStage: string;
+  toStage: string;
 }

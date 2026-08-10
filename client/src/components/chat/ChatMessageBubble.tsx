@@ -6,6 +6,8 @@ import {
   Trash,
   PushPin as Pin,
   ArrowBendUpRight,
+  ArrowBendUpLeft,
+  Star,
 } from '@phosphor-icons/react';
 import {
   DropdownMenu,
@@ -15,7 +17,35 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Checks as CheckCheck } from '@phosphor-icons/react';
-import type { ChatMessage } from '@/lib/chatHelpers';
+import {
+  REACTION_ICON_SRC,
+  REACTION_LABEL,
+  type ChatMessage,
+  type ChatReaction,
+} from '@/lib/chatHelpers';
+import { renderMentionSegments } from '@/lib/chatMessageUtils';
+import { chatFilePublicUrl } from '@/lib/chatMessageUtils';
+
+function ChatReactionIcon({
+  kind,
+  size = 20,
+  className = '',
+}: {
+  kind: ChatReaction['emoji'];
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <img
+      src={REACTION_ICON_SRC[kind]}
+      alt=""
+      width={size}
+      height={size}
+      className={`inline-block object-contain ${className}`}
+      draggable={false}
+    />
+  );
+}
 
 function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -29,24 +59,84 @@ function formatSize(bytes: number) {
 
 type ChatMessageBubbleProps = {
   msg: ChatMessage;
+  roomId: string;
   isMe: boolean;
   showSender: boolean;
   canDelete: boolean;
+  searchHighlight?: string;
   onPreviewFile: (msg: ChatMessage) => void;
   onForward: (msg: ChatMessage) => void;
   onDelete: (msg: ChatMessage) => void;
   onTogglePin: (msgId: string, isPinned: boolean) => void;
+  onReply?: (msg: ChatMessage) => void;
+  onReact?: (msgId: string, emoji: ChatReaction['emoji']) => void;
+  onToggleStar?: (msgId: string, isStarred: boolean) => void;
 };
+
+function MessageText({
+  content,
+  isMe,
+  highlight,
+}: {
+  content: string;
+  isMe: boolean;
+  highlight?: string;
+}) {
+  const segments = renderMentionSegments(content);
+  const hl = highlight?.trim().toLowerCase();
+
+  return (
+    <p className="text-sm whitespace-pre-wrap break-words">
+      {segments.map((seg) => {
+        const segKey = `${seg.type}:${seg.offset}`;
+        if (seg.type === 'mention') {
+          return (
+            <span
+              key={segKey}
+              className={`font-semibold ${isMe ? 'text-white' : 'text-[var(--color-brand-primary)] dark:text-blue-400'}`}
+            >
+              {seg.value}
+            </span>
+          );
+        }
+        if (!hl) {
+          return (
+            <span key={segKey} className={isMe ? 'text-white/95' : undefined}>
+              {seg.value}
+            </span>
+          );
+        }
+        const lower = seg.value.toLowerCase();
+        const idx = lower.indexOf(hl);
+        if (idx < 0) return <span key={segKey}>{seg.value}</span>;
+        return (
+          <span key={segKey}>
+            {seg.value.slice(0, idx)}
+            <mark className="bg-yellow-200/80 dark:bg-yellow-500/30 rounded px-0.5">
+              {seg.value.slice(idx, idx + hl.length)}
+            </mark>
+            {seg.value.slice(idx + hl.length)}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
 
 export default function ChatMessageBubble({
   msg,
+  roomId,
   isMe,
   showSender,
   canDelete,
+  searchHighlight,
   onPreviewFile,
   onForward,
   onDelete,
   onTogglePin,
+  onReply,
+  onReact,
+  onToggleStar,
 }: ChatMessageBubbleProps) {
   if (msg.isDeleted) {
     return (
@@ -55,7 +145,9 @@ export default function ChatMessageBubble({
         <div className={`max-w-[65%] ${isMe ? 'items-end' : 'items-start'}`}>
           <div
             className={`rounded-2xl px-3 py-2 text-sm italic opacity-70 ${
-              isMe ? 'bg-primary/40 text-white/80' : 'bg-hover-bg text-foreground-muted border border-border'
+              isMe
+                ? 'bg-[var(--color-brand-primary)]/30 text-foreground-muted'
+                : 'bg-muted text-foreground-muted border border-border'
             }`}
           >
             This message was deleted
@@ -65,10 +157,18 @@ export default function ChatMessageBubble({
     );
   }
 
+  const reactionCounts = (msg.reactions || []).reduce(
+    (acc, r) => {
+      acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
   return (
     <div className={`flex gap-2 group ${isMe ? 'flex-row-reverse' : ''} ${showSender ? 'mt-3' : 'mt-0.5'}`}>
       {!isMe && showSender ? (
-        <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-500/15 text-blue-600 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+        <div className="w-7 h-7 rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
           {msg.sender?.initials || '?'}
         </div>
       ) : !isMe ? (
@@ -86,10 +186,21 @@ export default function ChatMessageBubble({
           <div
             className={`relative rounded-2xl px-3 py-2 ${
               isMe
-                ? 'bg-primary text-white rounded-br-md'
-                : 'bg-card border border-border text-foreground rounded-bl-md shadow-sm'
+                ? 'bg-[var(--color-brand-primary)] text-white rounded-br-md shadow-sm'
+                : 'bg-muted text-foreground border border-border rounded-bl-md'
             }`}
           >
+            {msg.parent && (
+              <div
+                className={`text-[11px] mb-2 pl-2 border-l-2 ${
+                  isMe ? 'border-white/40 text-white/80' : 'border-border text-foreground-muted'
+                }`}
+              >
+                <p className="font-medium">{msg.parent.senderName}</p>
+                <p className="truncate opacity-90">{msg.parent.content?.slice(0, 120) || 'Attachment'}</p>
+              </div>
+            )}
+
             {msg.forwardedFromSenderName && (
               <div
                 className={`flex items-center gap-1 text-[10px] font-medium mb-1 pb-1 border-b ${
@@ -101,8 +212,19 @@ export default function ChatMessageBubble({
               </div>
             )}
 
-            {msg.type === 'TEXT' && (
-              <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
+            {msg.type === 'TEXT' && msg.content && (
+              <MessageText content={msg.content} isMe={isMe} highlight={searchHighlight} />
+            )}
+
+            {msg.type === 'VOICE' && (
+              <audio
+                controls
+                className="max-w-full h-8"
+                src={chatFilePublicUrl(roomId, msg.id, true)}
+                aria-label="Voice message"
+              >
+                <track kind="captions" />
+              </audio>
             )}
 
             {msg.type === 'FILE' && (
@@ -115,7 +237,7 @@ export default function ChatMessageBubble({
               >
                 <div
                   className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-                    isMe ? 'bg-white/15' : 'bg-primary/10'
+                    isMe ? 'bg-white/15' : 'bg-surface-muted'
                   }`}
                 >
                   {msg.mimeType?.startsWith('image/') ? (
@@ -137,22 +259,42 @@ export default function ChatMessageBubble({
               <span className={`text-[10px] ${isMe ? 'text-white/50' : 'text-foreground-muted'}`}>
                 {formatTime(msg.createdAt)}
               </span>
+              {msg.isStarred && (
+                <Star size={10} weight="fill" className={isMe ? 'text-yellow-200' : 'text-amber-500'} />
+              )}
               {isMe && <CheckCheck size={12} className="text-white/50" />}
             </div>
           </div>
 
-          {msg.type !== 'SYSTEM' && (
+          <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {onReply && (
+              <button
+                type="button"
+                title="Reply"
+                aria-label="Reply"
+                onClick={() => onReply(msg)}
+                className="p-1 rounded-md hover:bg-hover-bg text-foreground-muted"
+              >
+                <ArrowBendUpLeft size={14} />
+              </button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded-md hover:bg-hover-bg text-foreground-muted shrink-0 transition-opacity"
+                  className="p-1 rounded-md hover:bg-hover-bg text-foreground-muted"
                   aria-label="Message options"
                 >
                   <MoreVertical size={16} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align={isMe ? 'end' : 'start'} className="w-44">
+              <DropdownMenuContent align={isMe ? 'end' : 'start'} className="w-48">
+                {onReply && (
+                  <DropdownMenuItem onClick={() => onReply(msg)} className="gap-2 cursor-pointer">
+                    <ArrowBendUpLeft size={16} />
+                    Reply
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => onForward(msg)} className="gap-2 cursor-pointer">
                   <Forward size={16} />
                   Forward
@@ -162,8 +304,17 @@ export default function ChatMessageBubble({
                   className="gap-2 cursor-pointer"
                 >
                   <Pin size={16} />
-                  {msg.isPinned ? 'Unpin' : 'Pin'}
+                  {msg.isPinned ? 'Unpin in room' : 'Pin in room'}
                 </DropdownMenuItem>
+                {onToggleStar && (
+                  <DropdownMenuItem
+                    onClick={() => onToggleStar(msg.id, Boolean(msg.isStarred))}
+                    className="gap-2 cursor-pointer"
+                  >
+                    <Star size={16} />
+                    {msg.isStarred ? 'Unstar' : 'Star message'}
+                  </DropdownMenuItem>
+                )}
                 {canDelete && (
                   <>
                     <DropdownMenuSeparator />
@@ -178,7 +329,39 @@ export default function ChatMessageBubble({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          {(['thumbsup', 'check', 'question'] as const).map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              title={REACTION_LABEL[emoji]}
+              aria-label={REACTION_LABEL[emoji]}
+              onClick={() => onReact?.(msg.id, emoji)}
+              className="p-0.5 rounded-md opacity-70 hover:opacity-100 hover:bg-hover-bg transition-opacity"
+            >
+              <ChatReactionIcon kind={emoji} size={22} />
+            </button>
+          ))}
+          {Object.entries(reactionCounts).map(([emoji, count]) => {
+            const kind = emoji as ChatReaction['emoji'];
+            const src = REACTION_ICON_SRC[kind];
+            return (
+              <span
+                key={emoji}
+                className="inline-flex items-center gap-1 text-[10px] bg-surface-muted border border-border rounded-full pl-1 pr-2 py-0.5"
+              >
+                {src ? (
+                  <ChatReactionIcon kind={kind} size={16} />
+                ) : (
+                  <span>{emoji}</span>
+                )}
+                <span className="font-medium tabular-nums">{count}</span>
+              </span>
+            );
+          })}
         </div>
       </div>
     </div>

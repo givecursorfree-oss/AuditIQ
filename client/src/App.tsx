@@ -2,8 +2,12 @@ import { lazy, Suspense, Component } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import AuditIQLogo from './components/brand/AuditIQLogo';
+import { AppDialogProvider } from './context/AppDialogContext';
+import { AppToastProvider } from './context/AppToastContext';
+import { AttendanceConfirmationProvider } from './context/AttendanceConfirmationContext';
 import Layout from './components/layout/Layout';
-
+import RouteGuard from './components/layout/RouteGuard';
 // Retry lazy imports once on chunk-load failure (handles Vercel redeploy cache invalidation)
 function lazyRetry(factory: () => Promise<{ default: React.ComponentType }>) {
   return lazy(() =>
@@ -26,30 +30,47 @@ const Login = lazyRetry(() => import('./pages/Login'));
 const Register = lazyRetry(() => import('./pages/Register'));
 const Dashboard = lazyRetry(() => import('./pages/Dashboard'));
 const Engagements = lazyRetry(() => import('./pages/Engagements'));
+const EngagementPortfolio = lazyRetry(() => import('./pages/EngagementPortfolio'));
 const Workpapers = lazyRetry(() => import('./pages/Workpapers'));
 const Documents = lazyRetry(() => import('./pages/Documents'));
-const Copilot = lazyRetry(() => import('./pages/Copilot'));
 const Attendance = lazyRetry(() => import('./pages/Attendance'));
 const Reports = lazyRetry(() => import('./pages/Reports'));
 const Settings = lazyRetry(() => import('./pages/Settings'));
 const ClientPortal = lazyRetry(() => import('./pages/ClientPortal'));
+const Clients = lazyRetry(() => import('./pages/Clients'));
 const VerifyEmail = lazyRetry(() => import('./pages/VerifyEmail'));
-const AuditLog = lazyRetry(() => import('./pages/AuditLog'));
-const Observations = lazyRetry(() => import('./pages/Observations'));
-const Form3CD = lazyRetry(() => import('./pages/Form3CD'));
-const TimeBilling = lazyRetry(() => import('./pages/TimeBilling'));
+const ForgotPassword = lazyRetry(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazyRetry(() => import('./pages/ResetPassword'));
+const PrivacyPolicy = lazyRetry(() => import('./pages/LegalPages').then((m) => ({ default: m.PrivacyPolicy })));
+const TermsOfService = lazyRetry(() => import('./pages/LegalPages').then((m) => ({ default: m.TermsOfService })));
+const SecurityCompliance = lazyRetry(() =>
+  import('./pages/LegalPages').then((m) => ({ default: m.SecurityCompliance }))
+);
 const Unauthorized = lazyRetry(() => import('./pages/Unauthorized'));
 const Messages = lazyRetry(() => import('./pages/Messages'));
 const Employees = lazyRetry(() => import('./pages/Employees'));
-const ClientMaster = lazyRetry(() => import('./pages/ClientMaster'));
 const Approvals = lazyRetry(() => import('./pages/Approvals'));
-const Onboarding = lazyRetry(() => import('./pages/Onboarding'));
-const WorkflowBoard = lazyRetry(() => import('./pages/WorkflowBoard'));
+const ServiceCatalog = lazyRetry(() => import('./pages/ServiceCatalog'));
 const TimeTracker = lazyRetry(() => import('./pages/TimeTracker'));
 const PasswordVault = lazyRetry(() => import('./pages/PasswordVault'));
 const ManagementReports = lazyRetry(() => import('./pages/ManagementReports'));
 const LeaveStipend = lazyRetry(() => import('./pages/LeaveStipend'));
 const EngagementDetail = lazyRetry(() => import('./pages/EngagementDetail'));
+const Billing = lazyRetry(() => import('./pages/Billing'));
+const PendingRequests = lazyRetry(() => import('./pages/PendingRequests'));
+const RequestDetail = lazyRetry(() => import('./pages/RequestDetail'));
+const DocumentLibraryTemplates = lazyRetry(() => import('./pages/DocumentLibraryTemplates'));
+const EngagementLetterPage = lazyRetry(() => import('./pages/EngagementLetterPage'));
+const SchedulerAdmin = lazyRetry(() => import('./pages/SchedulerAdmin'));
+const BillingPending = lazyRetry(() => import('./pages/BillingPending'));
+const Timesheets = lazyRetry(() => import('./pages/Timesheets'));
+const ComplianceCalendarPage = lazyRetry(() => import('./pages/ComplianceCalendarPage'));
+const NoticesDashboard = lazyRetry(() => import('./pages/NoticesDashboard'));
+const NoticeDetail = lazyRetry(() => import('./pages/NoticeDetail'));
+const StaffSchedulePage = lazyRetry(() => import('./pages/StaffSchedulePage'));
+const ClaimsPending = lazyRetry(() => import('./pages/claims/ClaimsPending'));
+const LateHoursClaimForm = lazyRetry(() => import('./pages/claims/LateHoursClaimForm').then((m) => ({ default: m.LateHoursClaimForm })));
+const DeptVisitClaimForm = lazyRetry(() => import('./pages/claims/DeptVisitClaimForm').then((m) => ({ default: m.DeptVisitClaimForm })));
 
 // Error boundary to catch render errors and prevent blank screen
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -68,10 +89,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
       return (
         <div className="h-screen flex items-center justify-center bg-surface">
           <div className="text-center space-y-4">
-            <img src="/logo.png" alt="AuditIQ" className="h-14 w-auto mx-auto object-contain" />
+            <AuditIQLogo className="h-14 w-auto mx-auto object-contain" />
             <h2 className="text-lg font-semibold text-foreground">Something went wrong</h2>
             <p className="text-sm text-foreground-muted">Please refresh the page to continue.</p>
             <button
+              type="button"
               onClick={() => window.location.reload()}
               className="btn-primary"
             >
@@ -100,7 +122,7 @@ function ProtectedRoute() {
     return (
       <div className="h-screen flex items-center justify-center bg-surface">
         <div className="flex flex-col items-center gap-4">
-          <img src="/logo.png" alt="AuditIQ" className="h-14 w-auto object-contain dark:brightness-0 dark:invert" />
+          <AuditIQLogo className="h-14 w-auto object-contain" />
           <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
       </div>
@@ -108,17 +130,6 @@ function ProtectedRoute() {
   }
 
   return user ? <Outlet /> : <Navigate to="/login" replace />;
-}
-
-/** Route guard that checks user role against a whitelist */
-function RoleRoute({ roles }: { roles: string[] }) {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  if (!roles.includes(user.role)) {
-    if (user.role === 'Client') return <Navigate to="/client/dashboard" replace />;
-    return <Navigate to="/" replace />;
-  }
-  return <Outlet />;
 }
 
 function ClientRedirect() {
@@ -130,13 +141,21 @@ function ClientRedirect() {
 function PublicRoute() {
   const { user, loading } = useAuth();
   if (loading) return null;
-  return user ? <Navigate to="/" replace /> : <Outlet />;
+  if (user) {
+    return (
+      <Navigate to={user.role === 'Client' ? '/client/dashboard' : '/'} replace />
+    );
+  }
+  return <Outlet />;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <AttendanceConfirmationProvider>
+        <AppDialogProvider>
+        <AppToastProvider>
         <ErrorBoundary>
         <Suspense fallback={<PageFallback />}>
           <Routes>
@@ -144,57 +163,63 @@ export default function App() {
             <Route element={<PublicRoute />}>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
-              <Route path="/verify-email" element={<VerifyEmail />} />
             </Route>
 
-            {/* Unauthorized page (no layout) */}
-            <Route path="/unauthorized" element={<Unauthorized />} />
+            {/* Public pages (accessible signed in or out) */}
+            <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+            <Route path="/security-compliance" element={<SecurityCompliance />} />
 
-            {/* Protected routes — all authenticated users */}
+            {/* Unauthorized — inside layout for orientation (Trunk Test) */}
             <Route element={<ProtectedRoute />}>
               <Route element={<Layout />}>
-                <Route index element={<ClientRedirect />} />
-                <Route path="/documents" element={<Documents />} />
-
-                {/* Partner / Admin / Manager / Staff only — audit workflows */}
-                <Route element={<RoleRoute roles={['Partner', 'Admin', 'Manager', 'Staff']} />}>
+                <Route path="/unauthorized" element={<Unauthorized />} />
+                <Route element={<RouteGuard />}>
+                  <Route index element={<ClientRedirect />} />
+                  <Route path="/documents" element={<Documents />} />
                   <Route path="/engagements" element={<Engagements />} />
+                  <Route path="/engagements/portfolio" element={<EngagementPortfolio />} />
+                  <Route path="/engagements/:id/letter" element={<EngagementLetterPage />} />
                   <Route path="/engagements/:id" element={<EngagementDetail />} />
-                  <Route path="/workflow" element={<WorkflowBoard />} />
+                  <Route path="/engagements/workflow" element={<Navigate to="/engagements" replace />} />
+                  <Route path="/workflow" element={<Navigate to="/engagements" replace />} />
+                  <Route path="/services" element={<ServiceCatalog />} />
                   <Route path="/workpapers" element={<Workpapers />} />
-                  <Route path="/copilot" element={<Copilot />} />
                   <Route path="/attendance" element={<Attendance />} />
                   <Route path="/reports" element={<Reports />} />
-                  <Route path="/observations" element={<Observations />} />
-                  <Route path="/form3cd" element={<Form3CD />} />
-                  <Route path="/time-billing" element={<TimeBilling />} />
+                  <Route path="/observations" element={<Navigate to="/reports?tab=observations" replace />} />
+                  <Route path="/form3cd" element={<Navigate to="/reports?tab=form3cd" replace />} />
+                  <Route path="/time-billing" element={<Navigate to="/time-tracker" replace />} />
                   <Route path="/time-tracker" element={<TimeTracker />} />
                   <Route path="/leave-stipend" element={<LeaveStipend />} />
                   <Route path="/messages" element={<Messages />} />
                   <Route path="/employees" element={<Employees />} />
-                  <Route path="/client-master" element={<ClientMaster />} />
+                  <Route path="/clients" element={<Clients />} />
+                  <Route path="/requests" element={<PendingRequests />} />
+                  <Route path="/requests/:id" element={<RequestDetail />} />
+                  <Route path="/document-library" element={<DocumentLibraryTemplates />} />
+                  <Route path="/admin/scheduler" element={<SchedulerAdmin />} />
+                  <Route path="/compliance-calendar" element={<ComplianceCalendarPage />} />
+                  <Route path="/billing/pending" element={<BillingPending />} />
+                  <Route path="/timesheets" element={<Timesheets />} />
+                  <Route path="/notices" element={<NoticesDashboard />} />
+                  <Route path="/notices/:id" element={<NoticeDetail />} />
+                  <Route path="/portals/credentials" element={<Navigate to="/vault" replace />} />
+                  <Route path="/staff/:id/schedule" element={<StaffSchedulePage />} />
+                  <Route path="/claims/pending" element={<ClaimsPending />} />
+                  <Route path="/claims/new/late-hours" element={<LateHoursClaimForm />} />
+                  <Route path="/claims/new/dept-visit" element={<DeptVisitClaimForm />} />
+                  <Route path="/client-master" element={<Navigate to="/clients" replace />} />
+                  <Route path="/onboarding" element={<Navigate to="/clients?tab=incoming" replace />} />
                   <Route path="/approvals" element={<Approvals />} />
-                </Route>
-
-                {/* Partner / Admin / Manager only */}
-                <Route element={<RoleRoute roles={['Partner', 'Admin', 'Manager']} />}>
-                  <Route path="/onboarding" element={<Onboarding />} />
                   <Route path="/vault" element={<PasswordVault />} />
-                </Route>
-
-                {/* Partner / Admin only — management reports */}
-                <Route element={<RoleRoute roles={['Partner', 'Admin']} />}>
+                  <Route path="/billing" element={<Billing />} />
                   <Route path="/management-reports" element={<ManagementReports />} />
-                </Route>
-
-                {/* Partner / Admin only — administration */}
-                <Route element={<RoleRoute roles={['Partner', 'Admin']} />}>
                   <Route path="/settings" element={<Settings />} />
-                  <Route path="/audit-log" element={<AuditLog />} />
-                </Route>
-
-                {/* Client portal — Client role */}
-                <Route element={<RoleRoute roles={['Client']} />}>
+                  <Route path="/audit-log" element={<Navigate to="/settings?tab=audit-log" replace />} />
                   <Route path="/client/dashboard" element={<ClientPortal />} />
                   <Route path="/client/messages" element={<Messages />} />
                   <Route path="/portal" element={<Navigate to="/client/dashboard" replace />} />
@@ -207,6 +232,9 @@ export default function App() {
           </Routes>
         </Suspense>
         </ErrorBoundary>
+        </AppToastProvider>
+        </AppDialogProvider>
+        </AttendanceConfirmationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

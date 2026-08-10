@@ -4,15 +4,37 @@
   "private": true,
   "description": "AuditIQ India — Intelligent Audit Management Platform",
   "scripts": {
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "npm run dev:prep && concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:prep": "node scripts/kill-port.mjs 3001 && node scripts/ensure-db.mjs",
     "dev:server": "cd server && npm run dev",
+    "search:verify": "node scripts/verify-search.mjs",
     "dev:client": "cd client && npm run dev",
+    "share:tunnel": "npx cloudflared tunnel --url http://localhost:5173 --protocol http2",
     "build": "cd client && npm run build",
     "db:push": "cd server && npx prisma db push",
+    "db:push:safe": "cd server && npx prisma db push --skip-generate",
+    "db:migrate": "cd server && npx prisma migrate deploy",
+    "db:reset": "cd server && npm run db:reset",
+    "db:reset:force": "cd server && npm run db:reset:force",
     "db:seed": "cd server && npx tsx prisma/seed.ts",
-    "db:studio": "cd server && npx prisma studio"
+    "db:studio": "cd server && npx prisma studio",
+    "db:up": "docker compose -f docker-compose.db.yml up -d",
+    "db:down": "docker compose -f docker-compose.db.yml down",
+    "search:up": "docker compose -f docker-compose.search.yml up -d",
+    "search:status": "curl -s http://localhost:3001/api/config",
+    "search:down": "docker compose -f docker-compose.search.yml down",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "db:backup": "bash scripts/backup.sh",
+    "db:backup:local": "bash scripts/backup.sh --local",
+    "db:restore": "bash scripts/restore.sh",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report e2e-report"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@playwright/test": "^1.52.0",
+    "concurrently": "^10.0.3"
   }
 }

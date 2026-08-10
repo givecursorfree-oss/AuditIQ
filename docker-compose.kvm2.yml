@@ -1,0 +1,93 @@
+# Hostinger KVM 2 (2 vCPU / 8 GB / 100 GB) — pilot / staging only
+# Usage: docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
+#
+# Skips Typesense + Tika (saves ~3 GB RAM). App falls back to MySQL document search.
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: auditiq
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
+    command:
+      - --innodb-buffer-pool-size=1G
+      - --max-connections=100
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/auditiq
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      NODE_ENV: production
+      PORT: 3001
+      CLIENT_URL: ${CLIENT_URL:?CLIENT_URL must be set}
+      LOG_LEVEL: info
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-25}
+      VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:?VAULT_ENCRYPTION_KEY must be set}
+      # Search disabled — MySQL fallback only (fits 8 GB RAM)
+      SEMANTIC_SEARCH_ENABLED: "false"
+      TYPESENSE_HOST: http://127.0.0.1:8108
+      TYPESENSE_API_KEY: unused-on-kvm2
+      TIKA_URL: http://127.0.0.1:9998
+      ALLOW_STAFF_REGISTRATION: ${ALLOW_STAFF_REGISTRATION:-false}
+      SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-true}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+    volumes:
+      - server_logs:/app/logs
+      - document_uploads:/app/uploads
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  client:
+    build: ./client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    profiles:
+      - ssl
+
+volumes:
+  mysql_data:
+  server_logs:
+  document_uploads:
+  certbot_conf:
+  certbot_www:

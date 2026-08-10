@@ -1,260 +1,336 @@
-import { useState, useEffect } from 'react';
-import {
-  Users, Briefcase, AlertTriangle, Clock, TrendingUp, FileText,
-  ArrowUpRight, ArrowDownRight, ChevronRight
-} from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import type { DashboardData, Deadline } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useNavBadges } from '../context/NavBadgesContext';
+import PageLoading from '../components/layout/PageLoading';
+import { AppPageContainer } from '../components/layout/AppPageContainer';
+import AdminPresenceDashboard from '../components/time/AdminPresenceDashboard';
+import { DashboardWelcome } from '../components/dashboard/DashboardWelcome';
+import { DashboardStatsCards } from '../components/dashboard/DashboardStatsCards';
+import { DashboardTodaysTasks } from '../components/dashboard/DashboardTodaysTasks';
+import { DashboardPerformanceChart } from '../components/dashboard/DashboardPerformanceChart';
+import { DashboardEngagementsTable } from '../components/dashboard/DashboardEngagementsTable';
+import { DashboardExtraPanels } from '../components/dashboard/DashboardExtraPanels';
+import {
+  DashboardActionQueue,
+  type DashboardActionQueueData,
+} from '../components/dashboard/DashboardActionQueue';
+import { DashboardPriorities } from '../components/dashboard/DashboardPriorities';
+import {
+  buildChartPoints,
+  buildEngagementRows,
+  buildPerformanceMetrics,
+  buildStatCards,
+  buildTaskRows,
+  countTasksDueToday,
+  countUpcomingDeadlinesThisWeek,
+} from '../components/dashboard/mapDashboardData';
+import { engagementHubPath, engagementTasksPath } from '@/lib/engagementDeepLinks';
 
-const STATUS_COLORS: Record<string, string> = {
-  Planning: '#3b82f6',
-  Fieldwork: '#f59e0b',
-  Review: '#a855f7',
-  Completed: '#10b981',
-  Archived: '#6b7280',
-};
+const PARTNER_ADMIN_ROLES = ['Admin', 'Partner'];
+const FIRM_LEADERSHIP_ROLES = ['Admin', 'Partner', 'Manager'];
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { badges } = useNavBadges();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [chartData, setChartData] = useState<{ month: string; completed: number; active: number }[]>([]);
+  const [briefing, setBriefing] = useState<any>(null);
+  const [myTasks, setMyTasks] = useState<any[]>([]);
+  const [compliance, setCompliance] = useState<{
+    statutory: { title: string; dueDate: string; daysAway: number; rag: string }[];
+    engagementDeadlines: {
+      id: string;
+      title: string;
+      dueDate: string;
+      engagement: { id: string; title: string; client: { name: string } };
+    }[];
+  } | null>(null);
+  const [openClientQueries, setOpenClientQueries] = useState<{
+    openCount: number;
+    recent: {
+      id: string;
+      subject: string;
+      engagementId: string;
+      engagementTitle: string;
+      clientName: string;
+      createdAt: string;
+    }[];
+  } | null>(null);
+  const [actionQueue, setActionQueue] = useState<DashboardActionQueueData | null>(null);
+  const [actionQueueLoading, setActionQueueLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    Promise.all([
+  const loadDashboard = useCallback(() => {
+    setLoadError(null);
+    const role = user?.role || '';
+    const isPartnerAdmin = PARTNER_ADMIN_ROLES.includes(role);
+    const isFirmLeadership = FIRM_LEADERSHIP_ROLES.includes(role);
+    const isEmployee = ['Manager', 'Staff', 'Intern'].includes(role);
+    const isFirmStaff = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'].includes(role);
+    const showCompliance = ['Admin', 'Partner', 'Manager'].includes(role);
+    if (isFirmLeadership) setActionQueueLoading(true);
+
+    const fetches: Promise<any>[] = [
       api.get('/dashboard'),
       api.get('/dashboard/deadlines'),
       api.get('/dashboard/chart-data'),
-    ])
-      .then(([dashRes, dlRes, chartRes]) => {
+    ];
+    if (isPartnerAdmin) fetches.push(api.get('/dashboard/briefing').catch(() => ({ data: null })));
+    if (isFirmLeadership) {
+      fetches.push(
+        api.get<DashboardActionQueueData>('/dashboard/action-queue').catch(() => ({ data: null }))
+      );
+    }
+    if (isFirmStaff) fetches.push(api.get('/tasks?scope=mine&status=Open').catch(() => ({ data: { tasks: [] } })));
+    if (showCompliance) {
+      fetches.push(api.get('/dashboard/compliance-calendar').catch(() => ({ data: null })));
+      fetches.push(
+        api.get('/client-queries/open-summary').catch(() => ({
+          data: { openCount: 0, recent: [] },
+        }))
+      );
+    }
+
+    Promise.all(fetches)
+      .then((results) => {
+        const [dashRes, dlRes, chartRes, ...extras] = results;
         setData(dashRes.data);
         setDeadlines(Array.isArray(dlRes.data) ? dlRes.data : []);
         setChartData(Array.isArray(chartRes.data) ? chartRes.data : []);
+        let ei = 0;
+        if (isPartnerAdmin) {
+          setBriefing(extras[ei]?.data ?? null);
+          ei += 1;
+        }
+        if (isFirmLeadership) {
+          setActionQueue(extras[ei]?.data ?? null);
+          ei += 1;
+        }
+        if (isFirmStaff) {
+          setMyTasks(extras[ei]?.data?.tasks || extras[ei]?.data || []);
+          ei += 1;
+        }
+        if (showCompliance) {
+          setCompliance(extras[ei]?.data ?? null);
+          ei += 1;
+          setOpenClientQueries(extras[ei]?.data ?? { openCount: 0, recent: [] });
+        }
       })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
+      .catch(() => {
+        setLoadError('Unable to load dashboard data. Check your connection and try again.');
+      })
+      .finally(() => {
+        setLoading(false);
+        setActionQueueLoading(false);
+      });
+  }, [user?.role]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadDashboard();
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
+  }, [loadDashboard]);
+
+  const role = user?.role || '';
+  const isPartnerAdmin = PARTNER_ADMIN_ROLES.includes(role);
+  const isFirmLeadership = FIRM_LEADERSHIP_ROLES.includes(role);
+  const isTeam = ['Manager', 'Staff', 'Intern'].includes(role);
+  const isClient = role === 'Client';
+  const isIntern = role === 'Intern';
+  const isFirmStaff = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'].includes(role);
+  const showCompliance = ['Admin', 'Partner', 'Manager'].includes(role);
+
+  const taskRows = useMemo(() => buildTaskRows(myTasks, deadlines), [myTasks, deadlines]);
+  const engagementRows = useMemo(() => {
+    const list = data?.activeEngagements ?? [];
+    return buildEngagementRows(list);
+  }, [data?.activeEngagements]);
+  const chartPoints = useMemo(() => buildChartPoints(chartData), [chartData]);
+  const performance = useMemo(
+    () => buildPerformanceMetrics(chartData, data?.stats),
+    [chartData, data?.stats]
+  );
+
+  const statCards = useMemo(() => {
+    const all = buildStatCards(data?.stats, data?.engagementsByStatus, chartData, {
+      isClient,
+      isIntern,
+      showClients: !isClient,
+    });
+    const withBadges = all.map((stat) => {
+      if (stat.title === 'Total Clients') {
+        return { ...stat, attentionCount: badges.incomingClients, navHref: '/clients?tab=incoming' };
+      }
+      if (stat.title === 'Total Projects') {
+        return { ...stat, attentionCount: badges.workflowAttention, navHref: '/engagements' };
+      }
+      if (stat.title === 'In Reviews') {
+        return { ...stat, attentionCount: badges.approvals, navHref: '/engagements' };
+      }
+      if (stat.title === 'Overdue Deadlines') {
+        return {
+          ...stat,
+          attentionCount: stat.value > 0 ? stat.value : 0,
+          navHref: '/compliance-calendar',
+        };
+      }
+      if (stat.title === 'Open Tasks') {
+        return { ...stat, attentionCount: badges.openClientQueries, navHref: '/clients' };
+      }
+      return stat;
+    });
+    return withBadges.filter((s) => !s.hidden).slice(0, 4);
+  }, [data?.stats, data?.engagementsByStatus, chartData, isClient, isIntern, badges]);
+
+  const tasksDueToday = useMemo(() => countTasksDueToday(myTasks), [myTasks]);
+  const upcomingThisWeek = useMemo(() => countUpcomingDeadlinesThisWeek(deadlines), [deadlines]);
+
+  const overdueCount =
+    data?.stats?.overdueDeadlines ?? deadlines.filter((d) => d.isOverdue).length;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <PageLoading className="h-64" />;
   }
 
-  const stats = data?.stats;
-  const pieData = data?.engagementsByStatus
-    ? Object.entries(data.engagementsByStatus).map(([name, value]) => ({ name, value }))
-    : [];
-
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Welcome */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">
-          Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'},{' '}
-          {user?.firstName}
-        </h1>
-        <p className="text-sm text-foreground-muted mt-1">
-          Here's your audit practice overview for today
-        </p>
-      </div>
+    <AppPageContainer>
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm text-destructive">{loadError}</p>
+          <button type="button" className="btn-primary shrink-0" onClick={() => { setLoading(true); loadDashboard(); }}>
+            Retry
+          </button>
+        </div>
+      )}
+      <DashboardWelcome
+        userName={user?.firstName || 'there'}
+        tasksDueToday={tasksDueToday || taskRows.length}
+        overdueTasks={overdueCount}
+        upcomingDeadlines={upcomingThisWeek}
+        attentionCount={badges.dashboardAttention}
+        showAttentionBadge={!isFirmLeadership}
+        showActions={!isClient}
+        onExport={() => navigate('/reports')}
+        onNew={() => navigate('/engagements')}
+      />
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Users} label="Total Clients" value={stats?.totalClients ?? 0} color="primary" />
-        <StatCard icon={Briefcase} label="Active Engagements" value={stats?.activeEngagements ?? 0} color="success" />
-        <StatCard icon={AlertTriangle} label="Overdue Deadlines" value={stats?.overdueDeadlines ?? 0} color="danger" />
-        <StatCard icon={Clock} label="Hours This Month" value={stats?.monthlyHours ?? 0} color="warning" suffix="hrs" />
-      </div>
+      {!isClient && (
+        <DashboardPriorities
+          role={role}
+          badges={badges}
+          tasksDueToday={tasksDueToday || taskRows.length}
+          overdueDeadlines={overdueCount}
+          briefingSummary={
+            briefing?.summary
+              ? {
+                  atRiskCount: briefing.summary.atRiskCount,
+                  pendingDocsCount: briefing.summary.pendingDocsCount,
+                  udinPendingCount: briefing.summary.udinPendingCount,
+                }
+              : null
+          }
+          firstAtRiskEngagementId={briefing?.engagementsAtRisk?.[0]?.id ?? null}
+        />
+      )}
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Bar Chart — Engagement Trends */}
-        <div className="card lg:col-span-2">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Engagement Trends (6 months)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} barCategoryGap={20}>
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: 'var(--color-foreground-muted)', fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--color-foreground-muted)', fontSize: 12 }} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--color-tooltip-bg)', border: '1px solid var(--color-tooltip-border)', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: 'var(--color-foreground)' }}
-                />
-                <Bar dataKey="active" fill="#0C5CAB" radius={[4, 4, 0, 0]} name="Active" />
-                <Bar dataKey="completed" fill="#10b981" radius={[4, 4, 0, 0]} name="Completed" />
-              </BarChart>
-            </ResponsiveContainer>
+      {isFirmLeadership && (
+        <div className="mb-4 sm:mb-6" data-onboard="dashboard-action-queue">
+          <DashboardActionQueue queue={actionQueue} loading={actionQueueLoading && !actionQueue} />
+        </div>
+      )}
+
+      {isPartnerAdmin && briefing && (
+        <DashboardExtraPanels
+          isLeadership={isPartnerAdmin}
+          showCompliance={false}
+          isClient={isClient}
+          briefing={briefing}
+          compliance={null}
+          openClientQueries={null}
+          recentActivity={[]}
+          briefingOnly
+        />
+      )}
+
+      {showCompliance && openClientQueries && openClientQueries.openCount > 0 && (
+        <DashboardExtraPanels
+          isLeadership={false}
+          showCompliance={false}
+          isClient={isClient}
+          briefing={null}
+          compliance={null}
+          openClientQueries={openClientQueries}
+          recentActivity={[]}
+          queriesOnly
+        />
+      )}
+
+      {(isFirmStaff && !isClient) && (
+        <div className="mb-4 sm:mb-6">
+          <DashboardTodaysTasks
+            tasks={taskRows}
+            onTaskClick={(task) => {
+              if (task.projectId && task.projectId !== 'general') {
+                navigate(engagementTasksPath(task.projectId));
+              }
+            }}
+            onBrowseEngagements={() => navigate('/engagements')}
+          />
+        </div>
+      )}
+
+      <DashboardStatsCards stats={statCards} />
+
+      {isFirmLeadership && (
+        <AdminPresenceDashboard />
+      )}
+
+      <section className="space-y-4" aria-label="Insights and activity">
+        <h2 className="text-sm font-medium text-foreground">Insights &amp; activity</h2>
+        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <DashboardEngagementsTable
+              title={isFirmLeadership ? 'All engagements' : 'My engagements'}
+              engagements={engagementRows}
+              onRowClick={(row) => navigate(engagementHubPath(row.id, 'workflow'))}
+            />
+          </div>
+          <div>
+            <DashboardPerformanceChart
+              title="Performance"
+              score={performance.score}
+              changeLabel={performance.changeLabel}
+              data={chartPoints}
+            />
           </div>
         </div>
 
-        {/* Pie Chart — Status Distribution */}
-        <div className="card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Status Distribution</h3>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={70}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {pieData.map((entry) => (
-                    <Cell key={entry.name} fill={STATUS_COLORS[entry.name] || '#6b7280'} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: 'var(--color-tooltip-bg)', border: '1px solid var(--color-tooltip-border)', borderRadius: 8, fontSize: 12 }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-wrap gap-3 mt-2">
-            {pieData.map((entry) => (
-              <div key={entry.name} className="flex items-center gap-1.5 text-xs">
-                <div className="w-2 h-2 rounded-full" style={{ background: STATUS_COLORS[entry.name] }} />
-                <span className="text-foreground-muted">{entry.name}</span>
-                <span className="text-foreground font-medium">{entry.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Active Engagements + Deadlines */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Active Engagements */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-foreground">Active Engagements</h3>
-            <button
-              onClick={() => navigate('/engagements')}
-              className="text-xs text-primary hover:underline flex items-center gap-1"
-            >
-              View all <ChevronRight size={12} />
-            </button>
-          </div>
-          <div className="space-y-2">
-            {data?.activeEngagements?.slice(0, 5)?.map((eng) => (
-              <div
-                key={eng.id}
-                onClick={() => navigate(`/engagements/${eng.id}`)}
-                className="flex items-center justify-between p-3 rounded-lg bg-surface hover:bg-hover-bg cursor-pointer transition-colors"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{eng.title}</p>
-                  <p className="text-xs text-foreground-muted">{eng.client?.name} • FY {eng.financialYear}</p>
-                </div>
-                <span className={`badge-${eng.status === 'Fieldwork' ? 'warning' : eng.status === 'Review' ? 'primary' : 'neutral'}`}>
-                  {eng.status}
-                </span>
-              </div>
-            ))}
-            {(!data?.activeEngagements || data.activeEngagements.length === 0) && (
-              <p className="text-sm text-foreground-muted text-center py-4">No active engagements</p>
-            )}
-          </div>
-        </div>
-
-        {/* Upcoming Deadlines */}
-        <div className="card">
-          <h3 className="text-sm font-semibold text-foreground mb-4">Upcoming Deadlines</h3>
-          <div className="space-y-2">
-            {deadlines.slice(0, 6).map((dl) => (
-              <div
-                key={dl.id}
-                className={`flex items-center justify-between p-3 rounded-lg ${
-                  dl.isOverdue ? 'bg-danger/5 border border-danger/20' : 'bg-surface'
-                }`}
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{dl.title}</p>
-                  <p className="text-xs text-foreground-muted">
-                    {dl.engagement?.client?.name} • {dl.engagement?.title}
-                  </p>
-                </div>
-                <div className="text-right shrink-0 ml-3">
-                  <p className={`text-xs font-medium ${dl.isOverdue ? 'text-danger' : dl.daysRemaining && dl.daysRemaining <= 7 ? 'text-warning' : 'text-foreground-muted'}`}>
-                    {dl.isOverdue ? `${Math.abs(dl.daysRemaining || 0)}d overdue` : `${dl.daysRemaining}d left`}
-                  </p>
-                  <p className="text-[10px] text-foreground-muted">
-                    {new Date(dl.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                  </p>
-                </div>
-              </div>
-            ))}
-            {deadlines.length === 0 && (
-              <p className="text-sm text-foreground-muted text-center py-4">No upcoming deadlines</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="card">
-        <h3 className="text-sm font-semibold text-foreground mb-4">Recent Activity</h3>
-        <div className="space-y-3">
-          {data?.recentActivity?.slice(0, 10)?.map((activity) => (
-            <div key={activity.id} className="flex items-start gap-3">
-              <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-[10px] font-bold shrink-0 mt-0.5">
-                {activity.user.initials}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm text-foreground-secondary">
-                  <span className="font-medium text-foreground">{activity.user.firstName} {activity.user.lastName}</span>{' '}
-                  {activity.action} {activity.entity}
-                </p>
-                <p className="text-xs text-foreground-muted">
-                  {new Date(activity.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
-                </p>
-              </div>
-            </div>
-          ))}
-          {(!data?.recentActivity || data.recentActivity.length === 0) && (
-            <p className="text-sm text-foreground-muted text-center py-4">No recent activity</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Stat Card Component ───
-function StatCard({ icon: Icon, label, value, color, suffix }: {
-  icon: React.ElementType;
-  label: string;
-  value: number;
-  color: 'primary' | 'success' | 'danger' | 'warning';
-  suffix?: string;
-}) {
-  const colors = {
-    primary: 'bg-primary/10 text-primary',
-    success: 'bg-success/10 text-success',
-    danger: 'bg-danger/10 text-danger',
-    warning: 'bg-warning/10 text-warning',
-  };
-  return (
-    <div className="card flex items-center gap-4">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colors[color]}`}>
-        <Icon size={20} />
-      </div>
-      <div>
-        <p className="text-xs text-foreground-muted">{label}</p>
-        <p className="text-xl font-bold text-foreground">
-          {value.toLocaleString('en-IN')}{suffix && <span className="text-sm font-normal text-foreground-muted ml-1">{suffix}</span>}
-        </p>
-      </div>
-    </div>
+        <DashboardExtraPanels
+          isLeadership={false}
+          showCompliance={showCompliance}
+          isClient={isClient}
+          briefing={null}
+          compliance={compliance}
+          openClientQueries={null}
+          recentActivity={data?.recentActivity ?? []}
+        />
+      </section>
+    </AppPageContainer>
   );
 }

@@ -1,0 +1,9 @@
+# Local dev: expose Typesense + Tika to the host (npm run dev on port 3001).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d typesense tika
+services:
+  typesense:
+    ports:
+      - "8108:8108"
+  tika:
+    ports:
+      - "9998:9998"

@@ -1,23 +1,22 @@
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useGlobalChatOptional } from '../context/GlobalChatContext';
 import { DynamicIslandChat, type IslandChatRoom } from './ui/dynamic-island-chat';
-import { TeamsMessageToastStack } from './ui/teams-message-toast';
 import { getRoomName, getRoomSubtitle, type ChatRoom } from '../lib/chatHelpers';
 
 export default function GlobalChatShell() {
   const chat = useGlobalChatOptional();
   const { user } = useAuth();
+  const location = useLocation();
+  const onMessagesPage =
+    location.pathname === '/messages' || location.pathname === '/client/messages';
+
+  if (onMessagesPage) return null;
 
   return (
     <>
       {chat?.chatEnabled && (
         <>
-      <TeamsMessageToastStack
-        toasts={chat.toasts}
-        onDismiss={chat.dismissToast}
-        onOpen={chat.openFromToast}
-      />
-
       <DynamicIslandChat
         rooms={chat!.rooms as IslandChatRoom[]}
         activeRoomId={chat!.activeRoomId}

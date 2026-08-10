@@ -1,13 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Clock, MapPin, Calendar, CheckCircle2, XCircle, LogIn, LogOut,
-  Search, ChevronLeft, ChevronRight
-} from 'lucide-react';
+  Clock, MapPin, Calendar, CheckCircle as CheckCircle2, XCircle, SignIn as LogIn, SignOut as LogOut,
+  MagnifyingGlass as Search, CaretLeft as ChevronLeft, CaretRight as ChevronRight, Plus, X, WarningCircle as AlertCircle
+} from '@phosphor-icons/react';
 import api from '../services/api';
 import type { Attendance, LeaveRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { tryAttendanceCheckIn } from '../lib/attendancePopup';
+import { hoursBetween } from '../lib/attendanceDates';
+import { AppPageContainer } from '../components/layout/AppPageContainer';
+import PageHeader from '../components/layout/PageHeader';
+import { PanelCard, MetricCard } from '../components/layout/PanelCard';
+import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
+import { Button } from '@/components/ui/button';
+import { appAlert } from '@/context/AppDialogContext';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+/** Must match server leaveCreateSchema */
+const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Holiday', 'Exam', 'Study'] as const;
 
 export default function AttendancePage() {
   const { user } = useAuth();
@@ -17,35 +28,74 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [todayRecord, setTodayRecord] = useState<Attendance | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
-  const [curMonth, setCurMonth] = useState(() => new Date().getMonth() + 1);
-  const [curYear, setCurYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return { month: d.getMonth() + 1, year: d.getFullYear() };
+  });
+  const curMonth = calendarMonth.month;
+  const curYear = calendarMonth.year;
   const [summary, setSummary] = useState<{ totalDays: number; totalHours: number; presentDays: number; lateDays: number } | null>(null);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', type: 'Casual', reason: '' });
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [todayLabel, setTodayLabel] = useState('');
 
-  const fetchAll = () => {
-    setLoading(true);
-    Promise.all([
-      api.get('/attendance').then(({ data }) => {
-        setRecords(data);
-        const today = new Date().toISOString().split('T')[0];
-        const t = data.find((r: Attendance) => r.date?.startsWith(today) || r.checkIn?.startsWith(today));
-        setTodayRecord(t || null);
-      }),
-      api.get('/attendance/leaves').then(({ data }) => setLeaves(data)),
-      api.get(`/attendance/summary?month=${curYear}-${curMonth}`).then(({ data }) => setSummary(data)),
-    ])
-      .catch(console.error)
-      .finally(() => setLoading(false));
+  useEffect(() => {
+    setTodayLabel(
+      new Date().toLocaleDateString('en-IN', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    );
+  }, []);
+
+  const loadTodayRecord = async () => {
+    const { data } = await api.get<Attendance | null>('/attendance/me/today');
+    setTodayRecord(data);
   };
 
-  useEffect(() => { fetchAll(); }, [curMonth, curYear]);
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [attRes, leavesRes, summaryRes] = await Promise.all([
+        api.get<Attendance[]>('/attendance'),
+        api.get<LeaveRequest[]>('/attendance/leaves'),
+        api.get(`/attendance/summary?month=${curYear}-${String(curMonth).padStart(2, '0')}`),
+      ]);
+      setRecords(attRes.data);
+      setLeaves(leavesRes.data);
+      setSummary(summaryRes.data);
+      await loadTodayRecord();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Could not load attendance. Please refresh.';
+      await appAlert(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [curMonth, curYear]);
+
+  useEffect(() => {
+    void fetchAll();
+  }, [fetchAll]);
 
   const handleCheckIn = async () => {
+    if (!user?.id) return;
     setCheckingIn(true);
     try {
-      await api.post('/attendance/check-in', { method: 'manual' });
-      fetchAll();
-    } catch (e) {
-      console.error(e);
+      await tryAttendanceCheckIn(user.id, 'manual', {
+        skipIfAlreadyDone: false,
+        forcePopup: true,
+      });
+      await fetchAll();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Check-in failed. Please try again.';
+      await appAlert(msg);
     } finally {
       setCheckingIn(false);
     }
@@ -54,95 +104,206 @@ export default function AttendancePage() {
   const handleCheckOut = async () => {
     setCheckingIn(true);
     try {
-      await api.post('/attendance/check-out');
-      fetchAll();
-    } catch (e) {
-      console.error(e);
+      const { data } = await api.post<Attendance & { hoursWorked?: number }>('/attendance/check-out');
+      setTodayRecord({
+        ...data,
+        hoursWorked: data.hoursWorked ?? hoursBetween(data.checkIn, data.checkOut) ?? undefined,
+      });
+      await fetchAll();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Check-out failed. Please try again.';
+      await appAlert(msg);
     } finally {
       setCheckingIn(false);
     }
   };
 
+  const handleSubmitLeave = async () => {
+    if (!leaveForm.startDate || !leaveForm.endDate) return;
+    setSubmittingLeave(true);
+    try {
+      await api.post('/attendance/leaves', leaveForm);
+      setShowLeaveForm(false);
+      setLeaveForm({ startDate: '', endDate: '', type: 'Casual', reason: '' });
+      await appAlert({ title: 'Leave submitted', message: 'Your leave request was sent for approval.' });
+      await fetchAll();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Could not submit leave request.';
+      await appAlert(msg);
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
+
+  const handleApproveLeave = async (id: string, action: 'approve' | 'reject') => {
+    const role = user?.role || '';
+    let status: string;
+    if (action === 'reject') {
+      status = 'Rejected';
+    } else if (['Partner', 'Admin'].includes(role)) {
+      status = 'Approved';
+    } else {
+      status = 'Manager Approved';
+    }
+    try {
+      await api.patch(`/attendance/leaves/${id}`, { status });
+      await fetchAll();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Could not update leave request.';
+      await appAlert(msg);
+    }
+  };
+
   const prevMonth = () => {
-    if (curMonth === 1) { setCurMonth(12); setCurYear(curYear - 1); }
-    else setCurMonth(curMonth - 1);
+    setCalendarMonth(({ month, year }) =>
+      month === 1 ? { month: 12, year: year - 1 } : { month: month - 1, year }
+    );
   };
   const nextMonth = () => {
-    if (curMonth === 12) { setCurMonth(1); setCurYear(curYear + 1); }
-    else setCurMonth(curMonth + 1);
+    setCalendarMonth(({ month, year }) =>
+      month === 12 ? { month: 1, year: year + 1 } : { month: month + 1, year }
+    );
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Attendance</h1>
-          <p className="text-sm text-foreground-muted">{MONTHS[curMonth - 1]} {curYear}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-hover-bg"><ChevronLeft size={16} className="text-foreground-muted" /></button>
-          <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-hover-bg"><ChevronRight size={16} className="text-foreground-muted" /></button>
-        </div>
-      </div>
+    <AppPageContainer className="space-y-6">
+      <PageHeader
+        title="Attendance"
+        description={`${MONTHS[curMonth - 1]} ${curYear}`}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={prevMonth} aria-label="Previous month">
+              <ChevronLeft size={16} />
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={nextMonth} aria-label="Next month">
+              <ChevronRight size={16} />
+            </Button>
+          </div>
+        }
+      />
 
-      {/* Today's status */}
-      <div className="card flex items-center justify-between">
-        <div>
-          <p className="text-sm text-foreground-muted">Today — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-          {todayRecord ? (
-            <div className="flex items-center gap-4 mt-1">
-              <span className="text-sm text-foreground flex items-center gap-1">
-                <LogIn size={14} className="text-success" />
-                {todayRecord.checkIn ? new Date(todayRecord.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+      <PanelCard
+        title="Today"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link to="/leave-stipend">
+                <Plus size={16} className="mr-1" /> Apply leave
+              </Link>
+            </Button>
+            {!todayRecord ? (
+              <Button type="button" size="sm" disabled={checkingIn} onClick={() => void handleCheckIn()}>
+                <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check in'}
+              </Button>
+            ) : !todayRecord.checkOut ? (
+              <Button type="button" size="sm" variant="destructive" disabled={checkingIn} onClick={() => void handleCheckOut()}>
+                <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check out'}
+              </Button>
+            ) : (
+              <ApprovalStatusBadge status="Approved" />
+            )}
+          </div>
+        }
+      >
+        <p className="mb-2 text-sm text-muted-foreground">
+          {todayLabel || '\u00a0'}
+        </p>
+        {todayRecord ? (
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="flex items-center gap-1 text-sm text-foreground">
+              <LogIn size={14} className="text-success" />
+              {todayRecord.checkIn ? new Date(todayRecord.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+            </span>
+            {todayRecord.checkOut && (
+              <span className="flex items-center gap-1 text-sm text-foreground">
+                <LogOut size={14} className="text-danger" />
+                {new Date(todayRecord.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </span>
-              {todayRecord.checkOut && (
-                <span className="text-sm text-foreground flex items-center gap-1">
-                  <LogOut size={14} className="text-danger" />
-                  {new Date(todayRecord.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-              {todayRecord.hoursWorked != null && (
-                <span className="text-sm text-foreground-muted">{Number(todayRecord.hoursWorked).toFixed(1)} hrs</span>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-foreground-muted mt-1">Not checked in yet</p>
-          )}
-        </div>
-        <div>
-          {!todayRecord ? (
-            <button onClick={handleCheckIn} disabled={checkingIn} className="btn-primary flex items-center gap-2 disabled:opacity-50">
-              <LogIn size={16} /> {checkingIn ? 'Processing...' : 'Check In'}
-            </button>
-          ) : !todayRecord.checkOut ? (
-            <button onClick={handleCheckOut} disabled={checkingIn} className="btn-danger flex items-center gap-2 disabled:opacity-50">
-              <LogOut size={16} /> {checkingIn ? 'Processing...' : 'Check Out'}
-            </button>
-          ) : (
-            <span className="badge-success flex items-center gap-1"><CheckCircle2 size={12} /> Done for today</span>
-          )}
-        </div>
-      </div>
+            )}
+            {(todayRecord.hoursWorked != null || (todayRecord.checkIn && todayRecord.checkOut)) && (
+              <span className="text-sm text-muted-foreground">
+                {Number(todayRecord.hoursWorked ?? hoursBetween(todayRecord.checkIn, todayRecord.checkOut) ?? 0).toFixed(1)} hrs
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Not checked in yet</p>
+        )}
+      </PanelCard>
 
-      {/* Summary cards */}
       {summary && (
         <div className="grid grid-cols-2 gap-4">
-          <div className="card text-center">
-            <p className="text-3xl font-bold text-foreground">{summary.presentDays ?? summary.totalDays}</p>
-            <p className="text-xs text-foreground-muted mt-1">Days Present</p>
-          </div>
-          <div className="card text-center">
-            <p className="text-3xl font-bold text-foreground">{summary.totalHours && summary.presentDays ? (summary.totalHours / summary.presentDays).toFixed(1) : '0'}</p>
-            <p className="text-xs text-foreground-muted mt-1">Avg Hours/Day</p>
-          </div>
+          <MetricCard title="Days present" value={summary.presentDays ?? summary.totalDays} />
+          <MetricCard
+            title="Avg hours/day"
+            value={summary.totalHours && summary.presentDays ? (summary.totalHours / summary.presentDays).toFixed(1) : '0'}
+          />
         </div>
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface rounded-lg p-1 w-fit">
-        <button onClick={() => setTab('attendance')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'attendance' ? 'bg-card-hover text-foreground' : 'text-foreground-muted hover:text-foreground-secondary'}`}>Records</button>
-        <button onClick={() => setTab('leaves')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'leaves' ? 'bg-card-hover text-foreground' : 'text-foreground-muted hover:text-foreground-secondary'}`}>Leave Requests</button>
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 bg-surface rounded-lg p-1 w-fit">
+          <button type="button" onClick={() => setTab('attendance')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'attendance' ? 'bg-card-hover text-foreground' : 'text-muted-foreground hover:text-foreground-secondary'}`}>Records</button>
+          <button type="button" onClick={() => setTab('leaves')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'leaves' ? 'bg-card-hover text-foreground' : 'text-muted-foreground hover:text-foreground-secondary'}`}>Leave Requests</button>
+        </div>
+        {tab === 'leaves' && (
+          <button type="button" onClick={() => setShowLeaveForm(true)} className="btn-primary flex items-center gap-2 text-sm">
+            <Plus size={14} /> Apply Leave
+          </button>
+        )}
       </div>
+
+      {/* Leave Request Form Modal */}
+      {showLeaveForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="card w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-foreground">Apply for Leave</h3>
+              <button type="button" onClick={() => setShowLeaveForm(false)} className="p-1 rounded hover:bg-hover-bg"><X size={16} /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="leave-type" className="block text-sm text-muted-foreground mb-1">Leave Type</label>
+                <select id="leave-type" aria-label="Leave Type" value={leaveForm.type} onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value })} className="input w-full">
+                  {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="stat-grid-2">
+                <div>
+                  <label htmlFor="leave-from-date" className="block text-sm text-muted-foreground mb-1">From</label>
+                  <input id="leave-from-date" type="date" aria-label="From" value={leaveForm.startDate} onChange={(e) => setLeaveForm({ ...leaveForm, startDate: e.target.value })} className="input w-full" />
+                </div>
+                <div>
+                  <label htmlFor="leave-to-date" className="block text-sm text-muted-foreground mb-1">To</label>
+                  <input id="leave-to-date" type="date" aria-label="To" value={leaveForm.endDate} onChange={(e) => setLeaveForm({ ...leaveForm, endDate: e.target.value })} className="input w-full" />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="leave-reason" className="block text-sm text-muted-foreground mb-1">Reason</label>
+                <textarea id="leave-reason" aria-label="Reason" value={leaveForm.reason} onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} className="input w-full" rows={3} placeholder="Optional reason..." />
+              </div>
+              {leaveForm.startDate && leaveForm.endDate && (
+                <p className="text-xs text-muted-foreground">
+                  Duration: {Math.max(1, Math.ceil((new Date(leaveForm.endDate).getTime() - new Date(leaveForm.startDate).getTime()) / (1000*60*60*24)) + 1)} day(s)
+                </p>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowLeaveForm(false)} className="btn-secondary text-sm">Cancel</button>
+                <button type="button" onClick={handleSubmitLeave} disabled={submittingLeave || !leaveForm.startDate || !leaveForm.endDate} className="btn-primary text-sm disabled:opacity-50">
+                  {submittingLeave ? 'Submitting...' : 'Submit Request'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-32">
@@ -153,39 +314,76 @@ export default function AttendancePage() {
           {records.map(r => (
             <div key={r.id} className="card flex items-center justify-between py-3">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Clock size={14} className="text-primary" />
+                <div className="icon-well-sm">
+                  <Clock size={14} />
                 </div>
                 <div>
                   <p className="text-sm text-foreground">{r.date ? new Date(r.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</p>
-                  <p className="text-xs text-foreground-muted">{r.method || 'manual'}</p>
+                  <p className="text-xs text-muted-foreground">{r.method || 'manual'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4 text-sm">
-                <span className="text-foreground-muted">{r.checkIn ? new Date(r.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                <span className="text-foreground-muted">→</span>
-                <span className="text-foreground-muted">{r.checkOut ? new Date(r.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                <span className="text-foreground-muted w-14 text-right">{r.hoursWorked != null ? Number(r.hoursWorked).toFixed(1) : '—'} h</span>
+                <span className="text-muted-foreground">{r.checkIn ? new Date(r.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                <span className="text-muted-foreground">→</span>
+                <span className="text-muted-foreground">{r.checkOut ? new Date(r.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                <span className="text-muted-foreground w-14 text-right">
+                  {r.hoursWorked != null
+                    ? Number(r.hoursWorked).toFixed(1)
+                    : hoursBetween(r.checkIn, r.checkOut)?.toFixed(1) ?? '—'}{' '}
+                  h
+                </span>
               </div>
             </div>
           ))}
-          {records.length === 0 && <p className="text-center text-foreground-muted py-8">No attendance records this month</p>}
+          {records.length === 0 && <p className="text-center text-muted-foreground py-8">No attendance records this month</p>}
         </div>
       ) : (
         <div className="space-y-2">
           {leaves.map(l => (
             <div key={l.id} className="card flex items-center justify-between">
               <div>
-                <p className="text-sm text-foreground">{l.type} Leave</p>
-                <p className="text-xs text-foreground-muted">{new Date(l.fromDate).toLocaleDateString('en-IN')} — {new Date(l.toDate).toLocaleDateString('en-IN')}</p>
-                {l.reason && <p className="text-xs text-foreground-muted mt-1">{l.reason}</p>}
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-foreground font-medium">{l.type} Leave</p>
+                  {(l as any).user && (
+                    <span className="text-xs text-muted-foreground">— {(l as any).user.firstName} {(l as any).user.lastName}</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{new Date(l.fromDate).toLocaleDateString('en-IN')} — {new Date(l.toDate).toLocaleDateString('en-IN')}</p>
+                {l.reason && <p className="text-xs text-muted-foreground mt-1">{l.reason}</p>}
               </div>
-              <span className={l.status === 'Approved' ? 'badge-success' : l.status === 'Rejected' ? 'badge-danger' : 'badge-warning'}>{l.status}</span>
+              <div className="flex items-center gap-2">
+                <ApprovalStatusBadge status={l.status} />
+                {((l.status === 'Pending' &&
+                  ['Partner', 'Manager', 'Admin'].includes(user?.role || '')) ||
+                  (l.status === 'Manager Approved' &&
+                    ['Partner', 'Admin'].includes(user?.role || ''))) && (
+                  <div className="flex gap-1 ml-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleApproveLeave(l.id, 'approve')}
+                      className="p-1.5 rounded-lg hover:bg-green-500/10 text-green-500"
+                      title={
+                        l.status === 'Manager Approved' ? 'Final approve' : 'Approve'
+                      }
+                    >
+                      <CheckCircle2 size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleApproveLeave(l.id, 'reject')}
+                      className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-500"
+                      title="Reject"
+                    >
+                      <XCircle size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
-          {leaves.length === 0 && <p className="text-center text-foreground-muted py-8">No leave requests</p>}
+          {leaves.length === 0 && <p className="text-center text-muted-foreground py-8">No leave requests</p>}
         </div>
       )}
-    </div>
+    </AppPageContainer>
   );
 }

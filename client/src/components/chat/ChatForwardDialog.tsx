@@ -49,7 +49,7 @@ export default function ChatForwardDialog({
 
   const preview =
     message?.type === 'FILE'
-      ? `📎 ${message.fileName || 'Attachment'}`
+      ? `Attachment: ${message.fileName || 'file'}`
       : message?.content?.slice(0, 80) || 'Message';
 
   return (

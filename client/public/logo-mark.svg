@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="AuditIQ">
+  <defs>
+    <linearGradient id="aq-g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a6fd4"/>
+      <stop offset="1" stop-color="#0c5cab"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#aq-g)"/>
+  <path d="M8 24V10h3.6l4.2 6.8L20.2 10H24v14h-2.6v-7.6L17.2 24h-2l-4.4-7.6V24H8z" fill="#fff"/>
+  <path d="M22 20.5l1.8 3H19.5l2.8-4.4 1.6-2.6h3.2l-1.6 1.8z" fill="#bfdbfe"/>
+</svg>

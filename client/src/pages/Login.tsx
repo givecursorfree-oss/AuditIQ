@@ -1,7 +1,44 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Eye, EyeOff, ArrowRight, ShieldCheck, Bot, KeyRound } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { Eye, EyeSlash as EyeOff, ArrowRight, ShieldCheck, Key as KeyRound } from '@phosphor-icons/react';
+import { LiquidGlassCard } from '@/components/ui/liquid-glass-card';
 import { useAuth } from '../context/AuthContext';
+import { useAppConfig } from '../hooks/useAppConfig';
+import { isAttendanceEligible } from '../lib/attendancePopup';
+import AuditIQLogo from '@/components/brand/AuditIQLogo';
+
+const LOGIN_FEATURE_IMAGES = {
+  auditLifecycle:
+    'https://i.ibb.co/7dmX2jYK/xaf-Qu-Lh-FBDf-QTe-Kat-Um-OAlglx-UQ.avif',
+  documentSearch:
+    'https://i.ibb.co/HpfP0Jw9/Gemini-Generated-Image-9csajt9csajt9csa.png',
+} as const;
+
+const LOGIN_COPYRIGHT_YEAR = new Date().getFullYear();
+
+function LoginFeature({
+  imageSrc,
+  imageAlt,
+  title,
+  description,
+}: {
+  imageSrc: string;
+  imageAlt: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-5">
+      <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/15 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-sm sm:size-20">
+        <img src={imageSrc} alt={imageAlt} className="size-full object-cover" loading="lazy" />
+      </div>
+      <div className="min-w-0 pt-1">
+        <h3 className="text-base font-semibold tracking-tight text-white sm:text-lg">{title}</h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-300/90">{description}</p>
+      </div>
+    </div>
+  );
+}
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -10,42 +47,103 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [infoMsg, setInfoMsg] = useState('');
-  const { login } = useAuth();
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [preAuthToken, setPreAuthToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState('');
+  const { login, verifyTwoFactor } = useAuth();
+  const { allowStaffRegistration } = useAppConfig();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const onDismiss = () => {
+      if (pendingPath) {
+        navigate(pendingPath);
+        setPendingPath(null);
+      }
+    };
+    window.addEventListener('auditiq:attendance-popup-dismissed', onDismiss);
+    return () => window.removeEventListener('auditiq:attendance-popup-dismissed', onDismiss);
+  }, [pendingPath, navigate]);
+
+  useEffect(() => {
+    if (searchParams.get('verified') === '1') {
+      setInfoMsg('Your email has been verified. You can now sign in.');
+    }
+    if (searchParams.get('registered') === '1') {
+      setInfoMsg('Registration submitted. Check your email if verification is required, then sign in.');
+    }
+    if (searchParams.get('session') === 'expired') {
+      setInfoMsg('Your session has expired for security. Please log in again.');
+    }
+  }, [searchParams]);
+
+  const finishLogin = (loggedInUser: { id?: string; role: string }) => {
+    const path = loggedInUser.role === 'Client' ? '/client/dashboard' : '/';
+    if (loggedInUser.id && isAttendanceEligible(loggedInUser.role)) {
+      setPendingPath(path);
+      return;
+    }
+    navigate(path);
+  };
+
+  const extractError = (err: unknown): string => {
+    const axErr = err as { response?: { status?: number; data?: { error?: string } }; code?: string; message?: string };
+    if (axErr?.response?.status === 429) {
+      return 'Too many requests — wait a minute, refresh the page, or restart the dev server, then try again.';
+    }
+    const data = axErr?.response?.data as { error?: string; code?: string } | undefined;
+    return data?.error
+      || (axErr?.code === 'ERR_NETWORK' ? 'Cannot connect to server. Please ensure the backend is running on port 3001.' : '')
+      || axErr?.message
+      || 'Login failed';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfoMsg('');
     setLoading(true);
     try {
-      await login(email, password);
-      navigate('/');
+      const result = await login(email, password);
+      if (result.kind === '2fa-required') {
+        setPreAuthToken(result.preAuthToken);
+        setTotpCode('');
+        return;
+      }
+      finishLogin(result.user);
     } catch (err: unknown) {
-      const axErr = err as { response?: { data?: { error?: string } }; code?: string; message?: string };
-      const message = axErr?.response?.data?.error
-        || (axErr?.code === 'ERR_NETWORK' ? 'Cannot connect to server. Please ensure the backend is running on port 3001.' : null)
-        || axErr?.message
-        || 'Login failed';
-      setError(message);
+      setError(extractError(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const demoUsers = [
-    { role: 'Partner', email: 'rajesh@auditiq.in', color: '#0058bc' },
-    { role: 'Manager', email: 'priya@auditiq.in', color: '#7c3aed' },
-    { role: 'Staff', email: 'ankit@auditiq.in', color: '#059669' },
-    { role: 'Staff', email: 'neha@auditiq.in', color: '#059669' },
-    { role: 'Intern', email: 'rohan@auditiq.in', color: '#d97706' },
-    { role: 'Client', email: 'vikram@reliance.in', color: '#6b7280' },
-  ];
+  const handleTwoFactorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!preAuthToken) return;
+    setError('');
+    setLoading(true);
+    try {
+      const loggedInUser = await verifyTwoFactor(preAuthToken, totpCode);
+      finishLogin(loggedInUser);
+    } catch (err: unknown) {
+      const message = extractError(err);
+      setError(message);
+      // Pre-auth session expired — back to password step
+      if (message.toLowerCase().includes('expired')) {
+        setPreAuthToken(null);
+        setTotpCode('');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row overflow-hidden" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-
+    <div className="login-shell min-h-screen flex flex-col md:flex-row overflow-hidden" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
       {/* ── LEFT: Branding Panel ── */}
-      <section className="relative hidden md:flex md:w-1/2 lg:w-3/5 items-center justify-center p-12 overflow-hidden bg-[#1a1c1d]">
+      <section className="brand-panel relative hidden md:flex md:w-1/2 lg:w-3/5 items-center justify-center p-12 overflow-hidden">
         {/* Background image + overlay */}
         <div className="absolute inset-0 z-0">
           <img
@@ -53,82 +151,111 @@ export default function Login() {
             alt=""
             className="w-full h-full object-cover opacity-40 grayscale contrast-125"
           />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to top right, #1a1c1d 40%, rgba(26,28,29,0.75) 70%, rgba(0,88,188,0.28) 100%)' }} />
+          <div className="absolute inset-0 brand-panel-overlay" />
         </div>
 
         {/* Content */}
         <div className="relative z-10 w-full max-w-xl">
           <div className="mb-16">
-            <img src="/logo.png" alt="AuditIQ" className="h-48 md:h-56 w-auto object-contain mb-8 brightness-0 invert drop-shadow-2xl" />
-            <div className="h-1.5 w-24 rounded-full mb-8 bg-[#0070eb]" />
-            <p className="text-2xl font-light text-[#e2e2e4] leading-relaxed tracking-tight max-w-md">
-              Purpose-built for Indian CA firms — manage every audit engagement from planning and fieldwork to reporting, with built-in ICAI & GST compliance intelligence.
+            <AuditIQLogo forceTheme="dark" className="h-48 md:h-56 w-auto max-w-md object-contain mb-8" />
+            <div className="brand-panel-accent" />
+            <p className="text-2xl font-light text-slate-200 leading-relaxed tracking-tight max-w-md">
+              Purpose-built for Indian CA firms, manage every audit engagement from planning and fieldwork to reporting, with built-in ICAI and GST compliance intelligence.
             </p>
           </div>
 
-          {/* Glass card */}
-          <div
-            className="rounded-xl p-8 flex flex-col gap-6"
-            style={{
-              background: 'rgba(255,255,255,0.08)',
-              backdropFilter: 'blur(24px)',
-              WebkitBackdropFilter: 'blur(24px)',
-              border: '1px solid rgba(255,255,255,0.10)',
-            }}
+          <LiquidGlassCard
+            glassSize="lg"
+            className="rounded-2xl border border-white/15 ring-1 ring-white/10"
           >
-            <div className="flex items-start gap-4">
-              <div className="p-3 rounded-lg flex-shrink-0" style={{ background: 'rgba(0,88,188,0.22)' }}>
-                <ShieldCheck size={20} className="text-[#adc6ff]" />
-              </div>
-              <div>
-                <h3 className="text-white font-semibold text-lg">ICAI-Compliant Audit Lifecycle</h3>
-                <p className="text-[#c1c6d7] text-sm mt-1">End-to-end engagement management built for Indian CA firms — Statutory, Tax, GST &amp; Internal audits.</p>
-              </div>
+            <div className="flex flex-col gap-6">
+              <LoginFeature
+                imageSrc={LOGIN_FEATURE_IMAGES.auditLifecycle}
+                imageAlt="ICAI-compliant audit lifecycle"
+                title="ICAI-Compliant Audit Lifecycle"
+                description="End-to-end engagement management built for Indian CA firms, statutory, tax, GST and internal audits."
+              />
+              <div className="h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" aria-hidden />
+              <LoginFeature
+                imageSrc={LOGIN_FEATURE_IMAGES.documentSearch}
+                imageAlt="Smart document search"
+                title="Smart Document Search"
+                description="Find any file by name or content inside PDFs and Office documents, synced from Google Drive."
+              />
             </div>
-            <div className="flex items-start gap-4">
-              <div className="p-3 rounded-lg flex-shrink-0" style={{ background: 'rgba(0,88,188,0.22)' }}>
-                <Bot size={20} className="text-[#adc6ff]" />
-              </div>
-              <div>
-                <h3 className="text-white font-semibold text-lg">AI-Powered Copilot</h3>
-                <p className="text-[#c1c6d7] text-sm mt-1">Intelligent assistant for SA references, Form 3CD, materiality calculations &amp; regulatory guidance.</p>
-              </div>
-            </div>
-          </div>
+          </LiquidGlassCard>
         </div>
 
         {/* Copyright */}
         <div className="absolute bottom-10 left-12">
-          <span className="text-[0.65rem] tracking-[0.2em] uppercase font-bold text-[#717786]">© 2026 AuditIQ Enterprise Solutions</span>
+          <span className="text-[0.65rem] tracking-[0.2em] uppercase font-bold text-slate-500">© {LOGIN_COPYRIGHT_YEAR} AuditIQ Enterprise Solutions</span>
         </div>
       </section>
 
       {/* ── RIGHT: Login Form ── */}
-      <section className="flex-1 flex flex-col bg-white justify-center items-center px-6 py-12 sm:px-12 md:px-14 lg:px-20 overflow-y-auto">
+      <section className="flex-1 flex flex-col bg-surface justify-center items-center px-6 py-12 sm:px-12 md:px-14 lg:px-20 overflow-y-auto">
         <div className="w-full max-w-md">
 
           {/* Mobile-only logo */}
           <div className="md:hidden mb-10 flex justify-center">
-            <img src="/logo.png" alt="AuditIQ" className="h-28 w-auto object-contain" />
+            <AuditIQLogo className="h-12 w-auto object-contain" />
           </div>
 
           <header className="mb-10 text-center sm:text-left">
-            <h2 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-2">Sign In</h2>
-            <p className="text-base text-gray-500 leading-relaxed">Welcome back. Please enter your credentials to access your dashboard.</p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
+              {preAuthToken ? 'Two-Factor Authentication' : 'Sign In'}
+            </h1>
+            <p className="text-base text-foreground-muted leading-relaxed">
+              {preAuthToken
+                ? 'Enter the 6-digit code from your authenticator app to complete sign-in.'
+                : 'Welcome back. Please enter your credentials to access your dashboard.'}
+            </p>
           </header>
 
-          {error && (
-            <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm font-medium">
-              {error}
-            </div>
-          )}
+          {error && <div className="mb-8 alert-danger" role="alert">{error}</div>}
           {infoMsg && (
-            <div className="mb-8 p-4 bg-blue-50 border border-blue-100 rounded-xl text-blue-700 text-sm font-medium flex justify-between items-start">
+            <output className="mb-8 alert-info flex list-none justify-between items-start gap-3">
               <span>{infoMsg}</span>
-              <button type="button" onClick={() => setInfoMsg('')} className="ml-4 text-blue-400 hover:text-blue-700 font-bold leading-none flex-shrink-0 transition-colors">×</button>
-            </div>
+              <button type="button" onClick={() => setInfoMsg('')} aria-label="Dismiss message" className="shrink-0 text-primary/70 hover:text-primary font-bold leading-none transition-colors">×</button>
+            </output>
           )}
 
+          {preAuthToken ? (
+            <form onSubmit={handleTwoFactorSubmit} className="space-y-5">
+              <div className="relative">
+                <input
+                  type="text"
+                  id="login-totp"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder=" "
+                  required
+                  autoFocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  className="input-floating text-center text-2xl tracking-[0.5em] font-mono"
+                />
+                <label htmlFor="login-totp" className="input-floating-label">
+                  Authentication code
+                </label>
+              </div>
+              <button
+                type="submit"
+                disabled={loading || totpCode.length !== 6}
+                className="btn-primary w-full py-3.5 flex items-center justify-center gap-2 disabled:opacity-70 disabled:pointer-events-none mt-2"
+              >
+                {loading ? 'Verifying...' : 'Verify and sign in'}
+                {!loading && <ShieldCheck size={18} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPreAuthToken(null); setTotpCode(''); setError(''); }}
+                className="w-full text-sm font-medium text-foreground-muted hover:text-foreground transition-colors"
+              >
+                Back to password sign-in
+              </button>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email – floating label */}
             <div className="relative">
@@ -139,14 +266,9 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder=" "
                 required
-                className="peer block w-full px-4 pt-6 pb-2 text-gray-900 bg-gray-50 border border-transparent rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all duration-200"
+                className="input-floating"
               />
-              <label
-                htmlFor="login-email"
-                className="absolute left-4 top-4 text-sm font-medium text-gray-500 origin-top-left transition-all duration-200 pointer-events-none
-                  peer-focus:-translate-y-2 peer-focus:scale-[0.85] peer-focus:text-blue-600
-                  peer-[:not(:placeholder-shown)]:-translate-y-2 peer-[:not(:placeholder-shown)]:scale-[0.85]"
-              >
+              <label htmlFor="login-email" className="input-floating-label">
                 Corporate Email
               </label>
             </div>
@@ -161,26 +283,23 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder=" "
                   required
-                  className="peer block w-full px-4 pt-6 pb-2 pr-12 text-gray-900 bg-gray-50 border border-transparent rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all duration-200"
+                  className="input-floating pr-12"
                 />
-                <label
-                  htmlFor="login-password"
-                  className="absolute left-4 top-4 text-sm font-medium text-gray-500 origin-top-left transition-all duration-200 pointer-events-none
-                    peer-focus:-translate-y-2 peer-focus:scale-[0.85] peer-focus:text-blue-600
-                    peer-[:not(:placeholder-shown)]:-translate-y-2 peer-[:not(:placeholder-shown)]:scale-[0.85]"
-                >
+                <label htmlFor="login-password" className="input-floating-label">
                   Password
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-foreground-muted hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                 >
                   {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>
               <div className="flex justify-end pt-1">
-                <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-4 transition-colors">Forgot password?</a>
+                <Link to="/forgot-password" className="text-sm font-medium text-primary hover:text-primary-hover hover:underline underline-offset-4 transition-colors">Forgot password?</Link>
               </div>
             </div>
 
@@ -188,66 +307,63 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full text-white font-semibold py-3.5 px-4 rounded-xl shadow-sm hover:shadow transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-70 disabled:pointer-events-none mt-2"
-              style={{ background: '#0058bc' }}
-              onMouseEnter={(e) => !loading && ((e.currentTarget as HTMLButtonElement).style.background = '#004aa3')}
-              onMouseLeave={(e) => !loading && ((e.currentTarget as HTMLButtonElement).style.background = '#0058bc')}
+              className="btn-primary w-full py-3.5 flex items-center justify-center gap-2 disabled:opacity-70 disabled:pointer-events-none mt-2"
             >
               {loading ? 'Signing in...' : 'Sign in to dashboard'}
               {!loading && <ArrowRight size={18} />}
             </button>
           </form>
+          )}
+
+          {import.meta.env.DEV && (
+            <p className="mt-4 text-xs text-foreground-muted text-center sm:text-left">
+              Dev login (after <code className="text-[0.7rem]">npm run db:reset:force</code>):{' '}
+              <span className="font-mono">partner@mkd.co</span> / <span className="font-mono">Admin@123</span>
+              <span className="text-foreground-muted mx-1">·</span>
+              <span className="font-mono">client@mkd.co</span> for portal
+            </p>
+          )}
 
           {/* Divider */}
           <div className="relative my-8">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
+              <div className="w-full border-t border-border" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-white px-4 text-xs font-semibold tracking-wider uppercase text-gray-400">Or continue with</span>
+              <span className="bg-card px-4 text-xs font-semibold tracking-wider uppercase text-foreground-muted label-caps">Or continue with</span>
             </div>
           </div>
 
           {/* SSO / SAML */}
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <button type="button" onClick={() => setInfoMsg('SSO (Single Sign-On) is available for enterprise customers. Contact your IT administrator to configure OIDC/SAML integration with your identity provider.')} className="flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors font-semibold text-gray-700 text-sm shadow-sm">
-              <ShieldCheck size={18} className="text-blue-600" />
+          <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+            <button type="button" onClick={() => setInfoMsg('SSO (Single Sign-On) is available for enterprise customers. Contact your IT administrator to configure OIDC/SAML integration with your identity provider.')} className="btn-secondary flex items-center justify-center gap-2.5 py-3 text-sm font-semibold">
+              <ShieldCheck size={18} className="text-primary" />
               SSO
             </button>
-            <button type="button" onClick={() => setInfoMsg('SAML authentication requires enterprise configuration. Contact your administrator or email enterprise@auditiq.in for setup.')} className="flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors font-semibold text-gray-700 text-sm shadow-sm">
-              <KeyRound size={18} className="text-blue-600" />
+            <button type="button" onClick={() => setInfoMsg('SAML authentication requires enterprise configuration. Contact your administrator or email enterprise@auditiq.in for setup.')} className="btn-secondary flex items-center justify-center gap-2.5 py-3 text-sm font-semibold">
+              <KeyRound size={18} className="text-primary" />
               SAML
             </button>
           </div>
 
-          {/* Demo Credentials */}
-          <div className="p-5 rounded-xl border border-gray-200 bg-gray-50/50">
-            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3 flex items-center justify-between">
-              Demo Credentials
-              <span className="text-[10px] font-medium opacity-70 normal-case tracking-normal text-gray-400">Tap to auto-fill</span>
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {demoUsers.map((u) => (
-                <button
-                  key={u.email}
-                  type="button"
-                  onClick={() => { setEmail(u.email); setPassword('password123'); }}
-                  className="text-left p-2.5 rounded-lg bg-white hover:bg-blue-50 transition-colors border border-gray-200 hover:border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-sm"
-                >
-                  <span className="text-xs font-bold block mb-0.5" style={{ color: u.color }}>{u.role}</span>
-                  <span className="text-[10px] text-gray-500 block leading-tight truncate" title={u.email}>{u.email}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Register link */}
+          {/* Register link — client self-service; staff accounts via admin when registration is locked */}
           <footer className="mt-8 text-center sm:text-left">
-            <p className="text-sm text-gray-600 font-medium">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-blue-600 hover:text-blue-700 font-semibold hover:underline underline-offset-4 ml-1 transition-all">
-                Register here
-              </Link>
+            <p className="text-sm text-foreground-secondary font-medium">
+              {allowStaffRegistration ? (
+                <>
+                  Don&apos;t have an account?{' '}
+                  <Link to="/register" className="text-primary hover:text-primary-hover font-semibold hover:underline underline-offset-4 ml-1 transition-all">
+                    Register here
+                  </Link>
+                </>
+              ) : (
+                <>
+                  Client?{' '}
+                  <Link to="/register" className="text-primary hover:text-primary-hover font-semibold hover:underline underline-offset-4 ml-1 transition-all">
+                    Register your business
+                  </Link>
+                </>
+              )}
             </p>
           </footer>
         </div>
@@ -255,13 +371,13 @@ export default function Login() {
         {/* Footer links */}
         <div className="mt-auto pt-12 flex flex-wrap justify-center gap-x-8 gap-y-4">
           {['Privacy Policy', 'Terms of Service', 'Security Compliance'].map((label) => (
-            <a
+            <Link
               key={label}
-              href="#"
-              className="text-xs font-semibold tracking-wider uppercase text-gray-400 hover:text-gray-600 transition-colors"
+              to={`/${label.toLowerCase().replace(/ /g, '-')}`}
+              className="text-xs font-semibold tracking-wider uppercase text-foreground-muted hover:text-foreground-secondary transition-colors"
             >
               {label}
-            </a>
+            </Link>
           ))}
         </div>
       </section>

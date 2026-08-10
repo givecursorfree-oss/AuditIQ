@@ -59,8 +59,19 @@ model User {
   isActive         Boolean  @default(true)
   presenceStatus   String   @default("online") // online | offline | maintenance | degraded
   presenceUpdatedAt DateTime?
+  notifyStageChanges Boolean @default(true)
+  notifyDocumentRequests Boolean @default(true)
+  notifyInvoices     Boolean @default(true)
+  notifyDailyDigest  Boolean @default(true)
+  lastDigestSentAt   DateTime?
   twoFactorEnabled Boolean  @default(false)
-  refreshToken     String?  @db.Text
+  totpSecret       String?  @db.Text // AES-256-GCM encrypted TOTP secret
+  refreshToken     String?  @db.Text // legacy plaintext (cleared on next login)
+  refreshTokenHash String?  @unique // SHA-256 hash of the active refresh token
+  failedLoginCount Int      @default(0)
+  lockedUntil      DateTime?
+  passwordResetTokenHash String?   @unique
+  passwordResetExpires   DateTime?
   emailVerified              Boolean   @default(false)
   emailVerificationToken     String?   @unique
   emailVerificationExpires   DateTime?
@@ -70,6 +81,10 @@ model User {
   // RBAC relation
   roleId  String?
   roleRef Role?   @relation(fields: [roleId], references: [id])
+
+  // MKD office hierarchy (Partners → Audit Executives → Interns)
+  hierarchyLevelId String?
+  hierarchyLevel   HierarchyLevel? @relation(fields: [hierarchyLevelId], references: [id])
 
   // Employee hierarchy
   reportsToId  String?
@@ -87,16 +102,21 @@ model User {
   documents         Document[]
   timeEntries       TimeEntry[]
   notifications     Notification[]
+  navAttentionAcks  NavAttentionAck[]
   attendances       Attendance[]
   leaveRequests     LeaveRequest[]
   leaveApprovals    LeaveRequest[]     @relation("LeaveApprover")
   auditLogs         AuditLog[]
   copilotMessages   CopilotMessage[]
   copilotSessions   CopilotSession[]
+  clientQueriesAuthored ClientAuditQuery[] @relation("ClientQueryAuthor")
+  clientQueriesAnswered ClientAuditQuery[] @relation("ClientQueryResponder")
 
   // Chat relations
   chatParticipants ChatParticipant[]
   chatMessages     ChatMessage[]
+  chatReactions    ChatMessageReaction[]
+  chatStars        ChatMessageStar[]
 
   // Approval relations
   approvalRequests ApprovalRequest[] @relation("ApprovalRequester")
@@ -111,9 +131,21 @@ model User {
   articleship          ArticleshipRecord?
   vaultViews           VaultAccessLog[]
   passwordVaultCreated PasswordVaultEntry[]     @relation("VaultCreator")
+  recurringSchedulesCreated RecurringSchedule[] @relation("RecurringScheduleCreator")
+  lateHoursClaims      LateHoursClaim[]         @relation("LateHoursClaimStaff")
+  lateHoursReviews     LateHoursClaim[]         @relation("LateHoursClaimReviewer")
+  deptVisitClaims      DeptVisitClaim[]         @relation("DeptVisitClaimStaff")
+  deptVisitReviews     DeptVisitClaim[]         @relation("DeptVisitClaimReviewer")
+  engagementTeamChanges Engagement[]            @relation("EngagementTeamChanger")
   udinIssued           UdinLog[]                @relation("UdinIssuer")
   invoicesCreated      Invoice[]                @relation("InvoiceCreator")
   clientStopwatches    ClientStopwatch[]
+  staffWorkStatus      StaffWorkStatus?
+  googleDriveConnection GoogleDriveConnection?
+
+  documentTemplatesCreated DocumentTemplate[] @relation("TemplateCreator")
+  templateSends            TemplateSend[]     @relation("TemplateSender")
+  engagementLettersCreated EngagementLetter[] @relation("EngagementLetterCreator")
 
   @@index([firmId])
   @@index([roleId])
@@ -141,6 +173,8 @@ model Firm {
   clients     Client[]
   engagements Engagement[]
   offices     Office[]
+  clientRequests    ClientRequest[]
+  documentTemplates DocumentTemplate[]
 }
 
 // ─── PRD 5.1: Engagement & Client Management ───
@@ -170,6 +204,7 @@ model Client {
   conflictCheckedAt   DateTime?
   onboardedAt         DateTime?
   folderPath          String? // Auto-created folder path /ClientName/Year/...
+  recurringAutomationDisabled Boolean @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -184,6 +219,12 @@ model Client {
   invoices      Invoice[]
   portalUsers   ClientPortalUser[]
   commsLog      CommsLog[]
+  auditQueries  ClientAuditQuery[]
+  requests      ClientRequest[]
+  templateSends TemplateSend[]
+  engagementLetters EngagementLetter[]
+  recurringSchedules RecurringSchedule[]
+  governmentNotices  GovernmentNotice[]
 
   @@index([firmId])
   @@index([status])
@@ -204,20 +245,40 @@ model Engagement {
   billingType        String? // Fixed | Hourly | Retainer
   billingAmount      Float?
   notes              String?   @db.Text
+  // Workflow — DT / IDT / AUDIT templates (see workflowCatalog)
+  workflowDomain     String?   // DT | IDT | AUDIT
+  serviceCode        String?   // TDS_REMITTANCE, GSTR_1, STATUTORY_AUDIT, etc.
   // Workflow stage tracking
-  currentStage       String    @default("Data Pending") // Data Pending | Data Received | Execution (WIP) | Draft Ready | Review with Manager | Partner Review | Client Discussion | UDIN Generated | Filed | Archived
+  currentStage       String    @default("Data Pending") // Template step label or legacy audit stage
   udin               String? // Unique Document Identification Number — required before Filed
   filedAt            DateTime?
+  filingReferenceNo  String?
+  filingAcknowledgmentNo String?
+  filingAckPath      String?
   archivedAt         DateTime?
-  // Engagement Letter
+  // Engagement Letter (legacy PDF fields + MKD letter workflow)
   elGenerated        Boolean   @default(false)
   elSignedAt         DateTime?
   elSignedById       String?
   elStoragePath      String? // Path to generated EL PDF
+  letterStatus       String    @default("not_required") // not_required | draft | sent | signed | rejected
+  // MKD request / recurring metadata
+  requestStatus      String?   // request_pending | request_approved | awaiting_letter_signature | team_assigned | in_progress | filed | completed | rejected
+  isRecurring        Boolean   @default(false)
+  recurringFrequency String?   // monthly | quarterly | yearly
+  period             String?   // e.g. June 2026
+  parentEngagementId String?
+  parentEngagement   Engagement?  @relation("RecurringEngagements", fields: [parentEngagementId], references: [id])
+  childEngagements   Engagement[] @relation("RecurringEngagements")
+  clientRequestId    String?
+  clientRequest      ClientRequest? @relation(fields: [clientRequestId], references: [id])
   // Resource allocation
   partnerInChargeId  String?
   managerId          String?
   articleAssistantId String?
+  teamLastChangedById String?
+  teamLastChangedAt   DateTime?
+  teamLastChangedBy   User?    @relation("EngagementTeamChanger", fields: [teamLastChangedById], references: [id])
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -242,28 +303,174 @@ model Engagement {
   invoices         Invoice[]
   udinEntries      UdinLog[]
   commsLog         CommsLog[]
+  auditQueries     ClientAuditQuery[]
+  periods          EngagementPeriod[]
+  engagementLetter EngagementLetter?
+  templateSends    TemplateSend[]
+  governmentNotices GovernmentNotice[]
+  lateHoursClaims  LateHoursClaim[]
+  deptVisitClaims  DeptVisitClaim[]
 
   @@index([clientId])
   @@index([firmId])
   @@index([status])
   @@index([currentStage])
+  @@index([workflowDomain])
+  @@index([serviceCode])
   @@index([partnerInChargeId])
   @@index([managerId])
   @@index([articleAssistantId])
+  @@index([letterStatus])
+  @@index([requestStatus])
+  @@index([parentEngagementId])
+  @@index([clientRequestId])
+  @@index([teamLastChangedById])
+}
+
+// ─── MKD: Client service requests (before engagement activation) ───
+
+model ClientRequest {
+  id               String    @id @default(uuid())
+  selectedServices Json      // string[] of service codes
+  financialYears   Json      // string[]
+  notes            String?   @db.Text
+  status           String    @default("pending") // pending | approved | rejected
+  submittedAt      DateTime  @default(now())
+  reviewedById     String?
+  reviewedAt       DateTime?
+  rejectionReason  String?   @db.Text
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  firmId   String
+  firm     Firm   @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  engagements Engagement[]
+
+  @@index([clientId])
+  @@index([firmId])
+  @@index([status])
+}
+
+// ─── MKD: Document template library ───
+
+model DocumentTemplate {
+  id           String   @id @default(uuid())
+  name         String
+  category     String   // engagement_letter | data_request | reminder | etc.
+  serviceTypes Json?    // string[] — which services apply
+  subject      String
+  body         String   @db.LongText
+  attachPdf    Boolean  @default(false)
+  variables    Json?    // string[] — {{VAR}} names
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  firmId      String
+  firm        Firm   @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?  @relation("TemplateCreator", fields: [createdById], references: [id])
+  sends       TemplateSend[]
+  letters     EngagementLetter[]
+
+  @@index([firmId])
+  @@index([category])
+  @@index([isActive])
+}
+
+model TemplateSend {
+  id            String   @id @default(uuid())
+  filledSubject String?
+  filledContent String   @db.LongText
+  sentAt        DateTime @default(now())
+  deliveryStatus String  @default("sent") // sent | delivered | failed
+
+  templateId   String
+  template     DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  engagementId String?
+  engagement   Engagement?      @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+  sentById     String
+  sentBy       User             @relation("TemplateSender", fields: [sentById], references: [id])
+
+  @@index([templateId])
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([sentAt])
+}
+
+model EngagementLetter {
+  id                String    @id @default(uuid())
+  subjectLine       String?   @db.Text
+  generatedContent  String?   @db.LongText
+  docxPath          String?   // draft/sent Word document on disk
+  pdfPath           String?   // legacy — unused
+  status            String    @default("draft") // draft | sent | signed | rejected
+  fees              Json?     // FeeLineItem[]
+  partnerName       String?
+  partnerDesignation String?  @default("Partner")
+  sentAt            DateTime?
+  signedAt          DateTime?
+  signedDocumentUrl String?   // final signed DOCX path
+  clientSignatoryName String?
+  signatureImagePath  String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  engagementId String     @unique
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  templateId   String?
+  template     DocumentTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdById  String
+  createdBy    User       @relation("EngagementLetterCreator", fields: [createdById], references: [id])
+
+  @@index([clientId])
+  @@index([status])
+  @@index([templateId])
+}
+
+model ClientAuditQuery {
+  id           String   @id @default(uuid())
+  subject      String
+  body         String   @db.Text
+  status       String   @default("Open") // Open | Answered | Closed
+  response     String?  @db.Text
+  respondedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdById  String
+  createdBy    User       @relation("ClientQueryAuthor", fields: [createdById], references: [id])
+  respondedById String?
+  respondedBy   User?      @relation("ClientQueryResponder", fields: [respondedById], references: [id])
+
+  @@index([engagementId])
+  @@index([clientId])
+  @@index([status])
 }
 
 model EngagementMember {
   id         String   @id @default(uuid())
-  role       String // Lead | Reviewer | Preparer
+  role       String   @default("Preparer") // Lead | Reviewer | Preparer (legacy)
+  teamRole   String?  // Manager | Staff | Partner
+  sortOrder  Int      @default(0) // Priority within teamRole (0 = primary)
   assignedAt DateTime @default(now())
 
   engagementId String
-  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
   userId       String
   user         User       @relation(fields: [userId], references: [id])
 
   @@unique([engagementId, userId])
   @@index([userId])
+  @@index([teamRole])
 }
 
 // ─── PRD 5.2: Document & Evidence Management ───
@@ -281,18 +488,52 @@ model Document {
   parentId       String? // For version tracking — points to previous version
   isOcrProcessed Boolean  @default(false)
   ocrText        String?  @db.LongText
+  source         String   @default("UPLOAD") // UPLOAD | GOOGLE_DRIVE
+  externalId     String? // Google Drive file id
+  visibility     String   @default("ENGAGEMENT") // ENGAGEMENT | FIRM
+  firmId         String?
+  clientId       String?
+  indexStatus    String   @default("PENDING") // PENDING | INDEXED | FAILED | SKIPPED
+  indexedAt      DateTime?
+  driveModifiedAt DateTime?
+  syncedAt       DateTime?
   createdAt      DateTime @default(now())
 
-  engagementId String
-  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
   uploadedById String
   uploadedBy   User       @relation(fields: [uploadedById], references: [id])
   workpaperId  String?
   workpaper    Workpaper? @relation(fields: [workpaperId], references: [id])
+  checklistItems DataChecklistItem[]
 
+  @@unique([firmId, externalId])
   @@index([engagementId])
   @@index([uploadedById])
   @@index([workpaperId])
+  @@index([firmId])
+  @@index([visibility])
+  @@index([indexStatus])
+}
+
+model GoogleDriveConnection {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firmId                String
+  googleEmail           String?
+  encryptedRefreshToken String    @db.Text
+  encryptedAccessToken  String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  folderIds             String?   @db.Text // JSON string[] of Drive folder ids to sync
+  defaultEngagementId   String?
+  lastSyncAt            DateTime?
+  startPageToken        String? // Drive changes API cursor
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([firmId])
 }
 
 model DocumentRequest {
@@ -426,6 +667,10 @@ model Report {
   version     Int      @default(1)
   sharedWithClient Boolean @default(false)
   sharedWithClientAt DateTime?
+  clientAcknowledgedAt DateTime?
+  clientAcknowledgedById String?
+  clientQueryText String? @db.Text
+  clientQueryAt DateTime?
   generatedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -459,6 +704,7 @@ model TimeEntry {
   date        DateTime
   hours       Float
   workType    String? // Audit | GST Filing | IT Filing | Consultation | Internal | Other
+  stage       String? // engagement pipeline stage at time of logging
   description String?   @db.Text
   notes       String?   @db.Text
   isBillable  Boolean   @default(true)
@@ -471,10 +717,13 @@ model TimeEntry {
   engagement   Engagement @relation(fields: [engagementId], references: [id])
   userId       String
   user         User       @relation(fields: [userId], references: [id])
+  taskId       String?
+  task         Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([engagementId])
   @@index([userId])
   @@index([date])
+  @@index([taskId])
 }
 
 model Deadline {
@@ -510,6 +759,17 @@ model Notification {
   @@index([userId])
 }
 
+/** When a user views a nav area, badges for that scope clear until new activity arrives. */
+model NavAttentionAck {
+  userId  String
+  scope   String
+  ackedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, scope])
+}
+
 // ─── PRD 5.8: Facial Recognition Attendance Module ───
 
 model Office {
@@ -534,10 +794,12 @@ model Attendance {
   checkIn   DateTime?
   checkOut  DateTime?
   status    String    @default("present") // present | late | absent | leave | half-day
+  totalActiveSeconds Int @default(0)
+  totalAwaySeconds   Int @default(0)
   location  String? // Office | Client Site | Remote
   gpsLat    Float?
   gpsLng    Float?
-  method    String    @default("face") // face | otp | manual
+  method    String    @default("face") // face | otp | manual | timer
   createdAt DateTime  @default(now())
 
   userId   String
@@ -900,6 +1162,8 @@ model ChatParticipant {
   role       String   @default("member") // admin | member
   lastReadAt DateTime @default(now())
   isMuted    Boolean  @default(false)
+  isPinned   Boolean  @default(false) // Pin conversation in list (WhatsApp-style)
+  isArchived Boolean  @default(false) // Archive for this participant only
   joinedAt   DateTime @default(now())
 
   @@unique([roomId, userId])
@@ -930,11 +1194,45 @@ model ChatMessage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  parent         ChatMessage?  @relation("MessageReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies        ChatMessage[] @relation("MessageReplies")
   pinnedMessages ChatPinnedMessage[]
+  reactions      ChatMessageReaction[]
+  stars          ChatMessageStar[]
 
   @@index([roomId])
   @@index([senderId])
   @@index([createdAt])
+  @@index([parentId])
+}
+
+model ChatMessageReaction {
+  id        String      @id @default(uuid())
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  emoji     String // thumbsup | check | question
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+}
+
+model ChatMessageStar {
+  id        String      @id @default(uuid())
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  roomId    String
+
+  starredAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([userId])
+  @@index([roomId])
 }
 
 model ChatPinnedMessage {
@@ -1024,30 +1322,38 @@ model DataChecklistItem {
 
   title          String
   description    String?   @db.Text
-  status         String    @default("Requested") // Requested | Received | Missing
+  status         String    @default("Requested") // Requested | Received | Missing | Revision Required
   requestedAt    DateTime  @default(now())
   receivedAt     DateTime?
   lastFollowupAt DateTime?
   followupCount  Int       @default(0)
   escalatedAt    DateTime?
+  documentId     String?
+  document       Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  revisionNotes  String?   @db.Text
+  revisionRequestedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([engagementId])
   @@index([status])
+  @@index([documentId])
 }
 
 // ─── Tasks (Today's To-Do) ───
 
 model Task {
-  id          String    @id @default(uuid())
-  title       String
-  description String?   @db.Text
-  priority    String    @default("Normal") // Low | Normal | High | Urgent
-  status      String    @default("Open") // Open | In Progress | Done | Cancelled
-  dueDate     DateTime?
-  completedAt DateTime?
+  id               String    @id @default(uuid())
+  title            String
+  description      String?   @db.Text
+  priority         String    @default("Normal") // Low | Normal | High | Urgent
+  status           String    @default("not_started") // not_started | in_progress | completed | blocked (+ legacy Open/In Progress/Done)
+  dueDate          DateTime?
+  proposedTimeline String?
+  estimatedHours   Float?
+  notes            String?   @db.Text
+  completedAt      DateTime?
 
   assigneeId   String
   assignee     User        @relation("TaskAssignee", fields: [assigneeId], references: [id])
@@ -1055,6 +1361,7 @@ model Task {
   createdBy    User        @relation("TaskCreator", fields: [createdById], references: [id])
   engagementId String?
   engagement   Engagement? @relation(fields: [engagementId], references: [id])
+  timeEntries  TimeEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1062,6 +1369,7 @@ model Task {
   @@index([assigneeId])
   @@index([status])
   @@index([dueDate])
+  // engagementId indexed by Task_engagementId_fkey — do not add @@index([engagementId]) (db push conflict)
 }
 
 // ─── Live Client Stopwatch (open timers per user) ───
@@ -1071,11 +1379,32 @@ model ClientStopwatch {
   userId       String   @unique // one open timer per user
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   engagementId String
+  taskId       String?
   workType     String   @default("Audit")
+  stage        String?
   startedAt    DateTime @default(now())
+  isPaused     Boolean  @default(false)
+  pausedAt     DateTime?
   notes        String?  @db.Text
 
   @@index([userId])
+  @@index([taskId])
+}
+
+// Live work activity — engagement timer + idle detection (admin dashboard)
+model StaffWorkStatus {
+  userId              String    @id
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activityStatus      String    @default("offline") // active | away | offline
+  currentEngagementId String?
+  currentStage        String?
+  timerStartedAt      DateTime?
+  lastActiveAt        DateTime?
+  awaySince           DateTime?
+  statusChangedAt     DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([activityStatus])
 }
 
 // ─── Stipend Tracking (ICAI Articleship) ───
@@ -1131,6 +1460,7 @@ model PasswordVaultEntry {
   // AES-256-GCM encrypted password — stored as base64(iv:authTag:ciphertext)
   passwordEnc String  @db.Text
   notes       String? @db.Text
+  lastSyncedAt DateTime?
 
   createdById String
   createdBy   User             @relation("VaultCreator", fields: [createdById], references: [id])
@@ -1301,4 +1631,144 @@ model CommsLog {
   @@index([engagementId])
   @@index([status])
   @@index([templateKey])
+}
+
+// ─── MKD office hierarchy & workflow periods ───
+
+model HierarchyLevel {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  title      String
+  sortOrder  Int
+  systemRole String   // Partner | Manager | Staff | Intern — permission mapping
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  users User[]
+
+  @@index([sortOrder])
+}
+
+model EngagementPeriod {
+  id           String   @id @default(uuid())
+  periodKey    String   // e.g. 2026-05 for May 2026 GSTR-1
+  label        String
+  dueDate      DateTime?
+  currentStage String   @default("Data Request")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@unique([engagementId, periodKey])
+  @@index([engagementId])
+}
+
+// ─── Per-client recurring schedule config ───
+
+model RecurringSchedule {
+  id                        String    @id @default(uuid())
+  engagementTemplateId      String    // serviceCode e.g. GSTR_1
+  clientId                  String
+  client                    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  isActive                  Boolean   @default(true)
+  frequency                 String    // monthly | quarterly | yearly
+  triggerDay                Int?
+  triggerDates              String?   @db.Text // JSON array for quarterly
+  triggerMonth              String?
+  autoCreateStartDate       DateTime
+  autoCreateEndDate         DateTime?
+  autoSendDataRequestLetter Boolean   @default(true)
+  lastCreatedAt             DateTime?
+  nextCreateAt              DateTime?
+  createdById               String
+  createdBy                 User      @relation("RecurringScheduleCreator", fields: [createdById], references: [id])
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@unique([clientId, engagementTemplateId])
+  @@index([clientId])
+  @@index([isActive])
+  @@index([nextCreateAt])
+}
+
+// ─── Staff claims ───
+
+model LateHoursClaim {
+  id                    String    @id @default(uuid())
+  staffId               String
+  staff                 User      @relation("LateHoursClaimStaff", fields: [staffId], references: [id])
+  date                  DateTime  @db.Date
+  normalEndTime         String    // HH:mm
+  actualEndTime         String
+  computerLogoffTime    String?
+  fingerprintLogoffTime String?
+  hoursOvertime         Float
+  reason                String    @db.Text
+  engagementId          String?
+  engagement            Engagement? @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+  status                String    @default("pending") // pending | approved | rejected
+  reviewedById          String?
+  reviewedBy            User?     @relation("LateHoursClaimReviewer", fields: [reviewedById], references: [id])
+  reviewedAt            DateTime?
+  managerNotes          String?   @db.Text
+  createdAt             DateTime  @default(now())
+
+  @@index([staffId])
+  @@index([status])
+  @@index([date])
+}
+
+model DeptVisitClaim {
+  id                String    @id @default(uuid())
+  staffId           String
+  staff             User      @relation("DeptVisitClaimStaff", fields: [staffId], references: [id])
+  date              DateTime  @db.Date
+  department        String    // GST_office | Income_Tax | TRACES | ROC | Other
+  departmentDetails String    @db.Text
+  purpose           String    @db.Text
+  engagementId      String
+  engagement        Engagement @relation(fields: [engagementId], references: [id])
+  travelExpense     Float?
+  receiptUrl        String?
+  departureTime     String
+  returnTime        String
+  status            String    @default("pending")
+  reviewedById      String?
+  reviewedBy        User?     @relation("DeptVisitClaimReviewer", fields: [reviewedById], references: [id])
+  reviewedAt        DateTime?
+  managerNotes      String?   @db.Text
+  createdAt         DateTime  @default(now())
+
+  @@index([staffId])
+  @@index([status])
+  @@index([engagementId])
+}
+
+// ─── Government portal notices ───
+
+model GovernmentNotice {
+  id                String    @id @default(uuid())
+  clientId          String
+  client            Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  portal            String    // GST | Income_Tax | TRACES
+  noticeType        String
+  adjudicationLevel String?
+  referenceNumber   String?
+  dateOfNotice      DateTime? @db.Date
+  dueDate           DateTime? @db.Date
+  subject           String    @db.Text
+  status            String    @default("pending")
+  engagementId      String?
+  engagement        Engagement? @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+  fetchedAt         DateTime?
+  rawData           Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([clientId])
+  @@index([portal])
+  @@index([status])
+  @@index([dueDate])
 }

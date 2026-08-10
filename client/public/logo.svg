@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" fill="none" role="img" aria-label="AuditIQ">
+  <defs>
+    <linearGradient id="aq-mark" x1="4" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a6fd4"/>
+      <stop offset="1" stop-color="#0c5cab"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="4" width="40" height="40" rx="10" fill="url(#aq-mark)"/>
+  <path d="M14 32V16h4.2l5.2 8.4L28.6 16H33v16h-3.2v-8.2L23.2 32h-2.2l-6.6-8.2V32H14z" fill="#fff"/>
+  <path d="M30.5 28.5l2.2 3.5H28l3.5-5.5 2-3.2h3.8l-2 2.2z" fill="#93c5fd" opacity=".95"/>
+  <text x="52" y="30" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="22" font-weight="700" fill="#0f2744">AuditIQ</text>
+  <text x="52" y="42" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="9.5" font-weight="600" letter-spacing="0.14em" fill="#64748b">CA FIRM PLATFORM</text>
+</svg>

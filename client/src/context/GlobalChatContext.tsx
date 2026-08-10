@@ -32,7 +32,7 @@ type GlobalChatContextValue = {
   setRoomSearch: (q: string) => void;
   roomFilter: RoomFilter;
   setRoomFilter: (f: RoomFilter) => void;
-  refreshRooms: () => Promise<void>;
+  refreshRooms: (opts?: { includeArchived?: boolean }) => Promise<void>;
   openMessagesPage: () => void;
   selectRoom: (room: ChatRoom) => void;
   toasts: TeamsToastPayload[];
@@ -52,7 +52,7 @@ function formatToastTime(dateStr: string) {
 }
 
 export function GlobalChatProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -129,29 +129,34 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     [activeRoomId, onMessagesPage, pushToast]
   );
 
-  const refreshRooms = useCallback(async () => {
-    if (!chatEnabled || !user?.id) return;
+  const detectNewMessagesRef = useRef(detectNewMessages);
+  detectNewMessagesRef.current = detectNewMessages;
+
+  const refreshRooms = useCallback(async (opts?: { includeArchived?: boolean }) => {
+    if (authLoading || !chatEnabled || !user?.id) return;
     try {
-      const { data } = await api.get<ChatRoom[]>('/chat/rooms');
+      const { data } = await api.get<ChatRoom[]>('/chat/rooms', {
+        params: opts?.includeArchived ? { includeArchived: '1' } : undefined,
+      });
       const list = Array.isArray(data) ? data : [];
-      detectNewMessages(list, user.id);
+      detectNewMessagesRef.current(list, user.id);
       setRooms(list);
     } catch {
       /* polling may fail quietly */
     } finally {
       setLoading(false);
     }
-  }, [chatEnabled, user?.id, detectNewMessages]);
+  }, [authLoading, chatEnabled, user?.id]);
 
   useEffect(() => {
-    if (!chatEnabled) {
-      setLoading(false);
+    if (authLoading || !chatEnabled) {
+      if (!authLoading) setLoading(false);
       return;
     }
     refreshRooms();
     const interval = window.setInterval(refreshRooms, POLL_MS);
     return () => window.clearInterval(interval);
-  }, [chatEnabled, refreshRooms]);
+  }, [authLoading, chatEnabled, refreshRooms]);
 
   useEffect(() => {
     if (!chatEnabled || loading || activeRoomId) return;

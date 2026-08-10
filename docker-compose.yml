@@ -1,0 +1,108 @@
+version: "3.8"
+
+services:
+  # ── MySQL Database ──
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: auditiq
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env}
+    # ports:
+    #   - "3306:3306"  # Only expose if needed for local dev
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Express API Server ──
+  typesense:
+    image: typesense/typesense:29.0
+    restart: unless-stopped
+    # Do not publish 8108 publicly on VPS — server reaches typesense on the internal network only
+    environment:
+      TYPESENSE_DATA_DIR: /data
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-auditiq-typesense-dev-key}
+      TYPESENSE_ENABLE_CORS: "true"
+    volumes:
+      - typesense_data:/data
+    # ONNX embedding models need ~1–2 GB RAM (File Brain uses paraphrase-multilingual-mpnet)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    command: "--data-dir /data --api-key=${TYPESENSE_API_KEY:-auditiq-typesense-dev-key} --enable-cors"
+
+  tika:
+    image: apache/tika:3.3.0.0-full
+    restart: unless-stopped
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      typesense:
+        condition: service_started
+      tika:
+        condition: service_started
+    environment:
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env}@db:3306/auditiq
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      NODE_ENV: production
+      PORT: 3001
+      CLIENT_URL: ${CLIENT_URL:-http://localhost}
+      LOG_LEVEL: info
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-25}
+      VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:?VAULT_ENCRYPTION_KEY must be set in .env}
+      TYPESENSE_HOST: http://typesense:8108
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:?TYPESENSE_API_KEY must be set in .env}
+      TIKA_URL: http://tika:9998
+      ALLOW_STAFF_REGISTRATION: ${ALLOW_STAFF_REGISTRATION:-false}
+      SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3001/api/integrations/google-drive/callback}
+    volumes:
+      - server_logs:/app/logs
+      - document_uploads:/app/uploads
+    # ports:
+    #   - "3001:3001"  # Only expose if needed for local dev
+
+  # ── React Client (Nginx) ──
+  client:
+    build: ./client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Set after certbot (e.g. audit.example.com) to enable HTTPS template
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot
+
+  # ── Certbot (SSL certificate management) ──
+  # Run once: docker compose run --rm certbot certonly --webroot -w /var/www/certbot -d YOUR_DOMAIN.com
+  # Then uncomment the HTTPS block in client/nginx.conf and restart client.
+  # Auto-renewal: docker compose run --rm certbot renew
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
+volumes:
+  mysql_data:
+  server_logs:
+  typesense_data:
+  document_uploads:
+  certbot_conf:
+  certbot_www:

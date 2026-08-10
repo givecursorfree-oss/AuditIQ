@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearStoredUser } from '@/lib/userStorage';
 
 const api = axios.create({
   baseURL: '/api',
@@ -22,6 +23,7 @@ api.interceptors.request.use((config) => {
 });
 
 let isRefreshing = false;
+let refreshPromise: Promise<void> | null = null;
 let failedQueue: Array<{ resolve: (value?: unknown) => void; reject: (reason?: any) => void }> = [];
 
 const processQueue = (error: any, token: string | null = null) => {
@@ -34,6 +36,31 @@ const processQueue = (error: any, token: string | null = null) => {
   });
   failedQueue = [];
 };
+
+async function refreshSession(): Promise<void> {
+  if (refreshPromise) return refreshPromise;
+  isRefreshing = true;
+  refreshPromise = axios
+    .post('/api/auth/refresh', {}, { withCredentials: true })
+    .then(() => {
+      processQueue(null, 'refreshed');
+    })
+    .catch((refreshError) => {
+      processQueue(refreshError, null);
+      const status = (refreshError as { response?: { status?: number } })?.response?.status;
+      // ponytail: 429 = rate limited, not logged out — avoid redirect loops to /login
+      if (status !== 429) {
+        clearStoredUser();
+        window.location.href = '/login';
+      }
+      throw refreshError;
+    })
+    .finally(() => {
+      isRefreshing = false;
+      refreshPromise = null;
+    });
+  return refreshPromise;
+}
 
 // Handle 401 responses globally
 api.interceptors.response.use(
@@ -50,31 +77,26 @@ api.interceptors.response.use(
       url.includes('/auth/refresh');
 
     if (error.response?.status === 401 && !isAuthEndpoint && !originalRequest._retry) {
+      originalRequest._retry = true;
+
       if (isRefreshing) {
         return new Promise(function (resolve, reject) {
           failedQueue.push({ resolve, reject });
-        }).then(() => api(originalRequest)).catch((err) => Promise.reject(err));
+        })
+          .then(() => api(originalRequest))
+          .catch((err) => Promise.reject(err));
       }
 
-      originalRequest._retry = true;
-      isRefreshing = true;
-
       try {
-        await axios.post('/api/auth/refresh', {}, { withCredentials: true });
-        processQueue(null, 'refreshed');
+        await refreshSession();
         return api(originalRequest);
       } catch (refreshError) {
-        processQueue(refreshError, null);
-        localStorage.removeItem('auditiq_user');
-        window.location.href = '/login';
         return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
     }
 
     if (error.response?.status === 401 && !isAuthEndpoint && originalRequest._retry) {
-      localStorage.removeItem('auditiq_user');
+      clearStoredUser();
       window.location.href = '/login';
     }
 

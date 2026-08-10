@@ -1,42 +1,59 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import { clearDatabase } from './clear-database.js';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  console.log('🌱 Seeding AuditIQ database...\n');
+/** Relative dates so RAG deadlines work when you seed today */
+const now = new Date();
+function addDays(n: number): Date {
+  const d = new Date(now);
+  d.setDate(d.getDate() + n);
+  d.setHours(12, 0, 0, 0);
+  return d;
+}
+function daysAgo(n: number): Date {
+  return addDays(-n);
+}
 
-  // Clean existing data (reverse dependency order)
-  await prisma.auditLog.deleteMany();
-  await prisma.copilotMessage.deleteMany();
-  await prisma.copilotSession.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.leaveRequest.deleteMany();
-  await prisma.attendance.deleteMany();
-  await prisma.office.deleteMany();
-  await prisma.form3CDClause.deleteMany();
-  await prisma.report.deleteMany();
-  await prisma.observation.deleteMany();
-  await prisma.timeEntry.deleteMany();
-  await prisma.deadline.deleteMany();
-  await prisma.signOff.deleteMany();
-  await prisma.reviewComment.deleteMany();
-  await prisma.auditStep.deleteMany();
-  await prisma.document.deleteMany();
-  await prisma.documentRequest.deleteMany();
-  await prisma.workpaper.deleteMany();
-  await prisma.engagementMember.deleteMany();
-  await prisma.engagement.deleteMany();
-  await prisma.client.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.rolePermission.deleteMany();
-  await prisma.permission.deleteMany();
-  await prisma.role.deleteMany();
-  await prisma.firm.deleteMany();
+/** AES-256-GCM — same key derivation as server/src/lib/vaultCrypto.ts (reads VAULT_ENCRYPTION_KEY from .env) */
+function deriveVaultKey(raw: string): Buffer {
+  if (/^[0-9a-fA-F]{64}$/.test(raw)) return Buffer.from(raw, 'hex');
+  try {
+    const b = Buffer.from(raw, 'base64');
+    if (b.length === 32) return b;
+  } catch {
+    /* fall through */
+  }
+  return crypto.createHash('sha256').update(raw, 'utf8').digest();
+}
+const SEED_VAULT_KEY = deriveVaultKey(
+  process.env.VAULT_ENCRYPTION_KEY || 'auditiq-dev-vault-key-for-seed-only'
+);
+function encryptForSeed(plain: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', SEED_VAULT_KEY, iv);
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, enc]).toString('base64');
+}
+
+async function main() {
+  if (process.env.SEED_FULL !== 'true') {
+    console.log('⚠️  Full demo seed is disabled by default.\n');
+    console.log('   Clean test DB :  npm run db:reset   (from server/)');
+    console.log('   Full demo data:  SEED_FULL=true npm run db:seed\n');
+    process.exit(0);
+  }
+
+  console.log('🌱 Seeding AuditIQ database (full demo)...\n');
+  await clearDatabase(prisma);
 
   // ─── Permissions (modules × actions) ───
-  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'copilot', 'settings', 'clients'];
-  const actions = ['view', 'create', 'edit', 'delete', 'approve', 'export'];
+  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals'];
+  const actions = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
 
   const permissionData: { module: string; action: string; description: string }[] = [];
   for (const mod of modules) {
@@ -60,8 +77,12 @@ async function main() {
   // ─── Roles ───
   const adminRole = await prisma.role.create({
     data: {
-      name: 'Admin', description: 'Full system administrator with all permissions', isSystem: true,
-      permissions: { create: allPerms.map((p) => ({ permissionId: p.id })) },
+      name: 'Admin', description: 'Firm administrator — sanctions leave, manages users; cannot apply leave', isSystem: true,
+      permissions: {
+        create: allPerms
+          .filter((p) => !(p.module === 'leave' && p.action === 'apply'))
+          .map((p) => ({ permissionId: p.id })),
+      },
     },
   });
 
@@ -77,8 +98,8 @@ async function main() {
       name: 'Manager', description: 'Audit manager with review and approval rights', isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'copilot', 'clients'],
-          ['view', 'create', 'edit', 'approve', 'export']
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'clients', 'invoices', 'vault', 'approvals'],
+          ['view', 'create', 'edit', 'approve', 'export', 'apply', 'manage']
         ).map((pid) => ({ permissionId: pid })),
       },
     },
@@ -89,8 +110,8 @@ async function main() {
       name: 'Staff', description: 'Audit staff / article clerk with standard access', isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'copilot'],
-          ['view', 'create', 'edit']
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'invoices'],
+          ['view', 'create', 'edit', 'apply']
         ).map((pid) => ({ permissionId: pid })),
       },
     },
@@ -101,8 +122,8 @@ async function main() {
       name: 'Intern', description: 'Intern with limited view-only access', isSystem: false,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance'],
-          ['view']
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'],
+          ['view', 'apply']
         ).map((pid) => ({ permissionId: pid })),
       },
     },
@@ -113,7 +134,7 @@ async function main() {
       name: 'Client', description: 'External client with restricted portal access', isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'documents', 'reports'],
+          ['dashboard', 'documents', 'reports', 'messages'],
           ['view']
         ).map((pid) => ({ permissionId: pid })),
       },
@@ -125,7 +146,7 @@ async function main() {
   // ─── Firm ───
   const firm = await prisma.firm.create({
     data: {
-      name: 'Sharma & Associates',
+      name: 'M.K. Dandeker & Co LLP',
       registrationNo: 'FRN-123456W',
       address: '401 Maker Chambers, Nariman Point, Mumbai 400021',
       city: 'Mumbai',
@@ -141,7 +162,16 @@ async function main() {
 
   // ─── Users (bcrypt 12 rounds per security best practices) ───
   const SALT_ROUNDS = 12;
-  const hash = await bcrypt.hash('password123', SALT_ROUNDS);
+  const hash = await bcrypt.hash('Admin@123', SALT_ROUNDS);
+
+  const admin = await prisma.user.create({
+    data: {
+      email: 'admin@auditiq.in', passwordHash: hash,
+      firstName: 'Admin', lastName: 'User', role: 'Admin',
+      initials: 'AU', designation: 'System Administrator', firmId: firm.id,
+      roleId: adminRole.id,
+    },
+  });
 
   const partner = await prisma.user.create({
     data: {
@@ -198,7 +228,7 @@ async function main() {
     },
   });
 
-  console.log(`✅ Users: 6 created (Partner, Manager, 2 Staff, 1 Intern, 1 Client)`);
+  console.log(`✅ Users: 7 created (Admin, Partner, Manager, 2 Staff, 1 Intern, 1 Client)`);
 
   // ─── Clients ───
   const clients = await Promise.all([
@@ -463,12 +493,16 @@ async function main() {
 
   console.log(`✅ Review Comments: 3 created`);
 
-  // ─── Documents (demo files — no actual uploads) ───
+  // ─── Documents (demo files — dummy BLOB data for seeding) ───
+  const dummyPdf = Buffer.from('%PDF-1.4 dummy seed file content');
+  const dummyXlsx = Buffer.from('PK dummy xlsx seed file content');
+  const dummyDocx = Buffer.from('PK dummy docx seed file content');
+
   await Promise.all([
     prisma.document.create({
       data: {
         fileName: 'ril_bank_confirmation_hdfc.pdf', originalName: 'HDFC Bank Confirmation - RIL.pdf',
-        mimeType: 'application/pdf', size: 245000, storagePath: '/uploads/ril_bank_confirmation_hdfc.pdf',
+        mimeType: 'application/pdf', size: 245000, storagePath: '/blob',
         category: 'Bank Statement', folder: 'Current File', version: 1,
         engagementId: eng1.id, uploadedById: staff1.id,
       },
@@ -477,7 +511,7 @@ async function main() {
       data: {
         fileName: 'ril_trial_balance_mar25.xlsx', originalName: 'Trial Balance as at 31-Mar-2025.xlsx',
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: 1820000,
-        storagePath: '/uploads/ril_trial_balance_mar25.xlsx',
+        storagePath: '/blob',
         category: 'Ledger', folder: 'Current File', version: 1,
         engagementId: eng1.id, uploadedById: manager.id,
       },
@@ -485,7 +519,7 @@ async function main() {
     prisma.document.create({
       data: {
         fileName: 'ril_engagement_letter.pdf', originalName: 'Engagement Letter - Signed.pdf',
-        mimeType: 'application/pdf', size: 420000, storagePath: '/uploads/ril_engagement_letter.pdf',
+        mimeType: 'application/pdf', size: 420000, storagePath: '/blob',
         category: 'Other', folder: 'Permanent File', version: 1,
         engagementId: eng1.id, uploadedById: partner.id,
       },
@@ -494,7 +528,7 @@ async function main() {
       data: {
         fileName: 'ril_audit_plan_2025.docx', originalName: 'Audit Plan FY 2024-25 - RIL.docx',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 356000,
-        storagePath: '/uploads/ril_audit_plan_2025.docx',
+        storagePath: '/blob',
         category: 'Other', folder: 'Current File', version: 2,
         engagementId: eng1.id, uploadedById: manager.id,
       },
@@ -502,7 +536,7 @@ async function main() {
     prisma.document.create({
       data: {
         fileName: 'ril_tds_cert_q4.pdf', originalName: 'TDS Certificate Q4 - 26AS.pdf',
-        mimeType: 'application/pdf', size: 178000, storagePath: '/uploads/ril_tds_cert_q4.pdf',
+        mimeType: 'application/pdf', size: 178000, storagePath: '/blob',
         category: 'TDS Cert', folder: 'Current File', version: 1,
         engagementId: eng1.id, uploadedById: staff2.id,
       },
@@ -510,7 +544,7 @@ async function main() {
     prisma.document.create({
       data: {
         fileName: 'tcs_financial_statements.pdf', originalName: 'TCS Financial Statements FY 2024-25.pdf',
-        mimeType: 'application/pdf', size: 2450000, storagePath: '/uploads/tcs_financial_statements.pdf',
+        mimeType: 'application/pdf', size: 2450000, storagePath: '/blob',
         category: 'Ledger', folder: 'Current File', version: 1,
         engagementId: eng2.id, uploadedById: staff1.id,
       },
@@ -518,7 +552,7 @@ async function main() {
     prisma.document.create({
       data: {
         fileName: 'infosys_internal_policy.pdf', originalName: 'Procurement Policy Manual.pdf',
-        mimeType: 'application/pdf', size: 890000, storagePath: '/uploads/infosys_internal_policy.pdf',
+        mimeType: 'application/pdf', size: 890000, storagePath: '/blob',
         category: 'Other', folder: 'Permanent File', version: 1,
         engagementId: eng3.id, uploadedById: staff2.id,
       },
@@ -853,77 +887,6 @@ async function main() {
 
   console.log(`✅ Sign Offs: 2 created`);
 
-  // ─── Copilot Sessions ───
-  await prisma.copilotSession.create({
-    data: {
-      title: 'SA 500 Audit Evidence Guidance',
-      userId: staff1.id,
-      engagementId: eng1.id,
-      messages: {
-        create: [
-          {
-            role: 'user', userId: staff1.id,
-            content: 'What are the key procedures under SA 500 for obtaining audit evidence?',
-          },
-          {
-            role: 'assistant',
-            content: 'Under SA 500 – Audit Evidence, the key procedures include:\n\n1. **Inspection** – Examining records, documents, or tangible assets\n2. **Observation** – Looking at a process or procedure performed by others\n3. **External Confirmation** – Direct written response from third parties (SA 505)\n4. **Recalculation** – Checking mathematical accuracy\n5. **Re-performance** – Independent execution of procedures\n6. **Analytical Procedures** – Evaluating financial information through plausible relationships (SA 520)\n7. **Inquiry** – Seeking information from knowledgeable persons\n\nThe auditor should assess both sufficiency (quantity) and appropriateness (quality = relevance + reliability) of evidence obtained.',
-          },
-        ],
-      },
-    },
-  });
-
-  await prisma.copilotSession.create({
-    data: {
-      title: 'Related Party Disclosure Requirements',
-      userId: manager.id,
-      engagementId: eng1.id,
-      messages: {
-        create: [
-          {
-            role: 'user', userId: manager.id,
-            content: 'What disclosures are required under Ind AS 24 for related party transactions?',
-          },
-          {
-            role: 'assistant',
-            content: 'Under **Ind AS 24 – Related Party Disclosures**, the following must be disclosed:\n\n**For each related party relationship:**\n- Name of the related party and nature of relationship\n- Outstanding balances (receivables/payables) with terms and conditions\n\n**For each category of transactions:**\n- Purchases and sales of goods/services\n- Property and asset transfers\n- Leasing arrangements\n- Guarantees given or received\n- Key Management Personnel (KMP) compensation\n\n**Key points for RIL audit:**\n- Check Section 188 of Companies Act for prior Board/Shareholder approval\n- Verify arm\'s length pricing under Transfer Pricing regulations\n- Cross-check with Form AOC-2 filed with MCA\n- Directors\' report must include related party policy details\n\nGiven the 3 undisclosed transactions we found, this is a potential qualification matter.',
-          },
-          {
-            role: 'user', userId: manager.id,
-            content: 'How should we report this in the audit report?',
-          },
-          {
-            role: 'assistant',
-            content: 'For the undisclosed related party transactions (₹4.2 crore), the reporting approach depends on management\'s response:\n\n**If management agrees to correct:**\n- Verify the corrected disclosures\n- No qualification needed if fully disclosed before signing\n- Document in working papers as "resolved"\n\n**If management refuses to disclose:**\n- This is a material misstatement in disclosures per SA 705\n- Issue a **Qualified Opinion** with specific paragraph:\n  *"Except for the non-disclosure of related party transactions..."*\n- Reference Ind AS 24 and Section 188\n\n**CARO 2020 impact:**\n- Clause (xiii) — specifically asks about related party transactions\n- Must report adverse remarks if not at arm\'s length or not approved\n\n**Recommended action:** Send formal management representation request and set a deadline before the audit report signing date.',
-          },
-        ],
-      },
-    },
-  });
-
-  await prisma.copilotSession.create({
-    data: {
-      title: 'Tax Audit Checklist - Section 44AB',
-      userId: staff2.id,
-      engagementId: eng2.id,
-      messages: {
-        create: [
-          {
-            role: 'user', userId: staff2.id,
-            content: 'Can you give me a checklist for Section 44AB tax audit procedures?',
-          },
-          {
-            role: 'assistant',
-            content: 'Here is a structured checklist for **Tax Audit u/s 44AB**:\n\n**Phase 1 — Preliminary:**\n☐ Verify turnover threshold (> ₹1 crore for business / > ₹50 lakh for profession)\n☐ Check if presumptive taxation opted (Sec 44AD/44ADA)\n☐ Obtain engagement letter\n☐ Verify previous year Form 3CD for pending observations\n\n**Phase 2 — Books & Records:**\n☐ Verify books of account maintained (Sec 44AA)\n☐ Check if books audited under any other Act\n☐ Note accounting software used and data integrity\n\n**Phase 3 — Key Clauses:**\n☐ Clause 13(e) — Method of valuation of stock\n☐ Clause 21 — Amounts debited to P&L (Sec 40/40A/43B)\n☐ Clause 26 — TDS/TCS compliance\n☐ Clause 27 — Section 269SS/269T cash limits\n☐ Clause 30 — GAAR applicability\n☐ Clause 34 — Section 43B statutory dues\n\n**Phase 4 — Completion:**\n☐ Obtain management representation letter\n☐ Complete Form 3CA/3CB (as applicable)\n☐ File Form 3CD on e-filing portal\n☐ Due date: 30th September (extended dates if applicable)',
-          },
-        ],
-      },
-    },
-  });
-
-  console.log(`✅ Copilot: 3 sessions with messages`);
-
   // ─── Audit Logs ───
   await Promise.all([
     prisma.auditLog.create({
@@ -949,13 +912,6 @@ async function main() {
     }),
     prisma.auditLog.create({
       data: {
-        action: 'AI_USAGE', entity: 'CopilotSession',
-        details: JSON.stringify({ query: 'SA 500 audit procedures', tokensUsed: 450 }),
-        ipAddress: '192.168.1.15', userId: staff1.id,
-      },
-    }),
-    prisma.auditLog.create({
-      data: {
         action: 'SIGNOFF', entity: 'Workpaper', entityId: wp1.id,
         details: JSON.stringify({ type: 'Preparer', status: 'Approved' }),
         ipAddress: '192.168.1.15', userId: staff1.id,
@@ -965,13 +921,679 @@ async function main() {
 
   console.log(`✅ Audit Logs: 5 entries created`);
 
-  console.log('\n🎉 Seeding complete! Login credentials:');
-  console.log('   Partner : rajesh@auditiq.in / password123');
-  console.log('   Manager : priya@auditiq.in / password123');
-  console.log('   Staff   : ankit@auditiq.in / password123');
-  console.log('   Staff   : neha@auditiq.in / password123');
-  console.log('   Intern  : rohan@auditiq.in / password123');
-  console.log('   Client  : vikram@reliance.in / password123');
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Audit IQ — New modules (onboarding, workflow, time, leave, vault, reports)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const fy = '2024-25';
+  const folderRoot = `storage/clients`;
+
+  // Prospect client (for onboarding wizard testing)
+  const prospectClient = await prisma.client.create({
+    data: {
+      name: 'Zenith Retail Pvt Ltd',
+      legalName: 'Zenith Retail Private Limited',
+      cin: 'U52100MH2020PTC345678',
+      pan: 'AABFZ1234M',
+      gstin: '27AABFZ1234M1Z5',
+      category: 'Private Ltd',
+      industry: 'Retail',
+      address: '12 Link Road, Andheri West, Mumbai 400053',
+      city: 'Mumbai',
+      state: 'Maharashtra',
+      contactName: 'Kavita Menon',
+      contactEmail: 'kavita@zenithretail.in',
+      contactPhone: '+91-9876543210',
+      status: 'Prospect',
+      isActive: true,
+      firmId: firm.id,
+    },
+  });
+
+  // Enrich existing clients with onboarding fields
+  await prisma.client.update({
+    where: { id: clients[0].id },
+    data: {
+      legalName: 'Reliance Industries Limited',
+      status: 'Active',
+      onboardedAt: daysAgo(120),
+      folderPath: `${folderRoot}/Reliance Industries Ltd/${fy}`,
+      conflictOfInterest: false,
+      conflictCheckedById: partner.id,
+      conflictCheckedAt: daysAgo(120),
+    },
+  });
+  await prisma.client.update({
+    where: { id: clients[1].id },
+    data: {
+      legalName: 'Tata Consultancy Services Limited',
+      status: 'Active',
+      onboardedAt: daysAgo(90),
+      folderPath: `${folderRoot}/Tata Consultancy Services/${fy}`,
+      conflictOfInterest: false,
+      conflictCheckedById: partner.id,
+      conflictCheckedAt: daysAgo(90),
+    },
+  });
+  await prisma.client.update({
+    where: { id: clients[2].id },
+    data: {
+      legalName: 'Infosys Limited',
+      status: 'Active',
+      onboardedAt: daysAgo(60),
+      folderPath: `${folderRoot}/Infosys Limited/${fy}`,
+    },
+  });
+  await prisma.client.update({
+    where: { id: clients[3].id },
+    data: {
+      legalName: 'Bharti Airtel Limited',
+      status: 'Active',
+      onboardedAt: daysAgo(200),
+      folderPath: `${folderRoot}/Bharti Airtel Ltd/${fy}`,
+    },
+  });
+  await prisma.client.update({
+    where: { id: clients[4].id },
+    data: {
+      legalName: 'Asian Paints Limited',
+      status: 'Inactive',
+      onboardedAt: daysAgo(400),
+      folderPath: `${folderRoot}/Asian Paints Ltd/2023-24`,
+    },
+  });
+
+  // KYC checklists (mix of Pending / Received / Verified)
+  const kycTypes = ['PAN', 'GST Certificate', 'CIN', 'MOA', 'AOA', 'Address Proof', 'Board Resolution'];
+  for (const c of [clients[0], clients[1], prospectClient]) {
+    const statuses =
+      c.id === clients[0].id
+        ? ['Verified', 'Verified', 'Verified', 'Received', 'Pending', 'Verified', 'Received']
+        : c.id === clients[1].id
+          ? ['Verified', 'Received', 'Received', 'Pending', 'Pending', 'Pending', 'Pending']
+          : ['Pending', 'Pending', 'Pending', 'Pending', 'Pending', 'Pending', 'Pending'];
+    await prisma.kycDocument.createMany({
+      data: kycTypes.map((docType, i) => ({
+        clientId: c.id,
+        docType,
+        status: statuses[i],
+        receivedAt: ['Received', 'Verified'].includes(statuses[i]) ? daysAgo(30 - i) : null,
+        verifiedAt: statuses[i] === 'Verified' ? daysAgo(25 - i) : null,
+        verifiedById: statuses[i] === 'Verified' ? partner.id : null,
+      })),
+    });
+  }
+  console.log('✅ KYC documents: seeded for 3 clients');
+
+  // Workflow engagements — update existing + add kanban spread
+  await prisma.engagement.update({
+    where: { id: eng1.id },
+    data: {
+      currentStage: 'Review with Manager',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff1.id,
+      scopeIncluded: 'Statutory audit of standalone financial statements; CARO 2020; internal financial controls reporting',
+      scopeExcluded: 'Consolidation of subsidiaries; tax advisory',
+      deadline: addDays(5),
+      elGenerated: true,
+      elSignedAt: daysAgo(100),
+      elSignedById: partner.id,
+      elStoragePath: `${folderRoot}/Reliance Industries Ltd/${fy}/Audit/engagement-letter.pdf`,
+    },
+  });
+
+  await prisma.engagement.update({
+    where: { id: eng2.id },
+    data: {
+      currentStage: 'Execution (WIP)',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff2.id,
+      scopeIncluded: 'Tax audit u/s 44AB; Form 3CD preparation',
+      scopeExcluded: 'Transfer pricing study',
+      deadline: addDays(2),
+      elGenerated: true,
+      elSignedAt: daysAgo(80),
+      elSignedById: partner.id,
+    },
+  });
+
+  await prisma.engagement.update({
+    where: { id: eng3.id },
+    data: {
+      currentStage: 'Partner Review',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff2.id,
+      deadline: addDays(12),
+    },
+  });
+
+  await prisma.engagement.update({
+    where: { id: eng4.id },
+    data: {
+      currentStage: 'Filed',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff1.id,
+      udin: '24053101ABCD1234',
+      filedAt: daysAgo(30),
+      deadline: daysAgo(10),
+    },
+  });
+
+  const engGstPending = await prisma.engagement.create({
+    data: {
+      title: 'GSTR-9 Annual Return FY 2024-25',
+      type: 'GST',
+      financialYear: fy,
+      status: 'Fieldwork',
+      progress: 30,
+      currentStage: 'Data Pending',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff2.id,
+      deadline: addDays(1),
+      billingType: 'Fixed',
+      billingAmount: 180000,
+      clientId: clients[4].id,
+      firmId: firm.id,
+    },
+  });
+
+  const engDraftReady = await prisma.engagement.create({
+    data: {
+      title: 'ITR Filing FY 2024-25 — HNI Individual',
+      type: 'Income Tax',
+      financialYear: fy,
+      status: 'Reporting',
+      progress: 70,
+      currentStage: 'Draft Ready',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff1.id,
+      deadline: addDays(14),
+      billingAmount: 45000,
+      clientId: prospectClient.id,
+      firmId: firm.id,
+    },
+  });
+
+  const engUdin = await prisma.engagement.create({
+    data: {
+      title: 'Tax Audit Report FY 2024-25',
+      type: 'Tax (44AB)',
+      financialYear: fy,
+      status: 'Reporting',
+      progress: 95,
+      currentStage: 'UDIN Generated',
+      partnerInChargeId: partner.id,
+      managerId: manager.id,
+      articleAssistantId: staff2.id,
+      udin: '24052099XYZW5678',
+      deadline: addDays(4),
+      billingAmount: 650000,
+      clientId: clients[2].id,
+      firmId: firm.id,
+    },
+  });
+
+  // Stage history
+  const stageTransitions: { engId: string; from: string | null; to: string; actorId: string; daysBack: number }[] = [
+    { engId: eng1.id, from: null, to: 'Data Pending', actorId: manager.id, daysBack: 90 },
+    { engId: eng1.id, from: 'Data Pending', to: 'Data Received', actorId: staff1.id, daysBack: 75 },
+    { engId: eng1.id, from: 'Data Received', to: 'Execution (WIP)', actorId: staff1.id, daysBack: 60 },
+    { engId: eng1.id, from: 'Execution (WIP)', to: 'Draft Ready', actorId: staff1.id, daysBack: 30 },
+    { engId: eng1.id, from: 'Draft Ready', to: 'Review with Manager', actorId: manager.id, daysBack: 10 },
+    { engId: eng2.id, from: null, to: 'Data Pending', actorId: manager.id, daysBack: 45 },
+    { engId: eng2.id, from: 'Data Pending', to: 'Data Received', actorId: staff2.id, daysBack: 35 },
+    { engId: eng2.id, from: 'Data Received', to: 'Execution (WIP)', actorId: staff2.id, daysBack: 20 },
+    { engId: eng4.id, from: 'Partner Review', to: 'UDIN Generated', actorId: partner.id, daysBack: 35 },
+    { engId: eng4.id, from: 'UDIN Generated', to: 'Filed', actorId: partner.id, daysBack: 30 },
+  ];
+  for (const t of stageTransitions) {
+    await prisma.engagementStageHistory.create({
+      data: {
+        engagementId: t.engId,
+        fromStage: t.from,
+        toStage: t.to,
+        actorId: t.actorId,
+        notes: t.to === 'Filed' ? 'GSTR-9 filed with client confirmation' : null,
+        createdAt: daysAgo(t.daysBack),
+      },
+    });
+  }
+  console.log(`✅ Stage history: ${stageTransitions.length} transitions`);
+
+  // Data checklist (Missing >48h triggers scheduler follow-ups)
+  await prisma.dataChecklistItem.createMany({
+    data: [
+      { engagementId: eng1.id, title: 'Trial balance as at 31-Mar-2025', status: 'Received', receivedAt: daysAgo(70) },
+      { engagementId: eng1.id, title: 'Bank statements — all accounts', status: 'Received', receivedAt: daysAgo(65) },
+      { engagementId: eng1.id, title: 'Related party transaction list', status: 'Requested' },
+      {
+        engagementId: eng2.id,
+        title: 'Fixed asset register with depreciation',
+        status: 'Missing',
+        requestedAt: daysAgo(4),
+        lastFollowupAt: daysAgo(2),
+        followupCount: 1,
+      },
+      {
+        engagementId: eng2.id,
+        title: 'TDS challans and Form 26AS',
+        status: 'Missing',
+        requestedAt: daysAgo(5),
+        followupCount: 0,
+      },
+      { engagementId: engGstPending.id, title: 'GSTR-1 / 3B summaries for FY', status: 'Requested' },
+      { engagementId: engDraftReady.id, title: 'Form 16 and capital gains statement', status: 'Received', receivedAt: daysAgo(3) },
+    ],
+  });
+  console.log('✅ Data checklist: 7 items');
+
+  // Tasks (Today's To-Do)
+  await prisma.task.createMany({
+    data: [
+      {
+        title: 'Complete bank confirmation follow-up — HDFC',
+        priority: 'Urgent',
+        status: 'Open',
+        dueDate: addDays(1),
+        assigneeId: staff1.id,
+        createdById: manager.id,
+        engagementId: eng1.id,
+      },
+      {
+        title: 'Draft Form 3CD clauses 21 and 26',
+        priority: 'High',
+        status: 'In Progress',
+        dueDate: addDays(3),
+        assigneeId: staff2.id,
+        createdById: manager.id,
+        engagementId: eng2.id,
+      },
+      {
+        title: 'Review procurement workpaper WP-IA01',
+        priority: 'Normal',
+        status: 'Open',
+        dueDate: addDays(5),
+        assigneeId: manager.id,
+        createdById: partner.id,
+        engagementId: eng3.id,
+      },
+      {
+        title: 'Upload GSTR-9 working papers',
+        priority: 'High',
+        status: 'Open',
+        dueDate: addDays(2),
+        assigneeId: staff2.id,
+        createdById: manager.id,
+        engagementId: engGstPending.id,
+      },
+      {
+        title: 'ICAI E-Diary entry for last fortnight',
+        priority: 'Normal',
+        status: 'Done',
+        dueDate: daysAgo(2),
+        completedAt: daysAgo(1),
+        assigneeId: staff2.id,
+        createdById: staff2.id,
+      },
+    ],
+  });
+  console.log('✅ Tasks: 5 created');
+
+  // Recent time entries (work types + billable mix for heatmap / reports)
+  const recentTime = [
+    { date: daysAgo(0), hours: 4, workType: 'Audit', description: 'RIL revenue testing', isBillable: true, engagementId: eng1.id, userId: staff1.id },
+    { date: daysAgo(0), hours: 2, workType: 'Internal', description: 'Team stand-up and file organisation', isBillable: false, engagementId: eng1.id, userId: staff1.id },
+    { date: daysAgo(1), hours: 7.5, workType: 'GST Filing', description: 'GSTR-3B reconciliation', isBillable: true, engagementId: eng4.id, userId: staff1.id },
+    { date: daysAgo(1), hours: 6, workType: 'Audit', description: 'TCS depreciation schedule', isBillable: true, engagementId: eng2.id, userId: staff2.id },
+    { date: daysAgo(2), hours: 3, workType: 'Consultation', description: 'Client call — scope discussion', isBillable: true, engagementId: eng2.id, userId: manager.id },
+    { date: daysAgo(3), hours: 8, workType: 'IT Filing', description: 'ITR draft preparation', isBillable: true, engagementId: engDraftReady.id, userId: staff1.id },
+    { date: daysAgo(4), hours: 1.5, workType: 'Internal', description: 'Office admin — CPE registration', isBillable: false, engagementId: eng1.id, userId: staff2.id },
+    { date: daysAgo(5), hours: 5, workType: 'Audit', description: 'Infosys IA payroll testing', isBillable: true, engagementId: eng3.id, userId: staff2.id },
+    { date: daysAgo(6), hours: 9, workType: 'Audit', description: 'Year-end close support', isBillable: true, engagementId: eng1.id, userId: staff1.id },
+    { date: daysAgo(7), hours: 4, workType: 'GST Filing', description: 'Asian Paints GSTR-9 draft', isBillable: true, engagementId: engGstPending.id, userId: staff2.id },
+  ];
+  await prisma.timeEntry.createMany({ data: recentTime });
+  console.log(`✅ Recent time entries: ${recentTime.length} (with workType)`);
+
+  // Statutory deadlines for management reports (RAG)
+  await prisma.deadline.createMany({
+    data: [
+      { title: 'GSTR-1 — May 2026', dueDate: addDays(2), type: 'GST', status: 'At Risk', engagementId: engGstPending.id },
+      { title: 'GSTR-3B — May 2026', dueDate: addDays(11), type: 'GST', status: 'On Track', engagementId: eng4.id },
+      { title: 'TDS Challan — May 2026', dueDate: addDays(1), type: 'Tax', status: 'At Risk', engagementId: eng2.id },
+      { title: 'ITR filing — non-audit cases', dueDate: addDays(6), type: 'Tax', status: 'On Track', engagementId: engDraftReady.id },
+      { title: 'Tax audit report signing', dueDate: addDays(3), type: 'Statutory', status: 'At Risk', engagementId: engUdin.id },
+      { title: 'ROC AOC-4 — RIL', dueDate: addDays(25), type: 'MCA', status: 'On Track', engagementId: eng1.id },
+    ],
+  });
+
+  // Articleship + stipend (Neha = article clerk)
+  await prisma.articleshipRecord.create({
+    data: {
+      userId: staff2.id,
+      registrationNo: 'ART-2023-45821',
+      startDate: new Date('2023-07-01'),
+      expectedEndDate: new Date('2026-06-30'),
+      examLeaveUsed: 12,
+      casualLeaveUsed: 4,
+      sickLeaveUsed: 2,
+    },
+  });
+
+  const stipendMonths = [
+    { month: 3, year: 2026, articleYear: 3, amount: 10000, status: 'Paid' as const },
+    { month: 4, year: 2026, articleYear: 3, amount: 10000, status: 'Paid' as const },
+    { month: 5, year: 2026, articleYear: 3, amount: 10000, status: 'Pending' as const },
+  ];
+  for (const s of stipendMonths) {
+    await prisma.stipendRecord.create({
+      data: {
+        userId: staff2.id,
+        ...s,
+        paidAt: s.status === 'Paid' ? daysAgo(5) : null,
+      },
+    });
+  }
+
+  // Leave requests (two-step ICAI types)
+  await prisma.leaveRequest.create({
+    data: {
+      type: 'Exam',
+      examLevel: 'Final',
+      fromDate: addDays(14),
+      toDate: addDays(18),
+      days: 5,
+      reason: 'CA Final Group II examination',
+      status: 'Manager Approved',
+      managerApprovedAt: daysAgo(1),
+      managerApprovedBy: manager.id,
+      userId: staff2.id,
+    },
+  });
+  await prisma.leaveRequest.create({
+    data: {
+      type: 'Study',
+      fromDate: addDays(21),
+      toDate: addDays(22),
+      days: 2,
+      reason: 'Study leave before exams',
+      status: 'Pending',
+      userId: staff2.id,
+    },
+  });
+  const staff1CasualLeave = await prisma.leaveRequest.findFirst({
+    where: { userId: staff1.id, type: 'Casual' },
+  });
+  if (staff1CasualLeave) {
+    await prisma.leaveRequest.update({
+      where: { id: staff1CasualLeave.id },
+      data: {
+        status: 'Approved',
+        managerApprovedAt: daysAgo(10),
+        managerApprovedBy: manager.id,
+        partnerApprovedAt: daysAgo(9),
+        partnerApprovedBy: partner.id,
+      },
+    });
+  }
+
+  console.log('✅ Articleship, stipend, ICAI leave samples');
+
+  // Password vault (set VAULT_ENCRYPTION_KEY=auditiq-dev-vault-key-for-seed-only in .env to reveal)
+  const vaultEntries = await Promise.all([
+    prisma.passwordVaultEntry.create({
+      data: {
+        clientId: clients[0].id,
+        portalName: 'Income Tax',
+        username: 'ril_audit@incometax.gov.in',
+        passwordEnc: encryptForSeed('DemoITPass@2025'),
+        notes: 'E-filing portal — use DSC token #2',
+        createdById: partner.id,
+      },
+    }),
+    prisma.passwordVaultEntry.create({
+      data: {
+        clientId: clients[0].id,
+        portalName: 'GST',
+        username: '27AAACR5055K1ZP',
+        passwordEnc: encryptForSeed('DemoGST@2025'),
+        createdById: manager.id,
+      },
+    }),
+    prisma.passwordVaultEntry.create({
+      data: {
+        clientId: clients[1].id,
+        portalName: 'MCA',
+        username: 'tcs_mca_admin',
+        passwordEnc: encryptForSeed('DemoMCA@2025'),
+        createdById: partner.id,
+      },
+    }),
+  ]);
+
+  await prisma.vaultAccessLog.create({
+    data: {
+      entryId: vaultEntries[0].id,
+      userId: partner.id,
+      action: 'reveal',
+      ipAddress: '127.0.0.1',
+      createdAt: daysAgo(1),
+    },
+  });
+
+  console.log('✅ Password vault: 3 entries (+ audit log)');
+
+  // UDIN log
+  await prisma.udinLog.createMany({
+    data: [
+      {
+        udin: '24053101ABCD1234',
+        caName: 'CA Rajesh Sharma',
+        caUserId: partner.id,
+        clientId: clients[3].id,
+        documentType: 'GST Annual Return',
+        engagementId: eng4.id,
+        generatedAt: daysAgo(30),
+        status: 'Active',
+      },
+      {
+        udin: '24052099XYZW5678',
+        caName: 'CA Rajesh Sharma',
+        caUserId: partner.id,
+        clientId: clients[2].id,
+        documentType: 'Tax Audit',
+        engagementId: engUdin.id,
+        generatedAt: daysAgo(5),
+        status: 'Active',
+      },
+      {
+        udin: '23101500REVOKED01',
+        caName: 'CA Rajesh Sharma',
+        caUserId: partner.id,
+        clientId: clients[4].id,
+        documentType: 'Certification',
+        status: 'Revoked',
+        revokedAt: daysAgo(100),
+        revokeReason: 'Issued in error — re-issued with new UDIN',
+      },
+    ],
+  });
+  console.log('✅ UDIN log: 3 entries');
+
+  // Invoices & payments
+  const inv1 = await prisma.invoice.create({
+    data: {
+      invoiceNo: 'INV-2025-0042',
+      clientId: clients[0].id,
+      engagementId: eng1.id,
+      amount: 2500000,
+      tax: 450000,
+      totalAmount: 2950000,
+      description: 'Statutory audit fees FY 2024-25 (excl. out-of-pocket)',
+      issueDate: daysAgo(30),
+      dueDate: addDays(15),
+      status: 'Partial',
+      paidAmount: 1500000,
+      createdById: partner.id,
+    },
+  });
+  await prisma.payment.create({
+    data: {
+      invoiceId: inv1.id,
+      amount: 1500000,
+      method: 'Bank Transfer',
+      reference: 'NEFT-RIL-15052025',
+      paidAt: daysAgo(20),
+    },
+  });
+
+  await prisma.invoice.create({
+    data: {
+      invoiceNo: 'INV-2025-0058',
+      clientId: clients[1].id,
+      engagementId: eng2.id,
+      amount: 800000,
+      tax: 144000,
+      totalAmount: 944000,
+      issueDate: daysAgo(10),
+      dueDate: addDays(20),
+      status: 'Unpaid',
+      createdById: partner.id,
+    },
+  });
+
+  await prisma.invoice.create({
+    data: {
+      invoiceNo: 'INV-2025-0031',
+      clientId: clients[3].id,
+      engagementId: eng4.id,
+      amount: 350000,
+      tax: 63000,
+      totalAmount: 413000,
+      issueDate: daysAgo(60),
+      dueDate: daysAgo(30),
+      status: 'Paid',
+      paidAmount: 413000,
+      createdById: partner.id,
+      payments: {
+        create: {
+          amount: 413000,
+          method: 'UPI',
+          reference: 'UPI-AIRTEL-GST9',
+          paidAt: daysAgo(28),
+        },
+      },
+    },
+  });
+
+  console.log('✅ Invoices: 3 (+ payments)');
+
+  // Client portal users
+  const portalHash = await bcrypt.hash('clientportal123', 12);
+  await prisma.clientPortalUser.create({
+    data: {
+      clientId: clients[0].id,
+      email: 'portal@reliance.in',
+      passwordHash: portalHash,
+      fullName: 'Vikram Singh',
+      mobile: '+91-9820011234',
+      isActive: true,
+      lastLoginAt: daysAgo(3),
+    },
+  });
+  await prisma.clientPortalUser.create({
+    data: {
+      clientId: clients[1].id,
+      email: 'portal@tcs.com',
+      passwordHash: portalHash,
+      fullName: 'Ramesh Iyer',
+      mobile: '+91-9821015678',
+      isActive: true,
+    },
+  });
+
+  console.log('✅ Client portal users: portal@reliance.in / portal@tcs.com → clientportal123');
+
+  // Communications log
+  await prisma.commsLog.createMany({
+    data: [
+      {
+        clientId: clients[0].id,
+        engagementId: eng1.id,
+        templateKey: 'welcome',
+        toAddress: 'vikram@reliance.in',
+        subject: 'Welcome to M.K. Dandeker & Co LLP client portal',
+        body: '<p>Dear Vikram,</p><p>Your portal login is ready. Please upload the documents listed in your checklist.</p>',
+        status: 'sent',
+        sentAt: daysAgo(120),
+      },
+      {
+        clientId: clients[1].id,
+        engagementId: eng2.id,
+        templateKey: 'document-followup',
+        toAddress: 'ramesh@tcs.com',
+        subject: 'Reminder: documents pending for Tax Audit FY 2024-25',
+        body: '<p>Dear Ramesh,</p><p>We are still awaiting your fixed asset register and TDS documents.</p>',
+        status: 'sent',
+        sentAt: daysAgo(2),
+      },
+      {
+        clientId: clients[3].id,
+        engagementId: eng4.id,
+        templateKey: 'filing-confirmation',
+        toAddress: 'amit@airtel.in',
+        subject: 'Filing confirmation — GSTR-9 FY 2024-25',
+        body: '<p>Dear Amit,</p><p>Your GSTR-9 has been filed successfully. UDIN: 24053101ABCD1234</p>',
+        status: 'sent',
+        sentAt: daysAgo(30),
+      },
+      {
+        clientId: clients[1].id,
+        engagementId: eng2.id,
+        templateKey: 'deadline-reminder',
+        toAddress: 'ramesh@tcs.com',
+        subject: 'Upcoming deadline: Tax audit report — 3 days',
+        body: '<p>Reminder: Tax audit report due shortly. Pending documents may delay filing.</p>',
+        status: 'queued',
+      },
+    ],
+  });
+  console.log('✅ Comms log: 4 entries');
+
+  // Extra notifications for new modules
+  await prisma.notification.createMany({
+    data: [
+      { type: 'warning', title: 'Document missing >48 hours', message: 'TCS fixed asset register not received — follow-up sent', userId: manager.id },
+      { type: 'info', title: 'Task assigned', message: 'Upload GSTR-9 working papers — due in 2 days', userId: staff2.id },
+      { type: 'warning', title: 'UDIN required', message: 'Engagement cannot move to Filed without UDIN', userId: partner.id },
+      { type: 'success', title: 'Stipend marked paid', message: 'April 2026 stipend recorded for Neha Gupta', userId: manager.id },
+    ],
+  });
+
+  console.log('\n📋 Audit IQ module test data ready:');
+  console.log('   Workflow board  → 7 engagements across all stages (RAG deadlines)');
+  console.log('   Onboarding      → Zenith Retail (Prospect) + KYC on 3 clients');
+  console.log('   Time tracker    → Recent logs + tasks for Ankit/Neha');
+  console.log('   Leave & stipend → Neha articleship; exam leave pending partner approval');
+  console.log('   Password vault  → 3 credentials (Partner/Manager only)');
+  console.log('   Mgmt reports    → Invoices, UDINs, profitability inputs');
+  console.log('   Client portal   → portal@reliance.in / clientportal123');
+  console.log('\n   Password vault uses VAULT_ENCRYPTION_KEY from server/.env\n');
+
+  console.log('🎉 Seeding complete! Login credentials:');
+  console.log('   Admin   : admin@auditiq.in / Admin@123');
+  console.log('   Partner : rajesh@auditiq.in / Admin@123');
+  console.log('   Manager : priya@auditiq.in / Admin@123');
+  console.log('   Staff   : ankit@auditiq.in / Admin@123');
+  console.log('   Staff   : neha@auditiq.in / Admin@123');
+  console.log('   Intern  : rohan@auditiq.in / Admin@123');
+  console.log('   Client  : vikram@reliance.in / Admin@123');
 }
 
 main()

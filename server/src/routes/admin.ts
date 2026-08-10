@@ -3,6 +3,9 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../index.js';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
+import logger from '../lib/logger.js';
+import { normalizeEmail } from '../lib/emailNormalize.js';
+import { optionalString, optionalEmail } from '../lib/zodHelpers.js';
 
 const router = Router();
 
@@ -42,7 +45,7 @@ router.get('/roles', authorize('Partner', 'Admin'), async (_req: AuthRequest, re
 
     res.json(result);
   } catch (err) {
-    console.error('Fetch roles error:', err);
+    logger.error('Fetch roles error:', err);
     res.status(500).json({ error: 'Failed to fetch roles' });
   }
 });
@@ -110,7 +113,7 @@ router.post('/roles', authorize('Partner', 'Admin'), async (req: AuthRequest, re
       res.status(400).json({ error: 'Validation failed', details: err.errors });
       return;
     }
-    console.error('Create role error:', err);
+    logger.error('Create role error:', err);
     res.status(500).json({ error: 'Failed to create role' });
   }
 });
@@ -125,12 +128,30 @@ const updateRoleSchema = z.object({
 
 router.put('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
     const data = updateRoleSchema.parse(req.body);
     const { id } = req.params;
 
     const existing = await prisma.role.findUnique({ where: { id } });
     if (!existing) {
       res.status(404).json({ error: 'Role not found' });
+      return;
+    }
+
+    // Role table is global (no firmId): block mutations on roles used by other tenants
+    const crossFirmUser = await prisma.user.findFirst({
+      where: {
+        roleId: id,
+        OR: [{ firmId: null }, { firmId: { not: firmId } }],
+      },
+      select: { id: true },
+    });
+    if (crossFirmUser) {
+      res.status(403).json({ error: 'Role is shared across firms and cannot be modified' });
       return;
     }
 
@@ -185,7 +206,7 @@ router.put('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       res.status(400).json({ error: 'Validation failed', details: err.errors });
       return;
     }
-    console.error('Update role error:', err);
+    logger.error('Update role error:', err);
     res.status(500).json({ error: 'Failed to update role' });
   }
 });
@@ -193,6 +214,11 @@ router.put('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
 // DELETE /api/admin/roles/:id
 router.delete('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
     const { id } = req.params;
 
     const role = await prisma.role.findUnique({
@@ -207,6 +233,19 @@ router.delete('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthReque
 
     if (role.isSystem) {
       res.status(403).json({ error: 'Cannot delete system roles' });
+      return;
+    }
+
+    // Role table is global (no firmId): block mutations on roles used by other tenants
+    const crossFirmUser = await prisma.user.findFirst({
+      where: {
+        roleId: id,
+        OR: [{ firmId: null }, { firmId: { not: firmId } }],
+      },
+      select: { id: true },
+    });
+    if (crossFirmUser) {
+      res.status(403).json({ error: 'Role is shared across firms and cannot be modified' });
       return;
     }
 
@@ -229,7 +268,7 @@ router.delete('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthReque
 
     res.json({ message: 'Role deleted successfully' });
   } catch (err) {
-    console.error('Delete role error:', err);
+    logger.error('Delete role error:', err);
     res.status(500).json({ error: 'Failed to delete role' });
   }
 });
@@ -244,7 +283,7 @@ router.get('/permissions', authorize('Partner', 'Admin'), async (_req: AuthReque
     });
     res.json(permissions);
   } catch (err) {
-    console.error('Fetch permissions error:', err);
+    logger.error('Fetch permissions error:', err);
     res.status(500).json({ error: 'Failed to fetch permissions' });
   }
 });
@@ -274,7 +313,7 @@ router.get('/users', authorize('Partner', 'Admin', 'Manager'), async (req: AuthR
     });
     res.json(users);
   } catch (err) {
-    console.error('Fetch users error:', err);
+    logger.error('Fetch users error:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
@@ -287,15 +326,21 @@ const updateUserSchema = z.object({
   phone: z.string().optional(),
   roleId: z.string().optional(),
   isActive: z.boolean().optional(),
+  password: z.string().min(8).optional(),
 });
 
 router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
     const data = updateUserSchema.parse(req.body);
     const { id } = req.params;
 
     const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing) {
+    if (!existing || existing.firmId !== firmId) {
       res.status(404).json({ error: 'User not found' });
       return;
     }
@@ -315,17 +360,32 @@ router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       ? (data.firstName[0] + data.lastName[0]).toUpperCase()
       : undefined;
 
+    if (legacyRole === 'Partner' && req.user!.role !== 'Partner') {
+      res.status(403).json({ error: 'Only Partners can assign the Partner role' });
+      return;
+    }
+    if (id === req.user!.id && legacyRole && legacyRole !== existing.role) {
+      res.status(403).json({ error: 'You cannot change your own role' });
+      return;
+    }
+
+    const { password, ...profileFields } = data;
+    const passwordHash = password ? await bcrypt.hash(password, 12) : undefined;
+
     const user = await prisma.user.update({
       where: { id },
       data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        designation: data.designation,
-        phone: data.phone,
-        roleId: data.roleId,
+        firstName: profileFields.firstName,
+        lastName: profileFields.lastName,
+        designation: profileFields.designation,
+        phone: profileFields.phone,
+        roleId: profileFields.roleId,
         role: legacyRole,
-        isActive: data.isActive,
+        isActive: profileFields.isActive,
         initials,
+        ...(passwordHash
+          ? { passwordHash, refreshTokenHash: null, refreshToken: null }
+          : {}),
       },
       select: {
         id: true,
@@ -342,12 +402,24 @@ router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       },
     });
 
+    if (passwordHash) {
+      await prisma.clientPortalUser.updateMany({
+        where: { userId: id },
+        data: { passwordHash },
+      });
+    }
+
     await prisma.auditLog.create({
       data: {
         action: 'UPDATE_USER',
         entity: 'User',
         entityId: user.id,
-        details: JSON.stringify({ changes: data }),
+        details: JSON.stringify({
+          changes: {
+            ...profileFields,
+            ...(passwordHash ? { passwordChanged: true } : {}),
+          },
+        }),
         userId: req.user!.id,
       },
     });
@@ -358,7 +430,7 @@ router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       res.status(400).json({ error: 'Validation failed', details: err.errors });
       return;
     }
-    console.error('Update user error:', err);
+    logger.error('Update user error:', err);
     res.status(500).json({ error: 'Failed to update user' });
   }
 });
@@ -377,8 +449,9 @@ const createUserSchema = z.object({
 router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = createUserSchema.parse(req.body);
+    const email = normalizeEmail(data.email);
 
-    const existing = await prisma.user.findUnique({ where: { email: data.email } });
+    const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       res.status(409).json({ error: 'Email already registered' });
       return;
@@ -389,13 +462,17 @@ router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, re
       res.status(400).json({ error: 'Invalid role ID' });
       return;
     }
+    if (role.name === 'Partner' && req.user!.role !== 'Partner') {
+      res.status(403).json({ error: 'Only Partners can create Partner accounts' });
+      return;
+    }
 
     const passwordHash = await bcrypt.hash(data.password, 12);
     const initials = (data.firstName[0] + data.lastName[0]).toUpperCase();
 
     const user = await prisma.user.create({
       data: {
-        email: data.email,
+        email,
         passwordHash,
         firstName: data.firstName,
         lastName: data.lastName,
@@ -405,6 +482,7 @@ router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, re
         designation: data.designation,
         phone: data.phone,
         firmId: req.user!.firmId,
+        emailVerified: true,
       },
       select: {
         id: true,
@@ -438,7 +516,7 @@ router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, re
       res.status(400).json({ error: 'Validation failed', details: err.errors });
       return;
     }
-    console.error('Create user error:', err);
+    logger.error('Create user error:', err);
     res.status(500).json({ error: 'Failed to create user' });
   }
 });
@@ -459,7 +537,7 @@ router.get('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res:
 
     res.json(firm);
   } catch (err) {
-    console.error('Fetch firm error:', err);
+    logger.error('Fetch firm error:', err);
     res.status(500).json({ error: 'Failed to fetch firm details' });
   }
 });
@@ -467,16 +545,16 @@ router.get('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res:
 // PUT /api/admin/firm — Update firm settings
 const updateFirmSchema = z.object({
   name: z.string().min(1).optional(),
-  registrationNo: z.string().optional(),
-  pan: z.string().optional(),
-  gstin: z.string().optional(),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  pincode: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().optional(),
-  website: z.string().optional(),
+  registrationNo: optionalString,
+  pan: optionalString,
+  gstin: optionalString,
+  address: optionalString,
+  city: optionalString,
+  state: optionalString,
+  pincode: optionalString,
+  phone: optionalString,
+  email: optionalEmail,
+  website: optionalString,
 });
 
 router.put('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
@@ -513,7 +591,7 @@ router.put('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res:
       res.status(400).json({ error: 'Validation failed', details: err.errors });
       return;
     }
-    console.error('Update firm error:', err);
+    logger.error('Update firm error:', err);
     res.status(500).json({ error: 'Failed to update firm settings' });
   }
 });
@@ -523,12 +601,19 @@ router.put('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res:
 // GET /api/admin/audit-logs — View audit trail
 router.get('/audit-logs', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
     const skip = (page - 1) * limit;
+    const firmScope = { user: { firmId } };
 
     const [logs, total] = await Promise.all([
       prisma.auditLog.findMany({
+        where: firmScope,
         include: {
           user: { select: { firstName: true, lastName: true, initials: true } },
         },
@@ -536,12 +621,12 @@ router.get('/audit-logs', authorize('Partner', 'Admin'), async (req: AuthRequest
         skip,
         take: limit,
       }),
-      prisma.auditLog.count(),
+      prisma.auditLog.count({ where: firmScope }),
     ]);
 
     res.json({ logs, total, page, totalPages: Math.ceil(total / limit) });
   } catch (err) {
-    console.error('Fetch audit logs error:', err);
+    logger.error('Fetch audit logs error:', err);
     res.status(500).json({ error: 'Failed to fetch audit logs' });
   }
 });

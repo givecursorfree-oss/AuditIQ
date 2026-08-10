@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.github
+.planning
+graphify-out
+*.md
+!README.md
+.env
+.env.*
+logs
+uploads
+server/logs
+server/uploads
+client/dist
+server/dist
+backups
