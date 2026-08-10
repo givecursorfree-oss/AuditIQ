@@ -1,7 +1,9 @@
-# Hostinger KVM 2 (2 vCPU / 8 GB / 100 GB) — pilot / staging only
+# Hostinger KVM 2 (2 vCPU / 8 GB / 100 GB) — default production compose for 8 GB VPS
 # Usage: docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
+#        npm run docker:up:kvm2
 #
 # Skips Typesense + Tika (saves ~3 GB RAM). App falls back to MySQL document search.
+# Use full docker-compose.yml only on 16 GB+ hosts.
 
 services:
   db:

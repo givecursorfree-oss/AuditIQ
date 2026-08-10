@@ -1,21 +1,41 @@
 # AuditIQ — Production deployment (CA firm VPS)
 
+## 8 GB VPS (Hostinger KVM 2) — use this now
+
+**Do not** run full `docker-compose.yml` on 8 GB RAM (Typesense + Tika need ~3 GB extra).
+
+Use the kvm2 stack (MySQL + server + client only; document search falls back to MySQL / `pdf-parse`):
+
+```bash
+cp .env.kvm2.example .env.kvm2
+# edit secrets, CLIENT_URL, DOMAIN
+docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
+```
+
+Or from repo root: `npm run docker:up:kvm2`
+
+GitHub **Deploy** workflow is **manual only** (Actions → Deploy → Run workflow). Pushing to `main` does **not** update the VPS until you run that workflow.
+
+When you have **16 GB+**, you can switch to full `docker-compose.yml` (Typesense + Tika).
+
 ## Required environment variables
 
-Copy `.env.example` to `.env` and set:
+### kvm2 (8 GB) — copy `.env.kvm2.example` → `.env.kvm2`
 
 | Variable | Notes |
 |----------|--------|
 | `MYSQL_ROOT_PASSWORD` | Strong password |
 | `JWT_SECRET` | Min 32 characters |
-| `CLIENT_URL` | `https://your-domain.com` |
+| `CLIENT_URL` | `http://YOUR_VPS_IP` or `https://your-domain.com` |
 | `VAULT_ENCRYPTION_KEY` | 32+ byte secret (Drive tokens, password vault) |
-| `TYPESENSE_API_KEY` | Random string — **not** the dev default |
 | `ALLOW_STAFF_REGISTRATION` | `false` (first Partner via bootstrap only) |
-| `COPILOT_ENABLED` | `false` unless firm accepts cloud LLM |
-| `SKIP_EMAIL_VERIFICATION` | `false` when SMTP is configured |
+| `SKIP_EMAIL_VERIFICATION` | `true` until SMTP is configured |
 
-## Deploy
+### Full stack (16 GB+) — copy `.env.example` → `.env`
+
+Also set `TYPESENSE_API_KEY` (not the dev default), `COPILOT_ENABLED=false` unless accepted.
+
+## Deploy (full stack, 16 GB+ only)
 
 ```bash
 docker compose up -d db
@@ -45,9 +65,13 @@ First login: with `ALLOW_STAFF_REGISTRATION=false`, the **first** staff register
 ./scripts/enable-https.sh yourdomain.com admin@yourdomain.com
 ```
 
-Then set `CLIENT_URL=https://yourdomain.com` in `.env` and `docker compose up -d server`.
+Then set `CLIENT_URL=https://yourdomain.com` and `DOMAIN=yourdomain.com` in `.env.kvm2` (or `.env`) and recreate the client/server:
 
-Nginx uses `DOMAIN` from `.env` to render `client/nginx.https.template` (Let's Encrypt certs in `certbot_conf` volume).
+```bash
+docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d client server
+```
+
+Nginx uses `DOMAIN` to render `client/nginx.https.template` (Let's Encrypt certs in `certbot_conf` volume).
 
 ## Backups
 
@@ -59,7 +83,7 @@ Creates under `./backups/`:
 
 - `auditiq_*.sql.gz` — MySQL
 - `uploads_*.tar.gz` — document files volume
-- `typesense_*.tar.gz` — search index (optional; can reindex from documents)
+- `typesense_*.tar.gz` — search index (only if Typesense is running; skip on kvm2)
 
 Cron example (daily 2am):
 
@@ -77,16 +101,17 @@ CI runs authz unit tests on every push.
 
 ## Security checklist
 
-- [ ] Typesense and Tika **not** exposed on public ports (default compose)
+- [ ] On 8 GB: running `docker-compose.kvm2.yml` (no Typesense/Tika containers)
+- [ ] Typesense and Tika **not** exposed on public ports (if using full compose)
 - [ ] HTTPS via `./scripts/enable-https.sh`
-- [ ] `COPILOT_ENABLED=false`
 - [ ] `ALLOW_STAFF_REGISTRATION=false`
 - [ ] Backup cron: `./scripts/backup.sh`
 
 ## Document search
 
-Upload a PDF in **Document Library** → search a word that appears only inside the file. Requires Typesense + Tika containers running.
+- **kvm2 (8 GB):** MySQL text search + `pdf-parse` for PDFs. Typesense/Tika reported as unreachable in health — expected.
+- **Full stack:** Upload a PDF in **Document Library** → search a word inside the file. Needs Typesense + Tika.
 
 ## Health
 
-`GET /api/health` — returns database, Typesense, and Tika status.
+`GET /api/health` — database must be `ok`. On kvm2, Typesense/Tika may be `unreachable` (normal).
