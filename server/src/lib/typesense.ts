@@ -63,7 +63,7 @@ export function buildCollectionSchema(firmId: string): TypesenseCollectionSchema
   const modelName = getEmbeddingModelName();
 
   const fields: Array<Record<string, unknown>> = [
-    { name: 'id', type: 'string' },
+    // Typesense reserves `id` — do not declare it in schema
     { name: 'firm_id', type: 'string', facet: true },
     { name: 'engagement_id', type: 'string', optional: true, facet: true },
     { name: 'client_id', type: 'string', optional: true, facet: true },

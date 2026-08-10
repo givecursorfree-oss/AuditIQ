@@ -38,11 +38,16 @@ services:
       TYPESENSE_ENABLE_CORS: "true"
     volumes:
       - typesense_data:/data
-    command: "--data-dir /data --api-key=${TYPESENSE_API_KEY} --enable-cors"
+    # reset-peers-on-error: Docker gives Typesense a new IP on every recreate; raft state otherwise crash-loops
+    command: >-
+      --data-dir /data
+      --api-key=${TYPESENSE_API_KEY}
+      --enable-cors
+      --reset-peers-on-error
     deploy:
       resources:
         limits:
-          memory: 1280M
+          memory: 2G
 
   tika:
     image: apache/tika:3.3.0.0-full
@@ -89,7 +94,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1280M
 
   nginx:
     image: nginx:1.27-alpine
