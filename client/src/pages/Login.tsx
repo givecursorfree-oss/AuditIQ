@@ -8,10 +8,8 @@ import { isAttendanceEligible } from '../lib/attendancePopup';
 import AuditIQLogo from '@/components/brand/AuditIQLogo';
 
 const LOGIN_FEATURE_IMAGES = {
-  auditLifecycle:
-    'https://i.ibb.co/7dmX2jYK/xaf-Qu-Lh-FBDf-QTe-Kat-Um-OAlglx-UQ.avif',
-  documentSearch:
-    'https://i.ibb.co/HpfP0Jw9/Gemini-Generated-Image-9csajt9csajt9csa.png',
+  auditLifecycle: '/feature-audit-lifecycle.png',
+  documentSearch: '/feature-document-search.png',
 } as const;
 
 const LOGIN_COPYRIGHT_YEAR = new Date().getFullYear();
@@ -147,7 +145,7 @@ export default function Login() {
         {/* Background image + overlay */}
         <div className="absolute inset-0 z-0">
           <img
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuA4FEVC11qP_czTlKWHP3aND9QMfknjO7GKO8Uc4o09p27SVZ0fxMKsKnij-cCJ7P_5qyI--jgwoG5YhW_ISlgB0b-mlI9OBUoECi5aQM7g5yWjWAAByWFsoHCRAD8Q3ngzqb67y2tsZgoqf-Yj6OWGQQbTFIjpLN7cOxIY4s4wQ8w4T-q33x8A6cJhZcXGK6jGwGcIBXSgHCB7IL0uz7nEHyWXVcMNWYeIiWvgoLTy23kTJW2no1OyVTiQGPuqosKqubLGUnVIooaY"
+            src="/logo-bg.png"
             alt=""
             className="w-full h-full object-cover opacity-40 grayscale contrast-125"
           />

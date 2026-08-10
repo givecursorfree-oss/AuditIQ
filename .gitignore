@@ -149,5 +149,8 @@ client/doctor.config.json
 # Images: allow public brand assets only
 *.png
 !client/public/logo.png
+!client/public/logo-light.png
+!client/public/logo-dark.png
 !client/public/logo-bg.png
 !client/public/default-avatar.png
+!client/public/feature-*.png
