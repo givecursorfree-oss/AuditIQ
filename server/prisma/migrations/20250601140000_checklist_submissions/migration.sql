@@ -1,8 +1,10 @@
--- Link client checklist uploads to documents; support revision workflow
-ALTER TABLE "DataChecklistItem" ADD COLUMN "documentId" TEXT;
-ALTER TABLE "DataChecklistItem" ADD COLUMN "revisionNotes" TEXT;
-ALTER TABLE "DataChecklistItem" ADD COLUMN "revisionRequestedAt" TIMESTAMP(3);
+-- Link client checklist uploads to documents; support revision workflow (MySQL)
+ALTER TABLE `DataChecklistItem` ADD COLUMN `documentId` VARCHAR(191) NULL;
+ALTER TABLE `DataChecklistItem` ADD COLUMN `revisionNotes` TEXT NULL;
+ALTER TABLE `DataChecklistItem` ADD COLUMN `revisionRequestedAt` DATETIME(3) NULL;
 
-CREATE INDEX "DataChecklistItem_documentId_idx" ON "DataChecklistItem"("documentId");
+CREATE INDEX `DataChecklistItem_documentId_idx` ON `DataChecklistItem`(`documentId`);
 
-ALTER TABLE "DataChecklistItem" ADD CONSTRAINT "DataChecklistItem_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "Document"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE `DataChecklistItem`
+  ADD CONSTRAINT `DataChecklistItem_documentId_fkey`
+  FOREIGN KEY (`documentId`) REFERENCES `Document`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
