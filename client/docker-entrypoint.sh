@@ -6,9 +6,13 @@ set -e
 CERT="/etc/letsencrypt/live/${DOMAIN:-_none_}/fullchain.pem"
 KEY="/etc/letsencrypt/live/${DOMAIN:-_none_}/privkey.pem"
 
-# Default api subdomain from main DOMAIN (api.auditiq.example.com)
+# Default API host: api.<parent> e.g. DOMAIN=auditiq.mkdandeker.com → api.mkdandeker.com
+# (not api.auditiq.mkdandeker.com). Override with API_DOMAIN env.
 if [ -z "${API_DOMAIN:-}" ] && [ -n "${DOMAIN:-}" ]; then
-  API_DOMAIN="api.${DOMAIN}"
+  case "$DOMAIN" in
+    *.*.*) API_DOMAIN="api.${DOMAIN#*.}" ;;
+    *)     API_DOMAIN="api.${DOMAIN}" ;;
+  esac
   export API_DOMAIN
 fi
 

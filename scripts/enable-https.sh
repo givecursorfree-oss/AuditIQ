@@ -1,15 +1,32 @@
 #!/usr/bin/env bash
-# Enable HTTPS for AuditIQ app + api subdomain (same VPS, kvm2 by default).
+# Enable HTTPS for AuditIQ app + separate API host on the same VPS.
 # Usage:
 #   ./scripts/enable-https.sh auditiq.mkdandeker.com you@email.com
-#   ./scripts/enable-https.sh auditiq.mkdandeker.com you@email.com full
+#   ./scripts/enable-https.sh auditiq.mkdandeker.com you@email.com kvm2 api.mkdandeker.com
+#
+# Defaults: app = <domain>, API = api.<parent>  (auditiq.mkdandeker.com → api.mkdandeker.com)
 
 set -euo pipefail
 
-DOMAIN="${1:?Usage: $0 <domain> <email> [kvm2|full]}"
-EMAIL="${2:?Usage: $0 <domain> <email> [kvm2|full]}"
+DOMAIN="${1:?Usage: $0 <app-domain> <email> [kvm2|full] [api-domain]}"
+EMAIL="${2:?Usage: $0 <app-domain> <email> [kvm2|full] [api-domain]}"
 MODE="${3:-kvm2}"
-API_DOMAIN="api.${DOMAIN}"
+# 3rd arg may be api domain if user skips mode: detect
+if [[ "$MODE" != "kvm2" && "$MODE" != "full" ]]; then
+  API_DOMAIN="$MODE"
+  MODE="kvm2"
+else
+  API_DOMAIN="${4:-}"
+fi
+
+if [[ -z "$API_DOMAIN" ]]; then
+  # auditiq.mkdandeker.com → api.mkdandeker.com
+  if [[ "$DOMAIN" == *.*.* ]]; then
+    API_DOMAIN="api.${DOMAIN#*.}"
+  else
+    API_DOMAIN="api.${DOMAIN}"
+  fi
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -27,7 +44,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-echo "=== AuditIQ HTTPS for ${DOMAIN} + ${API_DOMAIN} (${MODE}) ==="
+echo "=== AuditIQ HTTPS ==="
+echo "  App: https://${DOMAIN}"
+echo "  API: https://${API_DOMAIN}"
+echo "  Mode: ${MODE}"
 
 set_env() {
   local key="$1" val="$2"
@@ -57,7 +77,7 @@ else
   "${COMPOSE[@]}" --profile ssl "${CERTBOT[@]}"
 fi
 
-echo "[3/4] Recreate client with HTTPS + api subdomain..."
+echo "[3/4] Recreate client with HTTPS + API host..."
 "${COMPOSE[@]}" up -d --force-recreate client
 
 echo "[4/4] Restart server (CLIENT_URL=https://${DOMAIN})..."
@@ -68,6 +88,10 @@ echo "Done."
 echo "  App: https://${DOMAIN}"
 echo "  API: https://${API_DOMAIN}/api/health"
 echo "Hostinger firewall MUST allow TCP 80 and 443."
+echo ""
+echo "DNS required:"
+echo "  A  ${DOMAIN%%.*}     → VPS IP   (or full host as you already have)"
+echo "  A  api             → same VPS IP   (for ${API_DOMAIN})"
 echo ""
 echo "Renewal cron (daily 3am):"
 echo "  0 3 * * * cd ${ROOT} && ${COMPOSE[*]} --profile ssl run --rm certbot renew && ${COMPOSE[*]} exec client nginx -s reload"

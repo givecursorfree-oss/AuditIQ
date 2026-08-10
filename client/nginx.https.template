@@ -1,6 +1,6 @@
-# Production HTTPS — app + api subdomain on same cert/VPS
+# Production HTTPS — app + API host on same VPS / cert
 # Variables: ${DOMAIN} ${API_DOMAIN}
-# API_DOMAIN defaults to api.${DOMAIN} via docker-entrypoint.sh
+# Example: DOMAIN=auditiq.mkdandeker.com  API_DOMAIN=api.mkdandeker.com
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
