@@ -1,7 +1,6 @@
-# Production HTTPS — rendered at container start when DOMAIN is set
+# Production HTTPS — rendered at container start when DOMAIN is set AND certs exist
 # Variables: ${DOMAIN}
 
-# HTTP → HTTPS + ACME challenge
 server {
     listen 80;
     server_name ${DOMAIN};
@@ -16,7 +15,8 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${DOMAIN};
 
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;

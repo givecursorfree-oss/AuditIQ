@@ -59,19 +59,31 @@ First login: with `ALLOW_STAFF_REGISTRATION=false`, the **first** staff register
 - **Development:** `npm run db:migrate` (creates new migrations)
 - See `server/prisma/migrations/README.md`
 
-## HTTPS
+## HTTPS (required for phones / all devices)
+
+Many phones open `https://` first. If Hostinger firewall blocks **443**, those devices fail while desktop HTTP still works.
+
+1. Hostinger → VPS → Firewall → allow **TCP 80** and **TCP 443** (and **22** for SSH).
+2. On the VPS:
 
 ```bash
-./scripts/enable-https.sh yourdomain.com admin@yourdomain.com
+cd /opt/auditiq
+git pull
+chmod +x scripts/enable-https.sh
+./scripts/enable-https.sh auditiq.mkdandeker.com YOUR_EMAIL@example.com
 ```
 
-Then set `CLIENT_URL=https://yourdomain.com` and `DOMAIN=yourdomain.com` in `.env.kvm2` (or `.env`) and recreate the client/server:
+3. Confirm: https://auditiq.mkdandeker.com and `/api/health`
+
+DNS for `auditiq.mkdandeker.com` must be an **A record → your VPS IP** (already `200.141.12.215` if unchanged).
+
+Then set `CLIENT_URL=https://auditiq.mkdandeker.com` and `DOMAIN=auditiq.mkdandeker.com` in `.env.kvm2` (the script does this) and recreate:
 
 ```bash
 docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d client server
 ```
 
-Nginx uses `DOMAIN` to render `client/nginx.https.template` (Let's Encrypt certs in `certbot_conf` volume).
+Nginx uses `DOMAIN` to render `client/nginx.https.template` only when Let's Encrypt cert files exist (safe if DOMAIN is set early).
 
 ## Backups
 
