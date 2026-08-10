@@ -29,19 +29,21 @@ const COOKIE_NAME = 'auditiq_token';
 const TWO_FA_ROLES = ['Partner', 'Admin'];
 
 function setTokensCookie(res: Response, accessToken: string, refreshToken?: string): void {
-  const isProduction = getEnv().NODE_ENV === 'production';
+  // Secure cookies only work over HTTPS. On HTTP (VPS IP before SSL), Secure
+  // cookies are dropped by the browser → login looks OK then /auth/me is 401.
+  const useSecure = getEnv().CLIENT_URL.startsWith('https://');
   res.cookie(COOKIE_NAME, accessToken, {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'strict' : 'lax',
+    secure: useSecure,
+    sameSite: useSecure ? 'strict' : 'lax',
     maxAge: 15 * 60 * 1000, // 15 mins
     path: '/',
   });
   if (refreshToken) {
     res.cookie('auditiq_refresh', refreshToken, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'strict' : 'lax',
+      secure: useSecure,
+      sameSite: useSecure ? 'strict' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/api/auth/refresh',
     });
