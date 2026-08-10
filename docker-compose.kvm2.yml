@@ -71,6 +71,7 @@ services:
       - "443:443"
     environment:
       DOMAIN: ${DOMAIN:-}
+      API_DOMAIN: ${API_DOMAIN:-}
     volumes:
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot

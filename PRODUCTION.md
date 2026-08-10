@@ -63,12 +63,20 @@ First login: with `ALLOW_STAFF_REGISTRATION=false`, the **first** staff register
 - **Development:** `npm run db:migrate` (creates new migrations)
 - See `server/prisma/migrations/README.md`
 
-## HTTPS (required for phones / all devices)
+## HTTPS (app + api subdomain)
 
-Many phones open `https://` first. If Hostinger firewall blocks **443**, those devices fail while desktop HTTP still works.
+Many phones open `https://` first. Hostinger firewall must allow **TCP 80** and **TCP 443** (and **22** for SSH).
 
-1. Hostinger → VPS → Firewall → allow **TCP 80** and **TCP 443** (and **22** for SSH).
-2. On the VPS:
+### DNS (Hostinger)
+
+| Type | Host | Points to |
+|------|------|-----------|
+| A | `auditiq` | VPS IP |
+| A | `api.auditiq` | **same** VPS IP |
+
+App stays on the VPS (no Vercel required). `api.` is only an extra hostname for the same backend.
+
+### Enable SSL for both
 
 ```bash
 cd /opt/auditiq
@@ -77,17 +85,18 @@ chmod +x scripts/enable-https.sh
 ./scripts/enable-https.sh auditiq.mkdandeker.com YOUR_EMAIL@example.com
 ```
 
-3. Confirm: https://auditiq.mkdandeker.com and `/api/health`
+Opens:
 
-DNS for `auditiq.mkdandeker.com` must be an **A record → your VPS IP** (already `200.141.12.215` if unchanged).
+- App: `https://auditiq.mkdandeker.com`
+- API: `https://api.auditiq.mkdandeker.com` (and `/api/health`)
 
-Then set `CLIENT_URL=https://auditiq.mkdandeker.com` and `DOMAIN=auditiq.mkdandeker.com` in `.env.kvm2` (the script does this) and recreate:
+Script sets `DOMAIN`, `API_DOMAIN=api.…`, and `CLIENT_URL=https://auditiq.…` in `.env.kvm2`.
 
 ```bash
 docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d client server
 ```
 
-Nginx uses `DOMAIN` to render `client/nginx.https.template` only when Let's Encrypt cert files exist (safe if DOMAIN is set early).
+Nginx uses `DOMAIN` + `API_DOMAIN` when Let's Encrypt certs exist.
 
 ## Backups
 
