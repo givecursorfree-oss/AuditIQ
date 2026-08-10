@@ -23,6 +23,7 @@ RUN npm ci --omit=dev
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
+COPY scripts ./scripts
 
 RUN mkdir -p uploads logs && chown -R appuser:appgroup uploads logs
 
