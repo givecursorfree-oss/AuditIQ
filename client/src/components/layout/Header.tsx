@@ -19,7 +19,6 @@ import { Button } from '../ui/button';
 import api from '../../services/api';
 import { useNavBadges } from '../../context/NavBadgesContext';
 import StaffPresenceSelector from '../StaffPresenceSelector';
-import UserPresenceAvatar from '../UserPresenceAvatar';
 import { isStaffPresenceRole } from '@/lib/presence';
 import { getRouteLabel } from '@/lib/routeLabels';
 import { performHeaderSearch, type HeaderSearchResult } from '@/lib/headerSearch';
@@ -276,18 +275,6 @@ export default function Header() {
             <div className="hidden sm:block">
               <StaffPresenceSelector />
             </div>
-          )}
-
-          {user && (
-            <UserPresenceAvatar
-              userId={user.id}
-              initials={user.initials}
-              name={user.firstName}
-              imageUrl={user.avatar}
-              size="sm"
-              showIndicator={isStaffPresenceRole(user.role)}
-              className="hidden md:flex"
-            />
           )}
         </div>
       </header>
