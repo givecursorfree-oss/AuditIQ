@@ -5,7 +5,11 @@
  *   (also shipped via client/.env.production for Vercel builds)
  */
 function configuredApiOrigin(): string {
-  return (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+  const url =
+    typeof import.meta !== 'undefined' && import.meta.env
+      ? import.meta.env.VITE_API_URL
+      : '';
+  return String(url || '').trim().replace(/\/$/, '');
 }
 
 export function resolveApiOrigin(): string {

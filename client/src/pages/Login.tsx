@@ -5,6 +5,7 @@ import { LiquidGlassCard } from '@/components/ui/liquid-glass-card';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../hooks/useAppConfig';
 import { isAttendanceEligible } from '../lib/attendancePopup';
+import { formatApiError } from '@/lib/apiErrors';
 import AuditIQLogo from '@/components/brand/AuditIQLogo';
 
 const LOGIN_FEATURE_IMAGES = {
@@ -48,7 +49,7 @@ export default function Login() {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [preAuthToken, setPreAuthToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
-  const { login, verifyTwoFactor } = useAuth();
+  const { login, verifyTwoFactor, sessionError } = useAuth();
   const { allowStaffRegistration } = useAppConfig();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -85,19 +86,7 @@ export default function Login() {
     navigate(path);
   };
 
-  const extractError = (err: unknown): string => {
-    const axErr = err as { response?: { status?: number; data?: { error?: string } }; code?: string; message?: string };
-    if (axErr?.response?.status === 429) {
-      return 'Too many requests — wait a minute, refresh the page, or restart the dev server, then try again.';
-    }
-    const data = axErr?.response?.data as { error?: string; code?: string } | undefined;
-    if (axErr?.code === 'ERR_NETWORK' || axErr?.message === 'Network Error') {
-      return import.meta.env.PROD
-        ? 'Cannot reach the API server. Check that https://api.mkdandeker.com is up (nginx 502 usually means the Node container is still starting or crashed).'
-        : 'Cannot connect to server. Please ensure the backend is running on port 3001.';
-    }
-    return data?.error || axErr?.message || 'Login failed';
-  };
+  const extractError = (err: unknown): string => formatApiError(err, 'login');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,10 +197,15 @@ export default function Login() {
             <p className="text-base text-foreground-muted leading-relaxed">
               {preAuthToken
                 ? 'Enter the 6-digit code from your authenticator app to complete sign-in.'
-                : 'Welcome back. Please enter your credentials to access your dashboard.'}
+                : 'Enter your email and password to sign in.'}
             </p>
           </header>
 
+          {sessionError && (
+            <output className="mb-8 alert-warning flex list-none justify-between items-start gap-3" role="status">
+              <span>{sessionError}</span>
+            </output>
+          )}
           {error && <div className="mb-8 alert-danger" role="alert">{error}</div>}
           {infoMsg && (
             <output className="mb-8 alert-info flex list-none justify-between items-start gap-3">

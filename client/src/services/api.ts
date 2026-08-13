@@ -6,6 +6,7 @@ const api = axios.create({
   baseURL: resolveApiBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true, // Send httpOnly cookies with every request
+  timeout: 25_000, // Fail fast when API/nginx is down instead of hanging ~60s
 });
 
 // Let the browser set multipart boundary — default application/json breaks file uploads

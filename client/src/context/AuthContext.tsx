@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import api from '../services/api';
 import type { User } from '../types';
 import { isStaffPresenceRole } from '@/lib/presence';
+import { formatApiError, isApiNetworkFailure } from '@/lib/apiErrors';
 import {
   isAttendanceEligible,
   tryAttendanceCheckIn,
@@ -15,6 +16,8 @@ export type LoginResult =
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  /** Set when /auth/me fails due to network/timeout (not 401). */
+  sessionError: string | null;
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyTwoFactor: (preAuthToken: string, code: string) => Promise<User>;
   register: (data: {
@@ -35,12 +38,19 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Restore session from httpOnly cookie via /auth/me
   useEffect(() => {
     api.get('/auth/me')
-      .then(({ data }) => setUser(data))
-      .catch(() => setUser(null))
+      .then(({ data }) => {
+        setUser(data);
+        setSessionError(null);
+      })
+      .catch((err) => {
+        setUser(null);
+        setSessionError(isApiNetworkFailure(err) ? formatApiError(err, 'session') : null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -136,8 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ user, loading, login, verifyTwoFactor, register, logout, refreshUser }),
-    [user, loading, login, verifyTwoFactor, register, logout, refreshUser]
+    () => ({ user, loading, sessionError, login, verifyTwoFactor, register, logout, refreshUser }),
+    [user, loading, sessionError, login, verifyTwoFactor, register, logout, refreshUser]
   );
 
   return (

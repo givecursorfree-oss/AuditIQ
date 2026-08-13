@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { AxiosResponse } from 'axios';
 import api from '../services/api';
 import type { DashboardData, Deadline } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +29,7 @@ import {
   countUpcomingDeadlinesThisWeek,
 } from '../components/dashboard/mapDashboardData';
 import { engagementHubPath, engagementTasksPath } from '@/lib/engagementDeepLinks';
+import { formatApiError } from '@/lib/apiErrors';
 
 const PARTNER_ADMIN_ROLES = ['Admin', 'Partner'];
 const FIRM_LEADERSHIP_ROLES = ['Admin', 'Partner', 'Manager'];
@@ -66,79 +68,97 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadDashboard = useCallback(() => {
+  const loadDashboard = useCallback(async () => {
     setLoadError(null);
     const role = user?.role || '';
     const isPartnerAdmin = PARTNER_ADMIN_ROLES.includes(role);
     const isFirmLeadership = FIRM_LEADERSHIP_ROLES.includes(role);
-    const isEmployee = ['Manager', 'Staff', 'Intern'].includes(role);
     const isFirmStaff = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'].includes(role);
     const showCompliance = ['Admin', 'Partner', 'Manager'].includes(role);
     if (isFirmLeadership) setActionQueueLoading(true);
 
-    const fetches: Promise<any>[] = [
+    type ApiResponse = AxiosResponse<unknown>;
+    type Settled = PromiseSettledResult<ApiResponse>;
+
+    const fetches: Promise<ApiResponse>[] = [
       api.get('/dashboard'),
       api.get('/dashboard/deadlines'),
       api.get('/dashboard/chart-data'),
     ];
-    if (isPartnerAdmin) fetches.push(api.get('/dashboard/briefing').catch(() => ({ data: null })));
-    if (isFirmLeadership) {
-      fetches.push(
-        api.get<DashboardActionQueueData>('/dashboard/action-queue').catch(() => ({ data: null }))
-      );
-    }
-    if (isFirmStaff) fetches.push(api.get('/tasks?scope=mine&status=Open').catch(() => ({ data: { tasks: [] } })));
+    if (isPartnerAdmin) fetches.push(api.get('/dashboard/briefing'));
+    if (isFirmLeadership) fetches.push(api.get<DashboardActionQueueData>('/dashboard/action-queue'));
+    if (isFirmStaff) fetches.push(api.get('/tasks?scope=mine&status=Open'));
     if (showCompliance) {
-      fetches.push(api.get('/dashboard/compliance-calendar').catch(() => ({ data: null })));
-      fetches.push(
-        api.get('/client-queries/open-summary').catch(() => ({
-          data: { openCount: 0, recent: [] },
-        }))
-      );
+      fetches.push(api.get('/dashboard/compliance-calendar'));
+      fetches.push(api.get('/client-queries/open-summary'));
     }
 
-    Promise.all(fetches)
-      .then((results) => {
-        const [dashRes, dlRes, chartRes, ...extras] = results;
-        setData(dashRes.data && typeof dashRes.data === 'object' ? dashRes.data : null);
-        setDeadlines(Array.isArray(dlRes.data) ? dlRes.data : []);
-        setChartData(Array.isArray(chartRes.data) ? chartRes.data : []);
-        let ei = 0;
-        if (isPartnerAdmin) {
-          const briefingData = extras[ei]?.data;
-          setBriefing(briefingData && typeof briefingData === 'object' ? briefingData : null);
-          ei += 1;
-        }
-        if (isFirmLeadership) {
-          const q = extras[ei]?.data;
-          setActionQueue(
-            q && typeof q === 'object' && Array.isArray(q.items) && q.summary ? q : null
-          );
-          ei += 1;
-        }
-        if (isFirmStaff) {
-          const taskPayload = extras[ei]?.data;
-          const tasks = Array.isArray(taskPayload?.tasks)
-            ? taskPayload.tasks
-            : Array.isArray(taskPayload)
-              ? taskPayload
-              : [];
-          setMyTasks(tasks);
-          ei += 1;
-        }
-        if (showCompliance) {
-          setCompliance(extras[ei]?.data ?? null);
-          ei += 1;
-          setOpenClientQueries(extras[ei]?.data ?? { openCount: 0, recent: [] });
-        }
-      })
-      .catch(() => {
-        setLoadError('Unable to load dashboard data. Check your connection and try again.');
-      })
-      .finally(() => {
-        setLoading(false);
-        setActionQueueLoading(false);
-      });
+    const settled = (await Promise.allSettled(fetches)) as Settled[];
+    const [dashRes, dlRes, chartRes, ...extras] = settled;
+
+    if (dashRes.status === 'rejected') {
+      setLoadError(formatApiError(dashRes.reason, 'dashboard'));
+      setData(null);
+    } else {
+      const dashData = dashRes.value.data;
+      setData(dashData && typeof dashData === 'object' ? (dashData as DashboardData) : null);
+    }
+
+    if (dlRes.status === 'fulfilled') {
+      setDeadlines(Array.isArray(dlRes.value.data) ? dlRes.value.data : []);
+    }
+    if (chartRes.status === 'fulfilled') {
+      setChartData(Array.isArray(chartRes.value.data) ? chartRes.value.data : []);
+    }
+
+    let ei = 0;
+    if (isPartnerAdmin) {
+      const res = extras[ei];
+      if (res?.status === 'fulfilled') {
+        const briefingData = res.value.data;
+        setBriefing(briefingData && typeof briefingData === 'object' ? briefingData : null);
+      }
+      ei += 1;
+    }
+    if (isFirmLeadership) {
+      const res = extras[ei];
+      if (res?.status === 'fulfilled') {
+        const q = res.value.data as DashboardActionQueueData | null;
+        setActionQueue(
+          q && typeof q === 'object' && Array.isArray(q.items) && q.summary ? q : null
+        );
+      }
+      ei += 1;
+    }
+    if (isFirmStaff) {
+      const res = extras[ei];
+      if (res?.status === 'fulfilled') {
+        const taskPayload = res.value.data as { tasks?: unknown[] } | unknown[] | null | undefined;
+        const tasks = Array.isArray((taskPayload as { tasks?: unknown[] })?.tasks)
+          ? (taskPayload as { tasks: unknown[] }).tasks
+          : Array.isArray(taskPayload)
+            ? taskPayload
+            : [];
+        setMyTasks(tasks);
+      }
+      ei += 1;
+    }
+    if (showCompliance) {
+      const compRes = extras[ei];
+      if (compRes?.status === 'fulfilled') {
+        setCompliance((compRes.value.data as typeof compliance) ?? null);
+      }
+      ei += 1;
+      const queriesRes = extras[ei];
+      if (queriesRes?.status === 'fulfilled') {
+        setOpenClientQueries(
+          (queriesRes.value.data as typeof openClientQueries) ?? { openCount: 0, recent: [] }
+        );
+      }
+    }
+
+    setLoading(false);
+    setActionQueueLoading(false);
   }, [user?.role]);
 
   useEffect(() => {
@@ -212,7 +232,7 @@ export default function Dashboard() {
     data?.stats?.overdueDeadlines ?? deadlines.filter((d) => d.isOverdue).length;
 
   if (loading) {
-    return <PageLoading className="h-64" />;
+    return <PageLoading label="Loading dashboard…" className="h-64" />;
   }
 
   return (

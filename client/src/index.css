@@ -529,6 +529,12 @@ mark.doc-search-hit {
 
   }
 
+  .alert-warning {
+
+    @apply rounded-xl border border-warning/25 bg-warning/10 px-4 py-3 text-sm font-medium text-warning;
+
+  }
+
   .input-floating {
 
     @apply block w-full rounded-xl border border-transparent bg-surface-muted px-4 pb-2 pt-6 text-foreground outline-none transition-all duration-200 focus:border-slate-400 focus:bg-card focus:ring-4 focus:ring-slate-400/15;

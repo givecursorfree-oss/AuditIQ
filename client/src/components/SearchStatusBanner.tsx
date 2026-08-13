@@ -1,35 +1,20 @@
 import { useAppConfig } from '../hooks/useAppConfig';
-import { MagnifyingGlass, Warning, CheckCircle, CircleNotch } from '@phosphor-icons/react';
+import { MagnifyingGlass, Warning, CircleNotch } from '@phosphor-icons/react';
 
 /**
- * Status banner for the File Brain–style search stack (Tika + Typesense).
+ * Shows search status only when something needs the user's attention.
+ * Healthy hybrid search stays silent (Krug: don't make me think).
  */
 export default function SearchStatusBanner({ compact = false }: { compact?: boolean }) {
   const { documentSearch, loaded } = useAppConfig();
 
   if (!loaded || !documentSearch) return null;
 
-  const { mode, typesense, tika, semantic, embeddingModel } = documentSearch;
+  const { mode, typesense, semantic } = documentSearch;
   const shell = compact ? 'px-3 py-2' : 'px-4 py-3';
 
-  if (mode === 'hybrid') {
-    return (
-      <output
-        className={`flex items-start gap-2 rounded-lg border border-border bg-surface-muted text-sm text-foreground-secondary list-none ${shell}`}
-      >
-        <CheckCircle size={18} className="text-success shrink-0 mt-0.5" weight="fill" aria-hidden />
-        <div>
-          <p className="font-medium text-foreground">Semantic search active</p>
-          {!compact && (
-            <p className="mt-0.5 text-xs text-foreground-muted">
-              Hybrid keyword + meaning search via {embeddingModel}. Filename matches appear immediately;
-              the first semantic query may take a few seconds while the model loads.
-            </p>
-          )}
-        </div>
-      </output>
-    );
-  }
+  // Search is fully working — no banner needed
+  if (mode === 'hybrid') return null;
 
   if (mode === 'keyword' && typesense === 'ok') {
     return (
@@ -38,10 +23,10 @@ export default function SearchStatusBanner({ compact = false }: { compact?: bool
       >
         <Warning size={18} className="text-amber-600 shrink-0 mt-0.5" aria-hidden />
         <div>
-          <p className="font-medium text-foreground">Keyword search only</p>
+          <p className="font-medium text-foreground">Basic search only</p>
           {!compact && (
             <p className="mt-0.5 text-xs text-foreground-muted">
-              Enable semantic search in server config (SEMANTIC_SEARCH_ENABLED=true) and re-index.
+              You can search by file name and keywords. Meaning-based search is not available yet.
             </p>
           )}
         </div>
@@ -56,10 +41,10 @@ export default function SearchStatusBanner({ compact = false }: { compact?: bool
       >
         <CircleNotch size={18} className="text-amber-600 shrink-0 mt-0.5 animate-spin" aria-hidden />
         <div>
-          <p className="font-medium text-foreground">Embedding model loading</p>
+          <p className="font-medium text-foreground">Search is warming up</p>
           {!compact && (
             <p className="mt-0.5 text-xs text-foreground-muted">
-              First startup can take 1–3 minutes. Use Reindex when ready (Partner/Admin).
+              This can take a minute after startup. File name search works right away.
             </p>
           )}
         </div>
@@ -67,20 +52,19 @@ export default function SearchStatusBanner({ compact = false }: { compact?: bool
     );
   }
 
-  // MySQL fallback — expected until Typesense/Tika are up on the VPS
+  // Limited / offline search stack
   return (
     <output
       className={`flex items-start gap-2 rounded-lg border border-border bg-surface-muted text-sm list-none ${shell}`}
     >
       <MagnifyingGlass size={18} className="text-foreground-muted shrink-0 mt-0.5" aria-hidden />
       <div>
-        <p className="font-medium text-foreground">Database search (limited)</p>
+        <p className="font-medium text-foreground">Limited search</p>
         {!compact && (
           <p className="mt-0.5 text-xs text-foreground-muted">
-            Typesense {typesense === 'ok' ? 'ok' : 'offline'}, Tika {tika === 'ok' ? 'ok' : 'offline'}.
             {import.meta.env.PROD
-              ? ' Filename and indexed text still work. Full semantic search starts when Typesense and Tika are running on the API host.'
-              : ' Run npm run search:up and restart the server for full semantic search.'}
+              ? 'You can still find files by name. Full search will return once indexing is available.'
+              : 'Start the local search services, then restart the server for full search.'}
           </p>
         )}
       </div>

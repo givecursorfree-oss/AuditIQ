@@ -3,6 +3,7 @@ import type { ReactNode, ErrorInfo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AuditIQLogo from './components/brand/AuditIQLogo';
+import PageLoading from './components/layout/PageLoading';
 import { AppDialogProvider } from './context/AppDialogContext';
 import { AppToastProvider } from './context/AppToastContext';
 import { AttendanceConfirmationProvider } from './context/AttendanceConfirmationContext';
@@ -113,9 +114,16 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 }
 
 function PageFallback() {
+  return <PageLoading label="Loading page…" className="py-20" />;
+}
+
+function AuthLoadingScreen({ label }: { label: string }) {
   return (
-    <div className="flex items-center justify-center py-20">
-      <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    <div className="h-screen flex items-center justify-center bg-surface">
+      <div className="flex flex-col items-center gap-4">
+        <AuditIQLogo className="h-14 w-auto object-contain" />
+        <PageLoading label={label} className="py-0" />
+      </div>
     </div>
   );
 }
@@ -124,14 +132,7 @@ function ProtectedRoute() {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-surface">
-        <div className="flex flex-col items-center gap-4">
-          <AuditIQLogo className="h-14 w-auto object-contain" />
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      </div>
-    );
+    return <AuthLoadingScreen label="Checking your session…" />;
   }
 
   return user ? <Outlet /> : <Navigate to="/login" replace />;
@@ -145,7 +146,7 @@ function ClientRedirect() {
 
 function PublicRoute() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AuthLoadingScreen label="Loading sign-in…" />;
   if (user) {
     return (
       <Navigate to={user.role === 'Client' ? '/client/dashboard' : '/'} replace />
