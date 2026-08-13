@@ -119,7 +119,10 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      DOMAIN: ${DOMAIN:-}
+      DOMAIN: ${DOMAIN:?DOMAIN must be set e.g. api.mkdandeker.com}
+      # Empty filter matches ALL env names in awk and can corrupt $host-style nginx vars.
+      # Only substitute ${DOMAIN}.
+      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
     volumes:
       - ./ops/nginx-api.conf:/etc/nginx/templates/default.conf.template:ro
       - certbot_conf:/etc/letsencrypt:ro
