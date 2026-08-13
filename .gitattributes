@@ -1,0 +1,2 @@
+# Force LF for nginx templates (CRLF breaks nginx: "invalid variable name")
+ops/*.conf text eol=lf
