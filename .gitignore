@@ -156,3 +156,10 @@ client/doctor.config.json
 !client/public/default-avatar.png
 !client/public/feature-*.png
 !client/public/feature-*.avif
+
+.vercel
+.env*
+!.env.example
+!.env.*.example
+!**/.env.example
+!**/.env.*.example

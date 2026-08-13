@@ -15,7 +15,8 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
     command:
       - --innodb-buffer-pool-size=1G
-      - --max-connections=100
+      # 50 concurrent app users + Prisma pool (~25) + admin/migrations headroom
+      - --max-connections=150
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:

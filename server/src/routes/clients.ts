@@ -92,9 +92,11 @@ router.get(
       const firmId = req.user!.firmId!;
 
       const [clients, unassignedEngagements, staff] = await Promise.all([
+        // Ceiling for concurrent overview loads (CA firms rarely exceed this active set).
         prisma.client.findMany({
           where: { firmId, isActive: true },
           orderBy: { name: 'asc' },
+          take: 2000,
           include: {
             portalUsers: { select: { id: true, email: true, fullName: true, userId: true } },
             engagements: {

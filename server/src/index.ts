@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
@@ -204,6 +204,11 @@ if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
+// Keep-alive slightly above typical nginx upstream idle so connections reuse under load.
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 66_000;
+httpServer.requestTimeout = 120_000;
+
 // Security headers (OWASP best practice)
 app.use(helmet({
   contentSecurityPolicy: {
@@ -218,11 +223,34 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
+// Cookies before rate limit so authenticated SPA traffic is keyed per user
+// (CA firm offices share one public IP — IP-only buckets starve concurrent staff).
+app.use(cookieParser());
+
 // Rate limiting — off in development (local loops during debugging trip limits fast).
 const isDev = env.NODE_ENV !== 'production';
 const skipRateLimitInDev = () => isDev;
 
+/** Prefer JWT subject for general limits; fall back to IP for anonymous. */
+function generalRateLimitKey(req: express.Request): string {
+  const header = req.headers.authorization;
+  const bearer = header?.startsWith('Bearer ') ? header.slice(7) : null;
+  const cookieToken = (req as express.Request & { cookies?: Record<string, string> }).cookies
+    ?.auditiq_token;
+  const token = bearer || cookieToken || null;
+  if (token) {
+    try {
+      const payload = jwt.decode(token) as { id?: string } | null;
+      if (payload?.id) return `user:${payload.id}`;
+    } catch {
+      /* fall through to IP */
+    }
+  }
+  return ipKeyGenerator(req.ip || 'unknown');
+}
+
 // Strict limiter for credential-submitting endpoints only (brute-force defense).
+// Always keyed by IP — do not use the user key here.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: isDev ? 1000 : 50,
@@ -235,11 +263,13 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// General limiter sized for SPA traffic (dashboards, badges, polling).
+// ~50 concurrent staff: per-user budget covers dashboard + badge polling without
+// office-NAT collisions. Health checks skipped so Docker probes never burn quota.
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isDev ? 10000 : 1000,
-  skip: skipRateLimitInDev,
+  max: isDev ? 10000 : 2500,
+  skip: (req) => skipRateLimitInDev() || req.path === '/api/health',
+  keyGenerator: generalRateLimitKey,
   message: {
     error: 'You are making requests too quickly. Please slow down and try again shortly.',
   },
@@ -263,7 +293,6 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(cookieParser());
 // File uploads go through multer (multipart), so JSON bodies stay small.
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));

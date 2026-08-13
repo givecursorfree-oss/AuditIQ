@@ -83,24 +83,34 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
       if (to) (where.date as Record<string, unknown>).lte = new Date(String(to));
     }
 
-    const entries = await prisma.timeEntry.findMany({ where });
-    const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
-    const billableHours = entries.filter(e => e.isBillable).reduce((sum, e) => sum + e.hours, 0);
+    // Aggregate in MySQL — avoid loading every row under concurrent report views.
+    const [byBillable, byEngagementRows, byUserRows] = await Promise.all([
+      prisma.timeEntry.groupBy({ by: ['isBillable'], where, _sum: { hours: true }, _count: true }),
+      prisma.timeEntry.groupBy({ by: ['engagementId'], where, _sum: { hours: true } }),
+      prisma.timeEntry.groupBy({ by: ['userId'], where, _sum: { hours: true } }),
+    ]);
+
+    let totalHours = 0;
+    let billableHours = 0;
+    let entryCount = 0;
+    for (const row of byBillable) {
+      const hours = row._sum.hours ?? 0;
+      totalHours += hours;
+      entryCount += row._count;
+      if (row.isBillable) billableHours = hours;
+    }
     const nonBillableHours = totalHours - billableHours;
 
-    // Group by engagement
     const byEngagement: Record<string, number> = {};
-    entries.forEach(e => {
-      byEngagement[e.engagementId] = (byEngagement[e.engagementId] || 0) + e.hours;
-    });
-
-    // Group by user
+    for (const row of byEngagementRows) {
+      byEngagement[row.engagementId] = row._sum.hours ?? 0;
+    }
     const byUser: Record<string, number> = {};
-    entries.forEach(e => {
-      byUser[e.userId] = (byUser[e.userId] || 0) + e.hours;
-    });
+    for (const row of byUserRows) {
+      byUser[row.userId] = row._sum.hours ?? 0;
+    }
 
-    res.json({ totalHours, billableHours, nonBillableHours, entryCount: entries.length, byEngagement, byUser });
+    res.json({ totalHours, billableHours, nonBillableHours, entryCount, byEngagement, byUser });
   } catch (err) {
     logger.error('Time entries summary error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to fetch summary' });
