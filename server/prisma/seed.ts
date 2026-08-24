@@ -784,8 +784,8 @@ async function main() {
   // ─── Office ───
   const office = await prisma.office.create({
     data: {
-      name: 'Nariman Point HQ', address: '401 Maker Chambers, Nariman Point, Mumbai',
-      latitude: 18.9256, longitude: 72.8242, geofenceRadius: 200, firmId: firm.id,
+      name: 'M K Dandeker & Co LLP', address: 'M K Dandeker & Co LLP',
+      latitude: 13.0762097, longitude: 80.2375391, geofenceRadius: 500, firmId: firm.id,
     },
   });
 

@@ -1,7 +1,6 @@
 import React, {
   createContext,
   useCallback,
-  useContext,
   useRef,
   useState,
 } from 'react';
@@ -14,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { appToast, type ToastVariant } from '@/context/AppToastContext';
 
 type AlertOptions = {
   title?: string;
@@ -30,7 +30,6 @@ type ConfirmOptions = {
 };
 
 type DialogState =
-  | { kind: 'alert'; options: AlertOptions; resolve: () => void }
   | { kind: 'confirm'; options: ConfirmOptions; resolve: (v: boolean) => void }
   | null;
 
@@ -51,6 +50,24 @@ function normalizeConfirm(input: ConfirmOptions | string): ConfirmOptions {
   return typeof input === 'string' ? { message: input, title: 'Confirm' } : input;
 }
 
+function toastVariantFromAlert(title: string, message: string): ToastVariant {
+  const text = `${title} ${message}`.toLowerCase();
+  if (/\bfail|could not|error|unable|denied\b/.test(text)) return 'error';
+  if (/\bsaved|done|success|submitted|copied|updated|created|marked|sent\b/.test(text)) return 'success';
+  if (/\brequired|pick |cannot\b/.test(text)) return 'warning';
+  return 'info';
+}
+
+function fireAlertToast(input: AlertOptions | string) {
+  const options = normalizeAlert(input);
+  const title = (options.title ?? 'Notice').trim();
+  appToast({
+    title: title === 'Notice' ? undefined : title,
+    message: options.message,
+    variant: toastVariantFromAlert(title, options.message),
+  });
+}
+
 export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<DialogState>(null);
   const stateRef = useRef<DialogState>(null);
@@ -60,21 +77,9 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
     setState(null);
   }, []);
 
-  const alert = useCallback((input: AlertOptions | string) => {
-    const options = normalizeAlert(input);
-    return new Promise<void>((resolve) => {
-      const next: DialogState = {
-        kind: 'alert',
-        options,
-        resolve: () => {
-          resolve();
-          close();
-        },
-      };
-      stateRef.current = next;
-      setState(next);
-    });
-  }, [close]);
+  const alert = useCallback(async (input: AlertOptions | string) => {
+    fireAlertToast(input);
+  }, []);
 
   const confirm = useCallback((input: ConfirmOptions | string) => {
     const options = normalizeConfirm(input);
@@ -102,7 +107,6 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   }, [value]);
 
   const open = state !== null;
-  const isConfirm = state?.kind === 'confirm';
 
   return (
     <AppDialogContext.Provider value={value}>
@@ -111,52 +115,31 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
         open={open}
         onOpenChange={(o) => {
           if (!o && stateRef.current) {
-            if (stateRef.current.kind === 'alert') {
-              stateRef.current.resolve();
-            } else {
-              stateRef.current.resolve(false);
-            }
+            stateRef.current.resolve(false);
           }
         }}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {state?.kind === 'alert'
-                ? state.options.title ?? 'Notice'
-                : state?.options.title ?? 'Confirm'}
-            </DialogTitle>
+            <DialogTitle>{state?.options.title ?? 'Confirm'}</DialogTitle>
             <DialogDescription className="text-left pt-1 text-muted-foreground">
               {state?.options.message}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-2">
-            {state?.kind === 'confirm' && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => state.resolve(false)}
-              >
-                {state.options.cancelLabel ?? 'Cancel'}
-              </Button>
-            )}
             <Button
               type="button"
-              variant={
-                state?.kind === 'confirm' && state.options.destructive
-                  ? 'destructive'
-                  : 'default'
-              }
-              onClick={() => {
-                if (state?.kind === 'alert') state.resolve();
-                else if (state?.kind === 'confirm') state.resolve(true);
-              }}
+              variant="outline"
+              onClick={() => state?.resolve(false)}
             >
-              {state?.kind === 'alert'
-                ? state.options.confirmLabel ?? 'OK'
-                : state?.kind === 'confirm'
-                  ? state.options.confirmLabel ?? 'Continue'
-                  : 'OK'}
+              {state?.options.cancelLabel ?? 'Cancel'}
+            </Button>
+            <Button
+              type="button"
+              variant={state?.options.destructive ? 'destructive' : 'default'}
+              onClick={() => state?.resolve(true)}
+            >
+              {state?.options.confirmLabel ?? 'Continue'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -165,11 +148,13 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Use outside React (e.g. utility modules) when provider is mounted */
+/** Status messages go to goey-toast site-wide. Confirmations stay as dialogs. */
 export async function appAlert(input: AlertOptions | string): Promise<void> {
-  if (globalDialog) return globalDialog.alert(input);
-  const options = normalizeAlert(input);
-  window.alert(options.message);
+  if (globalDialog) {
+    await globalDialog.alert(input);
+    return;
+  }
+  fireAlertToast(input);
 }
 
 export async function appConfirm(input: ConfirmOptions | string): Promise<boolean> {

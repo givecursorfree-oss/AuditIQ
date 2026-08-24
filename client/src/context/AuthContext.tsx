@@ -3,11 +3,6 @@ import api from '../services/api';
 import type { User } from '../types';
 import { isStaffPresenceRole } from '@/lib/presence';
 import { formatApiError, isApiNetworkFailure } from '@/lib/apiErrors';
-import {
-  isAttendanceEligible,
-  tryAttendanceCheckIn,
-  tryAttendanceCheckOut,
-} from '@/lib/attendancePopup';
 
 export type LoginResult =
   | { kind: 'success'; user: User }
@@ -28,7 +23,8 @@ interface AuthContextType {
     role: string;
     firmName?: string;
   }) => Promise<void>;
-  logout: (options?: { skipCheckout?: boolean }) => Promise<void>;
+  /** Ends app session only — does not mark attendance check-out. */
+  logout: () => Promise<void>;
   /** Refetch /auth/me — e.g. after role permissions change in Settings */
   refreshUser: () => Promise<void>;
 }
@@ -97,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { kind: '2fa-required', preAuthToken: data.preAuthToken };
     }
 
-    // Attendance is marked on first engagement timer start — not on login.
+    // Attendance is marked from Login page GPS / Attendance page — not here.
     return { kind: 'success', user: applyLoggedInUser(data.user) };
   }, [applyLoggedInUser]);
 
@@ -118,32 +114,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
   }, []);
 
-  const logout = useCallback(
-    async (options?: { skipCheckout?: boolean }) => {
-      const uid = user?.id;
-      const role = user?.role;
+  const logout = useCallback(async () => {
+    const uid = user?.id;
+    const role = user?.role;
 
-      if (uid && role && isStaffPresenceRole(role)) {
-        try {
-          await api.patch('/presence/me', { status: 'offline' });
-        } catch {
-          /* ignore */
-        }
-      }
-
-      if (uid && role && isAttendanceEligible(role) && !options?.skipCheckout) {
-        await tryAttendanceCheckOut(uid);
-      }
-
+    if (uid && role && isStaffPresenceRole(role)) {
       try {
-        await api.post('/auth/logout');
+        await api.patch('/presence/me', { status: 'offline' });
       } catch {
         /* ignore */
       }
-      setUser(null);
-    },
-    [user?.id, user?.role]
-  );
+    }
+
+    // Attendance check-out is manual on /attendance only — logout must not close the day
+    // (staff log in/out of the app many times; presence ≠ attendance).
+
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* ignore */
+    }
+    setUser(null);
+  }, [user?.id, user?.role]);
 
   const value = useMemo(
     () => ({ user, loading, sessionError, login, verifyTwoFactor, register, logout, refreshUser }),

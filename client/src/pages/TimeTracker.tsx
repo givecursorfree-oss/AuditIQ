@@ -170,17 +170,11 @@ export default function TimeTracker() {
       return;
     }
     try {
-      const r = await api.post('/stopwatch/start', startForm);
+      await api.post('/stopwatch/start', startForm);
       setShowStartForm(false);
       await loadStopwatch();
       notifyStopwatchChanged();
       window.dispatchEvent(new Event('auditiq:clock-in'));
-      if (r.data.clockInMarked) {
-        await appAlert({
-          title: 'Clocked in',
-          message: 'Your attendance for today has been marked from this first timer start.',
-        });
-      }
     } catch (e: any) {
       await appAlert({ title: 'Could not start', message: e?.response?.data?.error || 'Failed to start' });
     }
@@ -315,7 +309,7 @@ export default function TimeTracker() {
           <div className="space-y-3 max-w-lg mx-auto">
             <h3 className="font-semibold text-foreground text-center">Start client stopwatch</h3>
             <p className="text-xs text-muted-foreground text-center">
-              First start of the day marks your attendance clock-in.
+              Attendance is marked at login / on the Attendance page when you are at the office (GPS). Check out from Attendance at end of day — logging out of the app does not check you out.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <select className="input-field" aria-label="Engagement" value={startForm.engagementId} onChange={e => setStartForm({ ...startForm, engagementId: e.target.value })}>

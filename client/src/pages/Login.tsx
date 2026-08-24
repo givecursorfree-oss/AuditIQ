@@ -4,8 +4,11 @@ import { Eye, EyeSlash as EyeOff, ArrowRight, ShieldCheck, Key as KeyRound } fro
 import { LiquidGlassCard } from '@/components/ui/liquid-glass-card';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { isAttendanceEligible } from '../lib/attendancePopup';
+import { isAttendanceEligible, tryAttendanceCheckIn, requestAttendanceLocation } from '../lib/attendancePopup';
+import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { formatApiError } from '@/lib/apiErrors';
+import { appToast, gooeyToast } from '@/context/AppToastContext';
+import { appConfirm } from '@/context/AppDialogContext';
 import AuditIQLogo from '@/components/brand/AuditIQLogo';
 
 const LOGIN_FEATURE_IMAGES = {
@@ -46,24 +49,12 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [infoMsg, setInfoMsg] = useState('');
-  const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [preAuthToken, setPreAuthToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const { login, verifyTwoFactor, sessionError } = useAuth();
   const { allowStaffRegistration } = useAppConfig();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-
-  useEffect(() => {
-    const onDismiss = () => {
-      if (pendingPath) {
-        navigate(pendingPath);
-        setPendingPath(null);
-      }
-    };
-    window.addEventListener('auditiq:attendance-popup-dismissed', onDismiss);
-    return () => window.removeEventListener('auditiq:attendance-popup-dismissed', onDismiss);
-  }, [pendingPath, navigate]);
 
   useEffect(() => {
     if (searchParams.get('verified') === '1') {
@@ -77,11 +68,47 @@ export default function Login() {
     }
   }, [searchParams]);
 
-  const finishLogin = (loggedInUser: { id?: string; role: string }) => {
+  const finishLogin = async (
+    loggedInUser: { id?: string; role: string }
+  ) => {
     const path = loggedInUser.role === 'Client' ? '/client/dashboard' : '/';
     if (loggedInUser.id && isAttendanceEligible(loggedInUser.role)) {
-      setPendingPath(path);
-      return;
+      let loadingId: string | number | undefined;
+      try {
+        const gps = await requestAttendanceLocation({ confirm: appConfirm });
+        loadingId = gooeyToast.info('Getting GPS…', {
+          description: 'Device coordinates vs office pin (not Wi‑Fi/IP). Prefer phone.',
+          timing: { displayDuration: 2_147_483_647 },
+          showTimestamp: false,
+        });
+        await tryAttendanceCheckIn(loggedInUser.id, 'manual-login', {
+          skipIfAlreadyDone: true,
+          forcePopup: false,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracyMeters: gps.accuracyMeters,
+          gpsAttempted: true,
+        });
+        if (loadingId != null) gooeyToast.dismiss(loadingId);
+        appToast({
+          variant: 'success',
+          title: 'Attendance marked',
+          message: `GPS check-in · ±${Math.round(gps.accuracyMeters)}m`,
+        });
+      } catch (err: unknown) {
+        if (loadingId != null) gooeyToast.dismiss(loadingId);
+        const notice = attendanceLoginNotice(err);
+        appToast({
+          persist: true,
+          variant: notice.variant,
+          title: notice.title,
+          message: notice.message,
+          action: {
+            label: 'Open Attendance',
+            onClick: () => navigate('/attendance'),
+          },
+        });
+      }
     }
     navigate(path);
   };
@@ -100,7 +127,7 @@ export default function Login() {
         setTotpCode('');
         return;
       }
-      finishLogin(result.user);
+      await finishLogin(result.user);
     } catch (err: unknown) {
       setError(extractError(err));
     } finally {
@@ -115,7 +142,7 @@ export default function Login() {
     setLoading(true);
     try {
       const loggedInUser = await verifyTwoFactor(preAuthToken, totpCode);
-      finishLogin(loggedInUser);
+      await finishLogin(loggedInUser);
     } catch (err: unknown) {
       const message = extractError(err);
       setError(message);
@@ -238,9 +265,12 @@ export default function Login() {
                 disabled={loading || totpCode.length !== 6}
                 className="btn-primary w-full py-3.5 flex items-center justify-center gap-2 disabled:opacity-70 disabled:pointer-events-none mt-2"
               >
-                {loading ? 'Verifying...' : 'Verify and sign in'}
+                {loading ? 'Verifying…' : 'Verify and sign in'}
                 {!loading && <ShieldCheck size={18} />}
               </button>
+              <p className="text-xs text-foreground-muted text-center">
+                Next, allow location. Attendance is marked when you are at the office (phone GPS).
+              </p>
               <button
                 type="button"
                 onClick={() => { setPreAuthToken(null); setTotpCode(''); setError(''); }}
@@ -303,9 +333,18 @@ export default function Login() {
               disabled={loading}
               className="btn-primary w-full py-3.5 flex items-center justify-center gap-2 disabled:opacity-70 disabled:pointer-events-none mt-2"
             >
-              {loading ? 'Signing in...' : 'Sign in to dashboard'}
-              {!loading && <ArrowRight size={18} />}
-            </button>
+                {loading ? 'Signing in…' : 'Sign in'}
+                {!loading && <ArrowRight size={18} />}
+              </button>
+            {loading ? (
+              <p className="text-xs text-foreground-muted text-center">
+                Allow location when asked. You stay signed in even if attendance is not marked.
+              </p>
+            ) : (
+              <p className="text-xs text-foreground-muted text-center">
+                After sign-in, your browser will ask for location. Attendance uses phone GPS at the office. Desktop location is often rejected.
+              </p>
+            )}
           </form>
           )}
 

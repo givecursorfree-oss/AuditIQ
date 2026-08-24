@@ -160,8 +160,8 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <AttendanceConfirmationProvider>
-        <AppDialogProvider>
         <AppToastProvider>
+        <AppDialogProvider>
         <ErrorBoundary>
         <Suspense fallback={<PageFallback />}>
           <Routes>
@@ -238,8 +238,8 @@ export default function App() {
           </Routes>
         </Suspense>
         </ErrorBoundary>
-        </AppToastProvider>
         </AppDialogProvider>
+        </AppToastProvider>
         </AttendanceConfirmationProvider>
       </AuthProvider>
     </BrowserRouter>

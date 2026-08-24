@@ -52,7 +52,7 @@ const startSchema = z.object({
   notes: z.string().optional(),
 });
 
-/** POST /api/stopwatch/start — start timer; first start of day marks attendance clock-in */
+/** POST /api/stopwatch/start — start timer (does not mark attendance). */
 router.post('/start', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = startSchema.parse(req.body);

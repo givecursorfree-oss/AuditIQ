@@ -7,18 +7,21 @@ import {
 import api from '../services/api';
 import type { Attendance, LeaveRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { tryAttendanceCheckIn } from '../lib/attendancePopup';
+import { tryAttendanceCheckIn, requestAttendanceLocation, type PlaceOfWork } from '../lib/attendancePopup';
 import { hoursBetween } from '../lib/attendanceDates';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
 import { PanelCard, MetricCard } from '../components/layout/PanelCard';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
-import { appAlert } from '@/context/AppDialogContext';
+import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
+import { appAlert, appConfirm } from '@/context/AppDialogContext';
+import { appToast, gooeyToast } from '@/context/AppToastContext';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 /** Must match server leaveCreateSchema */
 const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Holiday', 'Exam', 'Study'] as const;
+const PLACES: PlaceOfWork[] = ['Office', 'Client Place', 'Work from Home'];
 
 export default function AttendancePage() {
   const { user } = useAuth();
@@ -27,6 +30,9 @@ export default function AttendancePage() {
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [todayRecord, setTodayRecord] = useState<Attendance | null>(null);
+  const [isArticle, setIsArticle] = useState(false);
+  const [placeOfWork, setPlaceOfWork] = useState<PlaceOfWork>('Office');
+  const [clientName, setClientName] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -34,7 +40,20 @@ export default function AttendancePage() {
   });
   const curMonth = calendarMonth.month;
   const curYear = calendarMonth.year;
-  const [summary, setSummary] = useState<{ totalDays: number; totalHours: number; presentDays: number; lateDays: number } | null>(null);
+  const [summary, setSummary] = useState<{
+    totalDays: number;
+    totalHours: number;
+    presentDays: number;
+    lateDays: number;
+    articlePolicy?: {
+      softLateCount: number;
+      hardLateCount: number;
+      noAttdCount: number;
+      lateDebitDays: number;
+      noAttdDebitDays: number;
+      totalDebitDays: number;
+    } | null;
+  } | null>(null);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', type: 'Casual', reason: '' });
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -54,19 +73,22 @@ export default function AttendancePage() {
   const loadTodayRecord = async () => {
     const { data } = await api.get<Attendance | null>('/attendance/me/today');
     setTodayRecord(data);
+    if (data?.isArticle != null) setIsArticle(!!data.isArticle);
   };
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [attRes, leavesRes, summaryRes] = await Promise.all([
+      const [attRes, leavesRes, summaryRes, balanceRes] = await Promise.all([
         api.get<Attendance[]>('/attendance'),
         api.get<LeaveRequest[]>('/attendance/leaves'),
         api.get(`/attendance/summary?month=${curYear}-${String(curMonth).padStart(2, '0')}`),
+        api.get<{ isArticle?: boolean }>('/attendance/leaves/balance').catch(() => ({ data: {} })),
       ]);
       setRecords(attRes.data);
       setLeaves(leavesRes.data);
       setSummary(summaryRes.data);
+      if (balanceRes.data?.isArticle) setIsArticle(true);
       await loadTodayRecord();
     } catch (err: unknown) {
       const msg =
@@ -84,18 +106,65 @@ export default function AttendancePage() {
 
   const handleCheckIn = async () => {
     if (!user?.id) return;
+    if (isArticle && placeOfWork === 'Client Place' && !clientName.trim()) {
+      await appAlert('Enter the client name for Client Place check-in.');
+      return;
+    }
     setCheckingIn(true);
+    let loadingId: string | number | undefined;
     try {
+      let gps: { latitude?: number; longitude?: number; accuracyMeters?: number } = {};
+      if (!isArticle || placeOfWork === 'Office') {
+        const fix = await requestAttendanceLocation({ confirm: appConfirm });
+        gps = {
+          latitude: fix.latitude,
+          longitude: fix.longitude,
+          accuracyMeters: fix.accuracyMeters,
+        };
+        loadingId = gooeyToast.info('Getting GPS…', {
+          description: 'Using device coordinates (not Wi‑Fi/IP) at the office.',
+          timing: { displayDuration: 2_147_483_647 },
+          showTimestamp: false,
+        });
+      } else {
+        loadingId = gooeyToast.info('Checking attendance…', {
+          description:
+            placeOfWork === 'Work from Home'
+              ? 'WFH requires prior manager approval.'
+              : 'Recording Client Place attendance.',
+          timing: { displayDuration: 2_147_483_647 },
+          showTimestamp: false,
+        });
+      }
       await tryAttendanceCheckIn(user.id, 'manual', {
-        skipIfAlreadyDone: false,
-        forcePopup: true,
+        skipIfAlreadyDone: true,
+        forcePopup: false,
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        accuracyMeters: gps.accuracyMeters,
+        gpsAttempted: placeOfWork === 'Office',
+        placeOfWork: isArticle ? placeOfWork : 'Office',
+        clientName: placeOfWork === 'Client Place' ? clientName.trim() : undefined,
+      });
+      if (loadingId != null) gooeyToast.dismiss(loadingId);
+      appToast({
+        variant: 'success',
+        title: 'Attendance marked',
+        message:
+          placeOfWork === 'Office'
+            ? `GPS check-in · ±${Math.round(gps.accuracyMeters || 0)}m`
+            : `Checked in · ${placeOfWork}`,
       });
       await fetchAll();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        'Check-in failed. Please try again.';
-      await appAlert(msg);
+      if (loadingId != null) gooeyToast.dismiss(loadingId);
+      const notice = attendanceLoginNotice(err);
+      appToast({
+        persist: true,
+        variant: notice.variant,
+        title: notice.title,
+        message: notice.message,
+      });
     } finally {
       setCheckingIn(false);
     }
@@ -144,7 +213,7 @@ export default function AttendancePage() {
     let status: string;
     if (action === 'reject') {
       status = 'Rejected';
-    } else if (['Partner', 'Admin'].includes(role)) {
+    } else if (['Partner', 'Admin', 'HR'].includes(role)) {
       status = 'Approved';
     } else {
       status = 'Manager Approved';
@@ -203,7 +272,7 @@ export default function AttendancePage() {
               </Button>
             ) : !todayRecord.checkOut ? (
               <Button type="button" size="sm" variant="destructive" disabled={checkingIn} onClick={() => void handleCheckOut()}>
-                <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check out'}
+                <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'End day (check out)'}
               </Button>
             ) : (
               <ApprovalStatusBadge status="Approved" />
@@ -214,12 +283,64 @@ export default function AttendancePage() {
         <p className="mb-2 text-sm text-muted-foreground">
           {todayLabel || '\u00a0'}
         </p>
+        {!todayRecord && isArticle && (
+          <div className="mb-3 flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <label className="text-sm w-full sm:w-auto">
+                <span className="mb-1 block text-muted-foreground">Place of work</span>
+                <select
+                  className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
+                  value={placeOfWork}
+                  onChange={(e) => setPlaceOfWork(e.target.value as PlaceOfWork)}
+                >
+                  {PLACES.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+              {placeOfWork === 'Client Place' && (
+                <label className="text-sm w-full sm:min-w-[220px]">
+                  <span className="mb-1 block text-muted-foreground">Client name</span>
+                  <input
+                    className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:min-h-0 sm:py-1.5 sm:text-sm"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Client name"
+                    autoComplete="organization"
+                  />
+                </label>
+              )}
+            </div>
+            {placeOfWork === 'Work from Home' && (
+              <p className="text-xs text-muted-foreground">
+                Manager must approve WFH for today before you can check in.
+              </p>
+            )}
+            {placeOfWork === 'Office' && (
+              <p className="text-xs text-muted-foreground">
+                Office check-in uses your phone GPS coordinates against the office pin (not Wi‑Fi/IP). Works on mobile browsers over HTTPS.
+              </p>
+            )}
+          </div>
+        )}
         {todayRecord ? (
           <div className="flex flex-wrap items-center gap-4">
             <span className="flex items-center gap-1 text-sm text-foreground">
               <LogIn size={14} className="text-success" />
               {todayRecord.checkIn ? new Date(todayRecord.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
             </span>
+            {todayRecord.location && (
+              <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                <MapPin size={14} />
+                {todayRecord.location}
+                {todayRecord.clientName ? ` · ${todayRecord.clientName}` : ''}
+              </span>
+            )}
+            {todayRecord.lateBand && todayRecord.lateBand !== 'on_time' && (
+              <span className="text-sm text-warning">
+                {todayRecord.lateBand === 'soft_late' ? 'Late (10:06–10:35)' : 'Late (after 10:35)'}
+              </span>
+            )}
             {todayRecord.checkOut && (
               <span className="flex items-center gap-1 text-sm text-foreground">
                 <LogOut size={14} className="text-danger" />
@@ -233,17 +354,29 @@ export default function AttendancePage() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Not checked in yet</p>
+          <p className="text-sm text-muted-foreground">
+            {!isArticle || placeOfWork === 'Office'
+              ? 'Not checked in. Use your phone GPS (Precise Location) at the office. Wi‑Fi/IP location is not accepted.'
+              : placeOfWork === 'Work from Home'
+                ? 'Not checked in. WFH needs manager approval for today.'
+                : 'Not checked in. Enter client name, then check in.'}
+          </p>
         )}
       </PanelCard>
 
       {summary && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <MetricCard title="Days present" value={summary.presentDays ?? summary.totalDays} />
           <MetricCard
             title="Avg hours/day"
             value={summary.totalHours && summary.presentDays ? (summary.totalHours / summary.presentDays).toFixed(1) : '0'}
           />
+          {summary.articlePolicy && (
+            <>
+              <MetricCard title="Late debit (days)" value={summary.articlePolicy.lateDebitDays} />
+              <MetricCard title="No-attd debit (days)" value={summary.articlePolicy.noAttdDebitDays} />
+            </>
+          )}
         </div>
       )}
 
@@ -319,7 +452,14 @@ export default function AttendancePage() {
                 </div>
                 <div>
                   <p className="text-sm text-foreground">{r.date ? new Date(r.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</p>
-                  <p className="text-xs text-muted-foreground">{r.method || 'manual'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.user
+                      ? `${r.user.firstName} ${r.user.lastName}`
+                      : r.method || 'manual'}
+                    {r.user && (r.location || r.clientName)
+                      ? ` · ${r.location || ''}${r.clientName ? ` · ${r.clientName}` : ''}`
+                      : ''}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-4 text-sm">
@@ -354,16 +494,19 @@ export default function AttendancePage() {
               <div className="flex items-center gap-2">
                 <ApprovalStatusBadge status={l.status} />
                 {((l.status === 'Pending' &&
-                  ['Partner', 'Manager', 'Admin'].includes(user?.role || '')) ||
+                  ['Partner', 'Manager', 'Admin', 'HR'].includes(user?.role || '')) ||
                   (l.status === 'Manager Approved' &&
-                    ['Partner', 'Admin'].includes(user?.role || ''))) && (
+                    ['Partner', 'Admin', 'HR'].includes(user?.role || ''))) && (
                   <div className="flex gap-1 ml-2">
                     <button
                       type="button"
                       onClick={() => void handleApproveLeave(l.id, 'approve')}
                       className="p-1.5 rounded-lg hover:bg-green-500/10 text-green-500"
                       title={
-                        l.status === 'Manager Approved' ? 'Final approve' : 'Approve'
+                        l.status === 'Manager Approved' ||
+                        ['Partner', 'Admin', 'HR'].includes(user?.role || '')
+                          ? 'Final approve'
+                          : 'Approve'
                       }
                     >
                       <CheckCircle2 size={16} />

@@ -2,153 +2,78 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useRef,
-  useState,
+  useMemo,
 } from 'react';
-import { AnimatePresence, m, useReducedMotion } from 'motion/react';
-import { CheckCircle, Info, WarningCircle, XCircle } from '@phosphor-icons/react';
+import { GooeyToaster, gooeyToast } from 'goey-toast';
+import 'goey-toast/styles.css';
+import { useTheme } from './ThemeContext';
 
 export type ToastVariant = 'success' | 'info' | 'error' | 'warning';
 
-export type ToastPayload = {
-  id: string;
+export type ToastInput = {
   message: string;
   title?: string;
-  variant: ToastVariant;
+  variant?: ToastVariant;
   action?: { label: string; onClick: () => void };
   durationMs?: number;
+  /** Stays until the user closes it (attendance location / geofence). */
+  persist?: boolean;
 };
 
 type AppToastContextValue = {
-  showToast: (input: {
-    message: string;
-    title?: string;
-    variant?: ToastVariant;
-    action?: { label: string; onClick: () => void };
-    durationMs?: number;
-  }) => void;
+  showToast: (input: ToastInput) => void;
 };
 
 const AppToastContext = createContext<AppToastContextValue | null>(null);
 
-let globalToast: AppToastContextValue | null = null;
+/** Browsers clamp setTimeout delays above 2^31-1 to 1ms. Infinity would auto-close immediately. */
+const STICKY_MS = 2_147_483_647;
 
-const VARIANT_STYLES: Record<
-  ToastVariant,
-  { border: string; icon: React.ReactNode }
-> = {
-  success: {
-    border: 'border-emerald-500/30',
-    icon: <CheckCircle size={20} weight="fill" className="text-emerald-500 shrink-0" />,
-  },
-  info: {
-    border: 'border-primary/30',
-    icon: <Info size={20} weight="fill" className="text-primary shrink-0" />,
-  },
-  error: {
-    border: 'border-destructive/30',
-    icon: <XCircle size={20} weight="fill" className="text-destructive shrink-0" />,
-  },
-  warning: {
-    border: 'border-amber-500/30',
-    icon: <WarningCircle size={20} weight="fill" className="text-amber-500 shrink-0" />,
-  },
-};
+function fireGooeyToast(input: ToastInput) {
+  const variant = input.variant ?? 'info';
+  const title = input.title?.trim() || input.message;
+  const description =
+    input.title?.trim() && input.message !== input.title ? input.message : undefined;
+  const stayMs = input.persist ? STICKY_MS : input.durationMs;
+  const options = {
+    description,
+    duration: stayMs,
+    timing: stayMs != null ? { displayDuration: stayMs } : undefined,
+    action: input.action
+      ? { label: input.action.label, onClick: input.action.onClick }
+      : undefined,
+    showTimestamp: false,
+  };
+
+  if (variant === 'success') gooeyToast.success(title, options);
+  else if (variant === 'error') gooeyToast.error(title, options);
+  else if (variant === 'warning') gooeyToast.warning(title, options);
+  else gooeyToast.info(title, options);
+}
 
 export function AppToastProvider({ children }: { children: React.ReactNode }) {
-  const [toasts, setToasts] = useState<ToastPayload[]>([]);
-  const counter = useRef(0);
-  const reduceMotion = useReducedMotion();
+  const { theme } = useTheme();
 
-  const timers = useRef<Map<string, number>>(new Map());
-
-  const dismiss = useCallback((id: string) => {
-    const t = timers.current.get(id);
-    if (t) {
-      window.clearTimeout(t);
-      timers.current.delete(id);
-    }
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  const showToast = useCallback((input: ToastInput) => {
+    fireGooeyToast(input);
   }, []);
 
-  const showToast = useCallback(
-    (input: {
-      message: string;
-      title?: string;
-      variant?: ToastVariant;
-      action?: { label: string; onClick: () => void };
-      durationMs?: number;
-    }) => {
-      const id = `toast-${++counter.current}`;
-      const toast: ToastPayload = {
-        id,
-        message: input.message,
-        title: input.title,
-        variant: input.variant ?? 'info',
-        action: input.action,
-        durationMs: input.durationMs,
-      };
-      setToasts((prev) => [...prev.slice(-2), toast]);
-      const duration = input.durationMs ?? (input.action ? 8000 : 4500);
-      const timer = window.setTimeout(() => dismiss(id), duration);
-      timers.current.set(id, timer);
-    },
-    [dismiss]
-  );
-
-  const value = { showToast };
-
-  globalToast = value;
+  const value = useMemo(() => ({ showToast }), [showToast]);
 
   return (
     <AppToastContext.Provider value={value}>
       {children}
-      <div
-        className="fixed top-4 right-4 z-[10004] flex flex-col gap-2 max-w-sm pointer-events-none"
-        aria-live="polite"
-        aria-relevant="additions"
-      >
-        <AnimatePresence>
-          {toasts.map((toast) => {
-            const style = VARIANT_STYLES[toast.variant];
-            return (
-              <m.div
-                key={toast.id}
-                role="status"
-                initial={reduceMotion ? false : { opacity: 0, x: 24, scale: 0.96 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={reduceMotion ? undefined : { opacity: 0, x: 16, scale: 0.96 }}
-                transition={reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 28 }}
-                className={`pointer-events-auto rounded-lg border bg-card/95 px-4 py-3 shadow-lg backdrop-blur-md ${style.border}`}
-              >
-                <div className="flex items-start gap-2.5">
-                  {style.icon}
-                  <div className="min-w-0 flex-1">
-                    {toast.title && (
-                      <p className="text-sm font-semibold text-foreground">{toast.title}</p>
-                    )}
-                    <p className={`text-sm text-foreground/90 ${toast.title ? 'mt-0.5' : ''}`}>
-                      {toast.message}
-                    </p>
-                    {toast.action ? (
-                      <button
-                        type="button"
-                        className="mt-2 text-xs font-semibold text-primary hover:underline"
-                        onClick={() => {
-                          toast.action?.onClick();
-                          dismiss(toast.id);
-                        }}
-                      >
-                        {toast.action.label}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              </m.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
+      <GooeyToaster
+        position="top-center"
+        theme={theme === 'dark' ? 'dark' : 'light'}
+        preset="smooth"
+        closeButton="top-right"
+        showTimestamp={false}
+        maxQueue={4}
+        queueOverflow="drop-oldest"
+        offset="16px"
+        gap={12}
+      />
     </AppToastContext.Provider>
   );
 }
@@ -159,13 +84,10 @@ export function useAppToast() {
   return ctx;
 }
 
-/** For modules that cannot use hooks (e.g. fire-and-forget after dialog). */
-export function appToast(input: {
-  message: string;
-  title?: string;
-  variant?: ToastVariant;
-  action?: { label: string; onClick: () => void };
-  durationMs?: number;
-}) {
-  globalToast?.showToast(input);
+/** Fire-and-forget toast from outside React hooks (login, engagement helpers). */
+export function appToast(input: ToastInput) {
+  fireGooeyToast(input);
 }
+
+/** Direct access when callers want gooeyToast.promise / update. */
+export { gooeyToast };

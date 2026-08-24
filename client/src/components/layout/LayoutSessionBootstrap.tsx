@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { isStaffPresenceRole } from '@/lib/presence';
 /**
- * After login / session restore: set Available (online) and show attendance confirmation when applicable.
+ * After login / session restore: set Available (online). Attendance is login + geofence only.
  */
 export function LayoutSessionBootstrap() {
   const { user, loading } = useAuth();

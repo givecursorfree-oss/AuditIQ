@@ -1,7 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { appConfirm } from '@/context/AppDialogContext';
-import { isAttendanceEligible } from '@/lib/attendancePopup';
 import type { LucideIcon } from 'lucide-react';
 import {
   Search,
@@ -128,26 +127,14 @@ export default function AppSidebar() {
   }, [user]);
 
   const handleLogout = async () => {
-    const needsCheckout = user && isAttendanceEligible(user.role);
-    if (needsCheckout) {
-      const ok = await appConfirm({
-        title: 'Sign out?',
-        message:
-          'Are you sure you want to sign out? Your attendance will be marked as check-out for today.',
-        confirmLabel: 'Sign out & check out',
-        cancelLabel: 'Stay signed in',
-        destructive: true,
-      });
-      if (!ok) return;
-    } else {
-      const ok = await appConfirm({
-        title: 'Sign out?',
-        message: 'Are you sure you want to sign out?',
-        confirmLabel: 'Sign out',
-        cancelLabel: 'Cancel',
-      });
-      if (!ok) return;
-    }
+    const ok = await appConfirm({
+      title: 'Sign out?',
+      message:
+        'Sign out of AuditIQ only. Your attendance for today stays open until you tap Check out on the Attendance page.',
+      confirmLabel: 'Sign out',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
     await logout();
     navigate('/login');
   };

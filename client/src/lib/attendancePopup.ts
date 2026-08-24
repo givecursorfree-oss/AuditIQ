@@ -1,5 +1,12 @@
 import api from '../services/api';
 import { todayKey } from './chatHelpers';
+import { LocationNeededError, type LocationFailCode } from './attendanceLoginNotice';
+import { getPreciseGps, isLikelyMobileDevice, type GpsFix } from './attendanceGps';
+
+export { LocationNeededError, attendanceLoginNotice } from './attendanceLoginNotice';
+export type { LocationFailCode } from './attendanceLoginNotice';
+export { getPreciseGps, isLikelyMobileDevice, MAX_OFFICE_GPS_ACCURACY_M } from './attendanceGps';
+export type { GpsFix } from './attendanceGps';
 
 const ATTENDANCE_AUTO_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'] as const;
 
@@ -64,9 +71,71 @@ function buildCheckOutPopup(data: { checkOut?: string; checkIn?: string }): Atte
     checkIn: formatCheckInTime(data.checkOut || data.checkIn),
     status: 'CHECKED OUT',
     dateTime: formatDateTime(),
-    methodLabel: 'Sign-out check-out',
+    methodLabel: 'Attendance check-out',
     kind: 'check-out',
   };
+}
+
+async function locationPermissionState(): Promise<PermissionState | 'unknown'> {
+  try {
+    if (!navigator.permissions?.query) return 'unknown';
+    const status = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+    return status.state;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** @deprecated use getPreciseGps — kept for any callers expecting single-shot */
+export function getBrowserGps(): Promise<GpsFix> {
+  return getPreciseGps();
+}
+
+/**
+ * Confirm + acquire precise GPS for Office check-in (phone recommended).
+ */
+export async function requestAttendanceLocation(options?: {
+  confirm: (input: {
+    title?: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+  }) => Promise<boolean>;
+}): Promise<GpsFix> {
+  if (!navigator.geolocation) {
+    throw new LocationNeededError(
+      'unsupported',
+      'This browser cannot share GPS. Open AuditIQ on your phone to check in at the office.'
+    );
+  }
+
+  const state = await locationPermissionState();
+  if (state === 'denied') {
+    throw new LocationNeededError(
+      'denied',
+      'Location permission is off. On your phone: allow Precise Location for the browser, then try again.'
+    );
+  }
+
+  if (state !== 'granted' && options?.confirm) {
+    const onPhone = isLikelyMobileDevice();
+    const allowed = await options.confirm({
+      title: 'Allow Precise Location',
+      message: onPhone
+        ? 'AuditIQ uses your phone GPS coordinates (not Wi‑Fi/IP) and checks you are at the office. Turn on Precise Location, then Allow.'
+        : 'Office check-in needs device GPS coordinates (not Wi‑Fi/IP). Desktop location is often rejected — prefer your phone at the office. Tap Allow, then Allow in the browser prompt.',
+      confirmLabel: 'Allow GPS',
+      cancelLabel: 'Not now',
+    });
+    if (!allowed) {
+      throw new LocationNeededError(
+        'denied',
+        'Location permission is off. You are signed in, but attendance is not marked.'
+      );
+    }
+  }
+
+  return getPreciseGps();
 }
 
 async function fetchTodayAttendanceRecord(): Promise<{
@@ -95,16 +164,30 @@ function dispatchAttendanceConfirmed(details: AttendancePopupDetails) {
   );
 }
 
+export type PlaceOfWork = 'Office' | 'Client Place' | 'Work from Home';
+
 /**
- * Records check-in and shows confirmation (including when already checked in today).
+ * Records check-in once per day. Office = precise GPS vs office pin.
+ * App attendance replaces Google Form; Bio is HR cross-verify separately.
  */
 export async function tryAttendanceCheckIn(
   userId: string,
   method: AttendanceMethod,
-  options?: { skipIfAlreadyDone?: boolean; forcePopup?: boolean }
+  options?: {
+    skipIfAlreadyDone?: boolean;
+    forcePopup?: boolean;
+    latitude?: number;
+    longitude?: number;
+    accuracyMeters?: number;
+    /** If true, do not prompt GPS again — caller already tried. */
+    gpsAttempted?: boolean;
+    placeOfWork?: PlaceOfWork;
+    clientName?: string;
+  }
 ): Promise<AttendancePopupDetails | null> {
-  const skipApiIfDone = options?.skipIfAlreadyDone ?? method !== 'manual';
+  const skipApiIfDone = options?.skipIfAlreadyDone ?? true;
   const forcePopup = options?.forcePopup ?? method === 'manual-login';
+  const placeOfWork = options?.placeOfWork ?? 'Office';
   const apiKey = attendanceApiKey(userId);
   const popupKey = attendancePopupShownKey(userId);
 
@@ -122,32 +205,93 @@ export async function tryAttendanceCheckIn(
   if (skipApiIfDone && sessionStorage.getItem(apiKey)) {
     const existing = await fetchTodayAttendanceRecord();
     if (existing && !existing.checkOut) {
-      return showPopup(buildCheckInPopup(existing, method));
+      return forcePopup ? showPopup(buildCheckInPopup(existing, method)) : null;
     }
     return null;
+  }
+
+  const existing = await fetchTodayAttendanceRecord();
+  if (existing?.checkIn && !existing.checkOut) {
+    sessionStorage.setItem(apiKey, 'done');
+    return forcePopup ? showPopup(buildCheckInPopup(existing, method)) : null;
+  }
+
+  const needsGps = placeOfWork === 'Office';
+  if (
+    needsGps &&
+    (options?.latitude == null || options?.longitude == null || options?.accuracyMeters == null)
+  ) {
+    if (options?.gpsAttempted) {
+      throw new LocationNeededError(
+        'unavailable',
+        'Could not get precise GPS. Use your phone at the office with Precise Location on.'
+      );
+    }
+  }
+
+  let gps: { latitude?: number; longitude?: number; accuracyMeters?: number } = {};
+  if (needsGps) {
+    if (
+      options?.latitude != null &&
+      options?.longitude != null &&
+      options?.accuracyMeters != null
+    ) {
+      gps = {
+        latitude: options.latitude,
+        longitude: options.longitude,
+        accuracyMeters: options.accuracyMeters,
+      };
+    } else {
+      const fix = await getPreciseGps();
+      gps = {
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        accuracyMeters: fix.accuracyMeters,
+      };
+    }
+  } else if (options?.latitude != null && options?.longitude != null) {
+    gps = {
+      latitude: options.latitude,
+      longitude: options.longitude,
+      accuracyMeters: options.accuracyMeters,
+    };
   }
 
   try {
-    const { data } = await api.post<{ checkIn?: string; status?: string }>(
-      '/attendance/check-in',
-      { method }
-    );
+    const { data } = await api.post<{
+      checkIn?: string;
+      status?: string;
+      alreadyCheckedIn?: boolean;
+      lateBand?: string;
+    }>('/attendance/check-in', {
+      method,
+      placeOfWork,
+      clientName: options?.clientName,
+      ...gps,
+    });
     sessionStorage.setItem(apiKey, 'done');
+    if (data.alreadyCheckedIn && !forcePopup) return null;
     return showPopup(buildCheckInPopup(data, method));
   } catch (err: unknown) {
     const status = (err as { response?: { status?: number } })?.response?.status;
+    const serverMsg = (err as { response?: { data?: { error?: string } } })?.response?.data
+      ?.error;
     if (status === 400) {
+      // Don't treat GPS accuracy failures as "already checked in"
+      if (/accuracy|GPS|Precise|Wi‑Fi|Wi-Fi|phone/i.test(serverMsg || '')) {
+        throw new Error(serverMsg || 'Check-in failed');
+      }
       sessionStorage.setItem(apiKey, 'done');
-      const existing = await fetchTodayAttendanceRecord();
-      if (existing && !existing.checkOut) {
-        return showPopup(buildCheckInPopup(existing, method));
+      const today = await fetchTodayAttendanceRecord();
+      if (today && !today.checkOut) {
+        return forcePopup ? showPopup(buildCheckInPopup(today, method)) : null;
       }
     }
-    return null;
+    throw new Error(serverMsg || (err as Error).message || 'Check-in failed');
   }
 }
 
-/** Records check-out on logout (no duplicate popup if already out). */
+/** Manual attendance check-out (Attendance page). Not called on app logout. */
 export async function tryAttendanceCheckOut(userId: string): Promise<boolean> {
   try {
     const today = await fetchTodayAttendanceRecord();

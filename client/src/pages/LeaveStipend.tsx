@@ -32,6 +32,16 @@ interface LeaveBalance {
   limits: { exam: number; casual: number; sick: number };
   used: { exam: number; casual: number; sick: number };
   remaining: { exam: number; casual: number; sick: number };
+  firmLeave?: {
+    credit: number;
+    usedFromLeaves: number;
+    attendanceDebitDays: number;
+    softLateCount: number;
+    hardLateCount: number;
+    noAttdCount: number;
+    used: number;
+    remaining: number;
+  };
 }
 
 interface StipendRecord {
@@ -171,6 +181,8 @@ export default function LeaveStipend() {
         description={
           isAdmin
             ? 'Review and sanction leave requests for your firm.'
+            : user?.role === 'HR'
+              ? 'Firm leave inbox, calendar, and leave balances for staff and articles.'
             : isIntern
               ? 'ICAI articleship leave balances, stipend, and e-diary.'
               : 'Submit leave requests for manager approval.'
@@ -178,11 +190,27 @@ export default function LeaveStipend() {
       />
 
       {balance && balance.isArticle && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <BalanceCard label="Exam Leave" used={balance.used.exam} limit={balance.limits.exam} icon={GraduationCap} />
           <BalanceCard label="Casual Leave" used={balance.used.casual} limit={balance.limits.casual} icon={Calendar} />
           <BalanceCard label="Sick Leave" used={balance.used.sick} limit={balance.limits.sick} icon={Calendar} />
+          {balance.firmLeave && (
+            <BalanceCard
+              label="Firm leave (24)"
+              used={balance.firmLeave.used}
+              limit={balance.firmLeave.credit}
+              icon={Calendar}
+            />
+          )}
         </div>
+      )}
+      {balance?.firmLeave && (
+        <p className="text-xs text-muted-foreground">
+          Firm leave includes casual leave taken plus attendance debits (late / no attendance).
+          Soft late {balance.firmLeave.softLateCount} · Hard late {balance.firmLeave.hardLateCount} ·
+          No attendance {balance.firmLeave.noAttdCount} · Attendance debit{' '}
+          {balance.firmLeave.attendanceDebitDays} days.
+        </p>
       )}
 
       <div className="flex gap-2 border-b border-border overflow-x-auto">
@@ -267,13 +295,16 @@ export default function LeaveStipend() {
                   <td className="text-right">{l.days}</td>
                   <td><ApprovalStatusBadge status={l.status} /></td>
                   <td className="space-x-1 whitespace-nowrap">
-                    {l.status === 'Pending' && user?.role === 'Manager' && (
+                    {l.status === 'Pending' &&
+                      ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <button type="button" className="text-xs btn-secondary py-1 px-2" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</button>
                     )}
-                    {(l.status === 'Manager Approved' || l.status === 'Pending') && ['Partner', 'Admin'].includes(user?.role || '') && (
+                    {(l.status === 'Manager Approved' || l.status === 'Pending') &&
+                      ['Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <button type="button" className="text-xs btn-primary py-1 px-2" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</button>
                     )}
-                    {!['Approved', 'Rejected'].includes(l.status) && (
+                    {!['Approved', 'Rejected'].includes(l.status) &&
+                      ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <button type="button" className="text-xs text-danger" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</button>
                     )}
                   </td>

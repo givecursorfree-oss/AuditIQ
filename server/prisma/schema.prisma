@@ -778,7 +778,7 @@ model Office {
   address        String?
   latitude       Float?
   longitude      Float?
-  geofenceRadius Int     @default(200) // meters
+  geofenceRadius Int     @default(500) // meters
 
   firmId String
   firm   Firm   @relation(fields: [firmId], references: [id])
@@ -793,13 +793,26 @@ model Attendance {
   date      DateTime
   checkIn   DateTime?
   checkOut  DateTime?
-  status    String    @default("present") // present | late | absent | leave | half-day
+  status    String    @default("present") // present | late | absent | leave | half-day | wfh-pending
   totalActiveSeconds Int @default(0)
   totalAwaySeconds   Int @default(0)
-  location  String? // Office | Client Site | Remote
+  /// Office | Client Place | Work from Home (HR place-of-work)
+  location  String?
+  /// on_time | soft_late | hard_late — Article late bands (IST)
+  lateBand  String?
+  clientName String?
+  /// null = Bio not synced; true/false after Bio import / HR mark
+  bioPresent Boolean?
+  /// Same-month mail exception (HR forgive)
+  forgiven Boolean @default(false)
+  forgivenReason String?
+  forgivenById String?
+  wfhApprovedById String?
   gpsLat    Float?
   gpsLng    Float?
-  method    String    @default("face") // face | otp | manual | timer
+  /// Browser/device reported GPS accuracy in meters (Office check-in)
+  gpsAccuracy Float?
+  method    String    @default("face") // face | otp | manual | timer | manual-login
   createdAt DateTime  @default(now())
 
   userId   String
@@ -809,6 +822,20 @@ model Attendance {
 
   @@index([userId])
   @@index([officeId])
+  @@index([userId, date])
+}
+
+/// Manager pre-approval required before Article WFH check-in (HR).
+model WfhApproval {
+  id           String   @id @default(uuid())
+  userId       String
+  date         DateTime
+  approvedById String
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([userId])
 }
 
 model LeaveRequest {
@@ -1443,6 +1470,8 @@ model ArticleshipRecord {
   examLeaveUsed   Int       @default(0) // out of 175 days
   casualLeaveUsed Int       @default(0)
   sickLeaveUsed   Int       @default(0)
+  /// Firm allotted leave for Article Assistants (HR: 24 days / 2 years)
+  firmLeaveCredit Float     @default(24)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

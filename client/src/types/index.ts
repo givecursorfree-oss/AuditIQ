@@ -258,6 +258,12 @@ export interface Attendance {
   hoursWorked?: number;
   status: string;
   method: string;
+  location?: string;
+  lateBand?: string | null;
+  clientName?: string | null;
+  bioPresent?: boolean | null;
+  forgiven?: boolean;
+  isArticle?: boolean;
   user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email'>;
   office?: { name: string };
 }

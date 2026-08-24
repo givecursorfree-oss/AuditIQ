@@ -8,10 +8,93 @@ import {
   attendanceDayStart,
 } from '../lib/attendanceDates.js';
 import { ensureTimerClockIn, syncAttendanceActivity } from '../lib/staffWorkStatus.js';
+import { GeofenceError, GpsAccuracyError, resolveOfficeCheckIn } from '../lib/geofence.js';
+import {
+  classifyLateBand,
+  statusFromLateBand,
+  PLACE_CLIENT,
+  PLACE_OFFICE,
+  PLACE_WFH,
+  ARTICLE_FIRM_LEAVE_DAYS,
+  type PlaceOfWork,
+} from '../lib/articleAttendancePolicy.js';
+import {
+  computeArticleAttendanceDebit,
+  hasWfhApproval,
+  userIsArticleAssistant,
+} from '../lib/articleAttendanceCompute.js';
 
 // ICAI articleship leave limits (from articleship.ts but duplicated here to
 // avoid a circular runtime dep — values rarely change)
 const ICAI_LEAVE_LIMITS = { exam: 175, casual: 30, sick: 15 } as const;
+
+const HR_ATTENDANCE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
+
+/** Roles that see firm-wide attendance / leave queues (nav Leave Management for HR). */
+const FIRM_PEOPLE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
+
+function canViewFirmAttendance(role: string): boolean {
+  return (FIRM_PEOPLE_ROLES as readonly string[]).includes(role);
+}
+
+const checkInBodySchema = z
+  .object({
+    method: z.string().optional(),
+    officeId: z.string().optional(),
+    placeOfWork: z
+      .enum([PLACE_OFFICE, PLACE_CLIENT, PLACE_WFH])
+      .optional()
+      .default(PLACE_OFFICE),
+    clientName: z.string().max(200).optional(),
+    latitude: z.coerce.number().gte(-90).lte(90).optional(),
+    longitude: z.coerce.number().gte(-180).lte(180).optional(),
+    /** Device-reported GPS accuracy in meters (required for Office). */
+    accuracyMeters: z.coerce.number().positive().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.placeOfWork === PLACE_OFFICE) {
+      if (val.latitude == null || val.longitude == null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Location is required for Office check-in',
+          path: ['latitude'],
+        });
+      }
+      if (val.accuracyMeters == null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'GPS accuracy is required for Office check-in. Use your phone with Precise Location on.',
+          path: ['accuracyMeters'],
+        });
+      }
+    }
+  });
+
+/** Legacy punch still requires GPS at office. */
+const checkInGpsSchema = z.object({
+  method: z.string().optional(),
+  officeId: z.string().optional(),
+  latitude: z.coerce.number().gte(-90).lte(90),
+  longitude: z.coerce.number().gte(-180).lte(180),
+  accuracyMeters: z.coerce.number().positive().optional(),
+});
+
+function geofenceOrValidation(err: unknown, res: Response): boolean {
+  if (err instanceof z.ZodError) {
+    res.status(400).json({ error: err.errors[0]?.message || 'Location is required to check in' });
+    return true;
+  }
+  if (err instanceof GpsAccuracyError) {
+    res.status(err.status).json({ error: err.message });
+    return true;
+  }
+  if (err instanceof GeofenceError) {
+    res.status(err.status).json({ error: err.message });
+    return true;
+  }
+  return false;
+}
 
 const router = Router();
 router.use(authenticate);
@@ -28,6 +111,11 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
         status: true,
         date: true,
         method: true,
+        location: true,
+        lateBand: true,
+        clientName: true,
+        bioPresent: true,
+        forgiven: true,
       },
     });
     if (!record) {
@@ -38,7 +126,8 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
       record.checkIn && record.checkOut
         ? +((record.checkOut.getTime() - record.checkIn.getTime()) / 3_600_000).toFixed(2)
         : null;
-    res.json({ ...record, hoursWorked });
+    const isArticle = await userIsArticleAssistant(req.user!.id);
+    res.json({ ...record, hoursWorked, isArticle });
   } catch (err) {
     logger.error('Today attendance error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to fetch today attendance' });
@@ -51,8 +140,8 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const { userId, date, month } = req.query;
     const where: Record<string, unknown> = { userId: req.user!.id };
 
-    // Partners/Managers see all firm attendance
-    if (['Partner', 'Manager'].includes(req.user!.role)) {
+    // Partners / Managers / Admin / HR see firm-wide attendance
+    if (canViewFirmAttendance(req.user!.role)) {
       if (!req.user!.firmId) {
         res.status(400).json({ error: 'Your account is not linked to a firm' });
         return;
@@ -106,15 +195,28 @@ router.post('/punch', async (req: AuthRequest, res: Response): Promise<void> => 
     });
 
     if (!existing) {
+      if (!req.user!.firmId) {
+        res.status(400).json({ error: 'Your account is not linked to a firm' });
+        return;
+      }
+      const gps = checkInGpsSchema.parse(req.body);
+      const fence = await resolveOfficeCheckIn(
+        req.user!.firmId,
+        gps.latitude,
+        gps.longitude,
+        gps.accuracyMeters
+      );
       const created = await prisma.attendance.create({
         data: {
           userId: req.user!.id,
           date: dayStart,
           checkIn: new Date(),
-          method: req.body?.method || 'manual',
-          gpsLat: req.body?.latitude ? parseFloat(req.body.latitude) : null,
-          gpsLng: req.body?.longitude ? parseFloat(req.body.longitude) : null,
-          officeId: req.body?.officeId || null,
+          method: gps.method || 'manual',
+          gpsLat: gps.latitude,
+          gpsLng: gps.longitude,
+          gpsAccuracy: gps.accuracyMeters ?? null,
+          officeId: fence.officeId,
+          location: 'Office',
           status: 'present',
         },
       });
@@ -137,6 +239,7 @@ router.post('/punch', async (req: AuthRequest, res: Response): Promise<void> => 
 
     res.status(400).json({ error: 'Already punched out for today' });
   } catch (err) {
+    if (geofenceOrValidation(err, res)) return;
     logger.error('Punch toggle error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to punch' });
   }
@@ -174,7 +277,7 @@ router.patch('/activity', async (req: AuthRequest, res: Response): Promise<void>
 });
 
 // GET /api/attendance/report?month=YYYY-MM — monthly attendance summary (admin)
-router.get('/report', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/report', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const month = String(req.query.month || '');
     const [y, m] = month.split('-').map(Number);
@@ -242,13 +345,93 @@ router.get('/report', authorize('Partner', 'Admin', 'Manager'), async (req: Auth
 // POST /api/attendance/check-in
 router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { method, latitude, longitude, officeId } = req.body;
-
     const existing = await prisma.attendance.findFirst({
       where: { userId: req.user!.id, date: attendanceDayFilter() },
     });
+    if (existing?.checkIn) {
+      res.json({ ...existing, alreadyCheckedIn: true });
+      return;
+    }
+    if (!req.user!.firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
+
+    const body = checkInBodySchema.parse(req.body);
+    const place = body.placeOfWork as PlaceOfWork;
+    const isArticle = await userIsArticleAssistant(req.user!.id);
+    const now = new Date();
+
+    let officeId: string | undefined;
+    let gpsLat: number | undefined;
+    let gpsLng: number | undefined;
+    let gpsAccuracy: number | undefined;
+    let wfhApprovedById: string | undefined;
+
+    // Non-articles: Office + geofence only. Articles: place-of-work rules.
+    // App check-in is source of truth (Google form skipped); Bio is cross-verify later.
+    const needsGeofence = !isArticle || place === PLACE_OFFICE;
+    if (needsGeofence) {
+      if (body.latitude == null || body.longitude == null) {
+        res.status(400).json({ error: 'Location is required for Office check-in' });
+        return;
+      }
+      const fence = await resolveOfficeCheckIn(
+        req.user!.firmId,
+        body.latitude,
+        body.longitude,
+        body.accuracyMeters
+      );
+      officeId = fence.officeId;
+      gpsLat = body.latitude;
+      gpsLng = body.longitude;
+      gpsAccuracy = body.accuracyMeters;
+    } else {
+      gpsLat = body.latitude;
+      gpsLng = body.longitude;
+      gpsAccuracy = body.accuracyMeters;
+    }
+
+    if (isArticle && place === PLACE_WFH) {
+      const wfh = await hasWfhApproval(req.user!.id, now);
+      if (!wfh.ok) {
+        res.status(403).json({
+          error:
+            'WFH requires manager approval for today. Ask your manager to approve Work from Home first.',
+        });
+        return;
+      }
+      wfhApprovedById = wfh.approvedById;
+    }
+
+    if (isArticle && place === PLACE_CLIENT && !body.clientName?.trim()) {
+      res.status(400).json({ error: 'Client name is required for Client Place check-in' });
+      return;
+    }
+
+    const lateBand = isArticle ? classifyLateBand(now) : 'on_time';
+    const status = isArticle ? statusFromLateBand(lateBand) : 'present';
+
+    const data = {
+      checkIn: now,
+      method: body.method || 'manual',
+      gpsLat: gpsLat ?? null,
+      gpsLng: gpsLng ?? null,
+      gpsAccuracy: gpsAccuracy ?? null,
+      officeId: officeId ?? null,
+      location: isArticle ? place : PLACE_OFFICE,
+      clientName: isArticle && place === PLACE_CLIENT ? body.clientName!.trim() : null,
+      lateBand: isArticle ? lateBand : null,
+      status,
+      wfhApprovedById: wfhApprovedById ?? null,
+    };
+
     if (existing) {
-      res.status(400).json({ error: 'Already checked in today' });
+      const attendance = await prisma.attendance.update({
+        where: { id: existing.id },
+        data,
+      });
+      res.json({ ...attendance, isArticle });
       return;
     }
 
@@ -256,16 +439,16 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       data: {
         userId: req.user!.id,
         date: attendanceDayStart(),
-        checkIn: new Date(),
-        method: method || 'manual',
-        gpsLat: latitude ? parseFloat(latitude) : null,
-        gpsLng: longitude ? parseFloat(longitude) : null,
-        officeId: officeId || null,
-        status: 'present',
+        ...data,
       },
     });
-    res.status(201).json(attendance);
+    res.status(201).json({ ...attendance, isArticle });
   } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: err.errors[0]?.message || 'Invalid check-in data' });
+      return;
+    }
+    if (geofenceOrValidation(err, res)) return;
     logger.error('Check-in error:', err);
     res.status(500).json({ error: 'Failed to check in' });
   }
@@ -294,6 +477,123 @@ router.post('/check-out', async (req: AuthRequest, res: Response): Promise<void>
   } catch (err) {
     logger.error('Check-out error:', err);
     res.status(500).json({ error: 'Failed to check out' });
+  }
+});
+
+// POST /api/attendance/wfh-approvals — manager pre-approves Article WFH for a date
+router.post('/wfh-approvals', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!HR_ATTENDANCE_ROLES.includes(req.user!.role as (typeof HR_ATTENDANCE_ROLES)[number])) {
+      res.status(403).json({ error: 'Only Manager / Partner / Admin / HR can approve WFH' });
+      return;
+    }
+    const schema = z.object({
+      userId: z.string().uuid(),
+      date: z.string().min(8), // YYYY-MM-DD
+      note: z.string().max(500).optional(),
+    });
+    const body = schema.parse(req.body);
+    if (!(await userIsArticleAssistant(body.userId))) {
+      res.status(400).json({ error: 'WFH approval applies to Article Assistants only' });
+      return;
+    }
+    const dayStart = attendanceDayStart(new Date(`${body.date}T12:00:00+05:30`));
+    const row = await prisma.wfhApproval.upsert({
+      where: { userId_date: { userId: body.userId, date: dayStart } },
+      create: {
+        userId: body.userId,
+        date: dayStart,
+        approvedById: req.user!.id,
+        note: body.note,
+      },
+      update: {
+        approvedById: req.user!.id,
+        note: body.note,
+      },
+    });
+    res.status(201).json(row);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation failed', details: err.errors });
+      return;
+    }
+    logger.error('WFH approval error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to approve WFH' });
+  }
+});
+
+// PATCH /api/attendance/:id/forgive — same-month mail exception (HR)
+router.patch('/:id/forgive', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!HR_ATTENDANCE_ROLES.includes(req.user!.role as (typeof HR_ATTENDANCE_ROLES)[number])) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+    const schema = z.object({ reason: z.string().min(1).max(500) });
+    const { reason } = schema.parse(req.body);
+    const record = await prisma.attendance.findUnique({ where: { id: req.params.id } });
+    if (!record) {
+      res.status(404).json({ error: 'Attendance record not found' });
+      return;
+    }
+    const now = new Date();
+    // Same calendar month in IST only (HR: mail forgiveness within the month)
+    const key = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(record.date);
+    const nowKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(now);
+    if (key !== nowKey) {
+      res.status(400).json({
+        error: 'Mail forgiveness is only allowed in the same calendar month as the attendance day',
+      });
+      return;
+    }
+    const updated = await prisma.attendance.update({
+      where: { id: record.id },
+      data: {
+        forgiven: true,
+        forgivenReason: reason,
+        forgivenById: req.user!.id,
+      },
+    });
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation failed', details: err.errors });
+      return;
+    }
+    logger.error('Forgive attendance error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to forgive attendance' });
+  }
+});
+
+// PATCH /api/attendance/:id/bio — mark biometric present (until Bio import exists)
+router.patch('/:id/bio', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!HR_ATTENDANCE_ROLES.includes(req.user!.role as (typeof HR_ATTENDANCE_ROLES)[number])) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+    const schema = z.object({ bioPresent: z.boolean() });
+    const { bioPresent } = schema.parse(req.body);
+    const updated = await prisma.attendance.update({
+      where: { id: req.params.id },
+      data: { bioPresent },
+    });
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Validation failed' });
+      return;
+    }
+    logger.error('Bio mark error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to update bio flag' });
   }
 });
 
@@ -327,7 +627,29 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
     const presentDays = records.filter(r => r.status === 'present').length;
     const lateDays = records.filter(r => r.status === 'late').length;
 
-    res.json({ totalDays, totalHours: +totalHours.toFixed(1), presentDays, lateDays, records });
+    const isArticle = await userIsArticleAssistant(req.user!.id);
+    let articlePolicy = null;
+    if (isArticle) {
+      const debit = await computeArticleAttendanceDebit(req.user!.id, { from: start, to: end });
+      articlePolicy = {
+        softLateCount: debit.softLateCount,
+        hardLateCount: debit.hardLateCount,
+        noAttdCount: debit.noAttdCount,
+        lateDebitDays: debit.lateDebitDays,
+        noAttdDebitDays: debit.noAttdDebitDays,
+        totalDebitDays: debit.totalDebitDays,
+      };
+    }
+
+    res.json({
+      totalDays,
+      totalHours: +totalHours.toFixed(1),
+      presentDays,
+      lateDays,
+      records,
+      isArticle,
+      articlePolicy,
+    });
   } catch (err) {
     logger.error('Attendance summary error:', err);
     res.status(500).json({ error: 'Failed to fetch summary' });
@@ -336,10 +658,19 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
 
 // ─── Leave Requests ───
 
-const FIRM_LEAVE_ROLES = ['Partner', 'Admin', 'Manager'] as const;
+const FIRM_LEAVE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
 
 function canViewFirmLeaves(role: string): boolean {
   return (FIRM_LEAVE_ROLES as readonly string[]).includes(role);
+}
+
+function canManagerApproveLeave(role: string): boolean {
+  return ['Manager', 'Partner', 'Admin', 'HR'].includes(role);
+}
+
+function canFinalApproveLeave(role: string): boolean {
+  // HR can complete sanction (leave:manage) — same as Admin for CA-firm ops
+  return ['Partner', 'Admin', 'HR'].includes(role);
 }
 
 // GET /api/attendance/leaves/inbox?status=Pending — approver queue
@@ -476,8 +807,8 @@ router.patch('/leaves/:id', async (req: AuthRequest, res: Response): Promise<voi
     const data: Record<string, unknown> = { approverId: req.user!.id };
 
     if (body.status === 'Manager Approved') {
-      if (!['Manager', 'Partner', 'Admin'].includes(role)) {
-        res.status(403).json({ error: 'Only Manager or above can perform this action' });
+      if (!canManagerApproveLeave(role)) {
+        res.status(403).json({ error: 'Only Manager, HR, or above can perform this action' });
         return;
       }
       if (leave.status !== 'Pending') {
@@ -488,8 +819,8 @@ router.patch('/leaves/:id', async (req: AuthRequest, res: Response): Promise<voi
       data.managerApprovedAt = new Date();
       data.managerApprovedBy = req.user!.id;
     } else if (body.status === 'Approved') {
-      if (!['Partner', 'Admin'].includes(role)) {
-        res.status(403).json({ error: 'Only Partners can grant final approval' });
+      if (!canFinalApproveLeave(role)) {
+        res.status(403).json({ error: 'Only Partner, Admin, or HR can grant final approval' });
         return;
       }
       if (leave.status !== 'Manager Approved' && leave.status !== 'Pending') {
@@ -515,8 +846,8 @@ router.patch('/leaves/:id', async (req: AuthRequest, res: Response): Promise<voi
       }
     } else {
       // Rejected
-      if (!['Manager', 'Partner', 'Admin'].includes(role)) {
-        res.status(403).json({ error: 'Only Manager or above can reject' });
+      if (!canManagerApproveLeave(role)) {
+        res.status(403).json({ error: 'Only Manager, HR, or above can reject' });
         return;
       }
       data.status = 'Rejected';
@@ -568,7 +899,7 @@ router.get('/leaves/balance', async (req: AuthRequest, res: Response): Promise<v
       ? String(req.query.userId)
       : req.user!.id;
 
-    if (userId !== req.user!.id && !['Partner', 'Admin', 'Manager'].includes(req.user!.role)) {
+    if (userId !== req.user!.id && !canViewFirmLeaves(req.user!.role)) {
       res.status(403).json({ error: 'Insufficient permissions' });
       return;
     }
@@ -589,6 +920,14 @@ router.get('/leaves/balance', async (req: AuthRequest, res: Response): Promise<v
       casual: articleship.casualLeaveUsed,
       sick: articleship.sickLeaveUsed,
     };
+    const attendanceDebit = await computeArticleAttendanceDebit(userId, {
+      from: articleship.startDate,
+      to: new Date(),
+    });
+    const firmCredit = articleship.firmLeaveCredit ?? ARTICLE_FIRM_LEAVE_DAYS;
+    // Firm 24-day pot: approved Casual leave days + attendance policy debits
+    const firmUsedFromLeaves = used.casual;
+    const firmUsed = firmUsedFromLeaves + attendanceDebit.totalDebitDays;
     res.json({
       isArticle: true,
       articleshipStart: articleship.startDate,
@@ -599,6 +938,16 @@ router.get('/leaves/balance', async (req: AuthRequest, res: Response): Promise<v
         exam: ICAI_LEAVE_LIMITS.exam - used.exam,
         casual: ICAI_LEAVE_LIMITS.casual - used.casual,
         sick: ICAI_LEAVE_LIMITS.sick - used.sick,
+      },
+      firmLeave: {
+        credit: firmCredit,
+        usedFromLeaves: firmUsedFromLeaves,
+        attendanceDebitDays: attendanceDebit.totalDebitDays,
+        softLateCount: attendanceDebit.softLateCount,
+        hardLateCount: attendanceDebit.hardLateCount,
+        noAttdCount: attendanceDebit.noAttdCount,
+        used: firmUsed,
+        remaining: firmCredit - firmUsed,
       },
     });
   } catch (err) {
@@ -623,7 +972,7 @@ router.get('/leaves/calendar', async (req: AuthRequest, res: Response): Promise<
         { AND: [{ fromDate: { lte: from } }, { toDate: { gte: to } }] },
       ],
     };
-    if (!['Partner', 'Admin', 'Manager'].includes(req.user!.role)) {
+    if (!canViewFirmLeaves(req.user!.role)) {
       where.userId = req.user!.id;
     } else {
       where.user = { firmId: req.user!.firmId! };
