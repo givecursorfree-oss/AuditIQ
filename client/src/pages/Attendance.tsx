@@ -83,7 +83,9 @@ export default function AttendancePage() {
         api.get<Attendance[]>('/attendance'),
         api.get<LeaveRequest[]>('/attendance/leaves'),
         api.get(`/attendance/summary?month=${curYear}-${String(curMonth).padStart(2, '0')}`),
-        api.get<{ isArticle?: boolean }>('/attendance/leaves/balance').catch(() => ({ data: {} })),
+        api
+          .get<{ isArticle?: boolean }>('/attendance/leaves/balance')
+          .catch(() => ({ data: { isArticle: false } as { isArticle?: boolean } })),
       ]);
       setRecords(attRes.data);
       setLeaves(leavesRes.data);

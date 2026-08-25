@@ -5,7 +5,7 @@ export interface User {
   firstName: string;
   lastName: string;
   initials: string;
-  role: 'Partner' | 'Admin' | 'Manager' | 'Staff' | 'Intern' | 'Client';
+  role: 'Partner' | 'Admin' | 'Manager' | 'Staff' | 'Intern' | 'HR' | 'Accounts' | 'Client';
   roleId?: string;
   roleRef?: { id: string; name: string };
   designation?: string;
