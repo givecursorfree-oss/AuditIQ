@@ -36,7 +36,12 @@ const csvUpload = multer({
       file.mimetype.includes('csv') ||
       file.mimetype === 'text/plain' ||
       file.originalname.toLowerCase().endsWith('.csv');
-    cb(ok ? null : new Error('Only CSV files are allowed'), ok);
+    // multer FileFilterCallback overloads: (Error) | (null, boolean) — not (Error|null, boolean)
+    if (!ok) {
+      cb(new Error('Only CSV files are allowed'));
+      return;
+    }
+    cb(null, true);
   },
 });
 
