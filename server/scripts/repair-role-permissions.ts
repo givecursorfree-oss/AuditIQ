@@ -147,7 +147,7 @@ async function main() {
   );
   await setRolePermissions(
     'HR',
-    pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages'], [
+    pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages', 'clients'], [
       'view',
       'manage',
       'export',

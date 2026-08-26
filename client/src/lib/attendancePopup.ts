@@ -138,7 +138,7 @@ export async function requestAttendanceLocation(options?: {
   return getPreciseGps();
 }
 
-async function fetchTodayAttendanceRecord(): Promise<{
+export async function fetchTodayAttendanceRecord(): Promise<{
   checkIn?: string;
   checkOut?: string;
   status?: string;
@@ -214,6 +214,11 @@ export async function tryAttendanceCheckIn(
   if (existing?.checkIn && !existing.checkOut) {
     sessionStorage.setItem(apiKey, 'done');
     return forcePopup ? showPopup(buildCheckInPopup(existing, method)) : null;
+  }
+  // Accidental early checkout: reopen via tryAttendanceResume, not a second check-in
+  if (existing?.checkIn && existing.checkOut) {
+    sessionStorage.setItem(apiKey, 'done');
+    return null;
   }
 
   const needsGps = placeOfWork === 'Office';
@@ -301,6 +306,20 @@ export async function tryAttendanceCheckOut(userId: string): Promise<boolean> {
       '/attendance/check-out'
     );
     dispatchAttendanceConfirmed(buildCheckOutPopup(data));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Reopen today after accidental check-out (keeps original check-in). */
+export async function tryAttendanceResume(): Promise<boolean> {
+  try {
+    const { data } = await api.post<{ checkIn?: string; checkOut?: string | null; alreadyOpen?: boolean }>(
+      '/attendance/resume'
+    );
+    if (data.alreadyOpen) return true;
+    window.dispatchEvent(new CustomEvent('auditiq:clock-in'));
     return true;
   } catch {
     return false;

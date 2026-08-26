@@ -1,15 +1,15 @@
 import prisma from './prisma.js';
 
 /**
- * Office attendance uses device GPS coordinates vs the firm office pin.
- * Rejects coarse fixes (typical Wi‑Fi / IP geolocation) — prefer a phone outdoors/near window.
+ * Office attendance: device GPS vs firm office pin (500m fence).
+ * Accuracy gate rejects only absurdly coarse fixes; distance is the real check.
  */
 export const MKD_OFFICE_LAT = 13.0762097;
 export const MKD_OFFICE_LNG = 80.2375391;
 export const DEFAULT_GEOFENCE_RADIUS_M = 500;
 
-/** Max reported accuracy (meters) accepted for Office check-in. Coarser ≈ Wi‑Fi/IP, not GPS. */
-export const MAX_OFFICE_GPS_ACCURACY_M = 100;
+/** Must stay in sync with client MAX_OFFICE_GPS_ACCURACY_M */
+export const MAX_OFFICE_GPS_ACCURACY_M = 2500;
 
 export class GeofenceError extends Error {
   status = 403;
@@ -44,16 +44,16 @@ export function metersBetween(aLat: number, aLng: number, bLat: number, bLng: nu
   return 2 * EARTH_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Reject missing or coarse accuracy (Wi‑Fi/IP style). */
+/** Reject missing or absurdly coarse accuracy. Distance gate still enforces the 500m fence. */
 export function assertOfficeGpsAccuracy(accuracyMeters: number | null | undefined): void {
   if (accuracyMeters == null || !Number.isFinite(accuracyMeters) || accuracyMeters <= 0) {
     throw new GpsAccuracyError(
-      'Office check-in needs your device GPS accuracy. Open AuditIQ on your phone, allow Precise Location, and try again.'
+      'Office check-in needs your device location. Allow location on your phone and try again.'
     );
   }
   if (accuracyMeters > MAX_OFFICE_GPS_ACCURACY_M) {
     throw new GpsAccuracyError(
-      `Location accuracy is ±${Math.round(accuracyMeters)}m (Wi‑Fi/IP-style). Need GPS within ±${MAX_OFFICE_GPS_ACCURACY_M}m. Use your phone with Precise Location on at the office.`
+      `Location accuracy is ±${Math.round(accuracyMeters)}m — too coarse to verify the office. Enable Precise Location and try again near a window.`
     );
   }
 }
@@ -97,7 +97,7 @@ export async function resolveOfficeCheckIn(
   const radius = nearest.office.geofenceRadius || DEFAULT_GEOFENCE_RADIUS_M;
   if (nearest.meters > radius) {
     throw new GeofenceError(
-      `You are ${Math.round(nearest.meters)}m from ${nearest.office.name}. Check-in is allowed within ${radius}m of the office GPS pin.`
+      `You are ${Math.round(nearest.meters)}m from ${nearest.office.name}. Check-in is allowed within ${radius}m.`
     );
   }
   return { officeId: nearest.office.id, meters: nearest.meters };

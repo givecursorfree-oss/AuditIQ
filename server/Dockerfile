@@ -24,6 +24,7 @@ COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
 COPY scripts ./scripts
+COPY seed-data ./seed-data
 
 RUN mkdir -p uploads logs && chown -R appuser:appgroup uploads logs
 

@@ -480,6 +480,31 @@ router.post('/check-out', async (req: AuthRequest, res: Response): Promise<void>
   }
 });
 
+/** Clears today's check-out so staff can keep working after an accidental early end. */
+router.post('/resume', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const attendance = await prisma.attendance.findFirst({
+      where: { userId: req.user!.id, date: attendanceDayFilter() },
+    });
+    if (!attendance?.checkIn) {
+      res.status(404).json({ error: 'No check-in found for today' });
+      return;
+    }
+    if (!attendance.checkOut) {
+      res.json({ ...attendance, alreadyOpen: true });
+      return;
+    }
+    const updated = await prisma.attendance.update({
+      where: { id: attendance.id },
+      data: { checkOut: null },
+    });
+    res.json({ ...updated, resumed: true });
+  } catch (err) {
+    logger.error('Resume attendance error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to resume day' });
+  }
+});
+
 // POST /api/attendance/wfh-approvals — manager pre-approves Article WFH for a date
 router.post('/wfh-approvals', async (req: AuthRequest, res: Response): Promise<void> => {
   try {

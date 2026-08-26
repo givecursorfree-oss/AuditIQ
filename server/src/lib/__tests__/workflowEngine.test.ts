@@ -3,6 +3,7 @@ import {
   getEngagementWorkflowMeta,
   clientProgressBuckets,
   canRoleMoveToStep,
+  canUserMoveToStep,
   buildClientPortalTimeline,
 } from '../workflowEngine.js';
 
@@ -38,6 +39,12 @@ describe('workflowEngine', () => {
   it('allows Partner to move to partner review step', () => {
     expect(canRoleMoveToStep('Partner', 'PARTNER_REVIEW', 'DT_COMPLIANCE')).toBe(true);
     expect(canRoleMoveToStep('Staff', 'PARTNER_REVIEW', 'DT_COMPLIANCE')).toBe(false);
+  });
+
+  it('gates senior executive check by grade', () => {
+    expect(canUserMoveToStep('Staff', 'SENIOR_AUDIT_EXECUTIVE', 'SR_EXEC_REVIEW', 'AUDIT_STATUTORY')).toBe(true);
+    expect(canUserMoveToStep('Staff', 'AUDIT_EXECUTIVE', 'SR_EXEC_REVIEW', 'AUDIT_STATUTORY')).toBe(false);
+    expect(canUserMoveToStep('Manager', 'AUDIT_MANAGER', 'SR_EXEC_REVIEW', 'AUDIT_STATUTORY')).toBe(true);
   });
 
   it('builds client portal timeline from GSTR-1 service steps', () => {

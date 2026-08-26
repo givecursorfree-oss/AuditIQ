@@ -101,6 +101,8 @@ model User {
   signoffs          SignOff[]
   documents         Document[]
   timeEntries       TimeEntry[]
+  timesheetDays     TimesheetDay[]     @relation("TimesheetDayStaff")
+  timesheetReviews  TimesheetDay[]     @relation("TimesheetDayReviewer")
   notifications     Notification[]
   navAttentionAcks  NavAttentionAck[]
   attendances       Attendance[]
@@ -147,6 +149,10 @@ model User {
   templateSends            TemplateSend[]     @relation("TemplateSender")
   engagementLettersCreated EngagementLetter[] @relation("EngagementLetterCreator")
 
+  compOffRequests          CompOffRequest[]   @relation("CompOffRequester")
+  compOffManagerApprovals  CompOffRequest[]   @relation("CompOffManager")
+  compOffHrCredits         CompOffRequest[]   @relation("CompOffHr")
+
   @@index([firmId])
   @@index([roleId])
   @@index([role])
@@ -175,6 +181,8 @@ model Firm {
   offices     Office[]
   clientRequests    ClientRequest[]
   documentTemplates DocumentTemplate[]
+  lookupValues      FirmLookupValue[]
+  compOffRequests   CompOffRequest[]
 }
 
 // ─── PRD 5.1: Engagement & Client Management ───
@@ -726,6 +734,27 @@ model TimeEntry {
   @@index([taskId])
 }
 
+/// Daily timesheet attestation (CA firm: Manager / Sr Exec signs off hours before WIP/billing).
+model TimesheetDay {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation("TimesheetDayStaff", fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime
+  /// Draft | Submitted | Approved | Rejected
+  status       String    @default("Draft")
+  submittedAt  DateTime?
+  reviewedById String?
+  reviewer     User?     @relation("TimesheetDayReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  reviewNote   String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@index([status])
+  @@index([date])
+}
+
 model Deadline {
   id         String   @id @default(uuid())
   title      String
@@ -836,6 +865,51 @@ model WfhApproval {
 
   @@unique([userId, date])
   @@index([userId])
+}
+
+/// Firm master lists for Attendance / Timesheet (HR client names, activity classification, holidays).
+model FirmLookupValue {
+  id        String   @id @default(uuid())
+  firmId    String
+  firm      Firm     @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  /// attendance_client | activity_classification | firm_holiday (YYYY-MM-DD)
+  kind      String
+  value     String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([firmId, kind, value])
+  @@index([firmId, kind])
+}
+
+/// Article comp-off: Sunday / firm holiday work → Manager/Partner approve → HR credit leave.
+model CompOffRequest {
+  id                   String    @id @default(uuid())
+  firmId               String
+  firm                 Firm      @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User      @relation("CompOffRequester", fields: [userId], references: [id], onDelete: Cascade)
+  workDate             DateTime
+  days                 Float     @default(1)
+  reason               String?   @db.Text
+  /// Pending | ManagerApproved | HrCredited | Rejected
+  status               String    @default("Pending")
+  managerApprovedById  String?
+  managerApprover      User?     @relation("CompOffManager", fields: [managerApprovedById], references: [id], onDelete: SetNull)
+  managerApprovedAt    DateTime?
+  hrCreditedById       String?
+  hrCreditor           User?     @relation("CompOffHr", fields: [hrCreditedById], references: [id], onDelete: SetNull)
+  hrCreditedAt         DateTime?
+  rejectedById         String?
+  rejectedAt           DateTime?
+  rejectionReason      String?   @db.Text
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([firmId, status])
+  @@index([userId])
+  @@index([workDate])
 }
 
 model LeaveRequest {

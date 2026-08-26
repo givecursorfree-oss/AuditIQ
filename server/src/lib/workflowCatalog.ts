@@ -8,6 +8,7 @@ export type WorkflowDomain = 'DT' | 'IDT' | 'AUDIT';
 export type OwnerTier =
   | 'client'
   | 'article'
+  | 'senior_exec'
   | 'manager'
   | 'partner'
   | 'accounts'
@@ -71,6 +72,7 @@ export const WORKFLOW_TEMPLATES = {
       { code: 'DATA_RECEIVED', label: 'Data received', ownerTier: 'manager', clientLabel: 'Documents received' },
       { code: 'EXECUTION_WIP', label: 'Execution (WIP)', ownerTier: 'article', clientLabel: 'Fieldwork in progress' },
       { code: 'DRAFT_READY', label: 'Draft ready', ownerTier: 'article', clientLabel: 'Draft prepared' },
+      { code: 'SR_EXEC_REVIEW', label: 'Senior executive check', ownerTier: 'senior_exec', clientLabel: 'Under senior review' },
       { code: 'MANAGER_REVIEW', label: 'Audit manager review', ownerTier: 'manager', clientLabel: 'Manager review' },
       { code: 'PARTNER_REVIEW', label: 'Partner review', ownerTier: 'partner', clientLabel: 'Partner review' },
       { code: 'CLIENT_DISCUSSION', label: 'Client discussion', ownerTier: 'client', clientLabel: 'Discussion with client' },
@@ -89,6 +91,8 @@ export const LEGACY_STAGE_TO_CODE: Record<string, string> = {
   'Data Received': 'DATA_RECEIVED',
   'Execution (WIP)': 'EXECUTION_WIP',
   'Draft Ready': 'DRAFT_READY',
+  'Senior executive check': 'SR_EXEC_REVIEW',
+  'Senior Executive Check': 'SR_EXEC_REVIEW',
   'Review with Manager': 'MANAGER_REVIEW',
   'Partner Review': 'PARTNER_REVIEW',
   'Client Discussion': 'CLIENT_DISCUSSION',
@@ -112,6 +116,7 @@ export const CODE_TO_LEGACY_STAGE: Record<string, string> = {
   DATA_RECEIVED: 'Data Received',
   EXECUTION_WIP: 'Execution (WIP)',
   DRAFT_READY: 'Draft Ready',
+  SR_EXEC_REVIEW: 'Senior executive check',
   MANAGER_REVIEW: 'Review with Manager',
   PARTNER_REVIEW: 'Partner Review',
   CLIENT_DISCUSSION: 'Client Discussion',
@@ -157,11 +162,11 @@ export const MKD_HIERARCHY = [
   { code: 'AUDIT_MANAGER', title: 'Audit Manager', sortOrder: 3, systemRole: 'Manager' },
   { code: 'EXECUTIVE_MANAGER', title: 'Executive Manager', sortOrder: 4, systemRole: 'Manager' },
   { code: 'SENIOR_AUDIT_EXECUTIVE', title: 'Senior Audit Executive', sortOrder: 5, systemRole: 'Staff' },
-  { code: 'AUDIT_EXECUTIVE', title: 'Audit Executive (Article)', sortOrder: 6, systemRole: 'Staff' },
-  { code: 'HR_MANAGER', title: 'HR Manager', sortOrder: 7, systemRole: 'Staff' },
-  { code: 'ACCOUNTS_MANAGER', title: 'Accounts Manager', sortOrder: 8, systemRole: 'Staff' },
-  { code: 'SENIOR_OFFICE_ADMIN', title: 'Senior Office Administrator', sortOrder: 9, systemRole: 'Staff' },
-  { code: 'OFFICE_EXECUTIVE', title: 'Office Executive', sortOrder: 10, systemRole: 'Staff' },
+  { code: 'AUDIT_EXECUTIVE', title: 'Audit Executive', sortOrder: 6, systemRole: 'Staff' },
+  { code: 'HR_MANAGER', title: 'HR & Admin Manager', sortOrder: 7, systemRole: 'HR' },
+  { code: 'ACCOUNTS_MANAGER', title: 'Accounts Manager', sortOrder: 8, systemRole: 'Accounts' },
+  { code: 'SENIOR_OFFICE_ADMIN', title: 'Office Admin Person', sortOrder: 9, systemRole: 'Staff' },
+  { code: 'OFFICE_EXECUTIVE', title: 'Office Assistant', sortOrder: 10, systemRole: 'Staff' },
   { code: 'INTERN', title: 'Intern', sortOrder: 11, systemRole: 'Intern' },
 ] as const;
 

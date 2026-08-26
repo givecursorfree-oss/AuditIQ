@@ -18,6 +18,7 @@ import {
 } from '../lib/workflowCatalog.js';
 import {
   canRoleMoveToStep,
+  canUserMoveToStep,
   checkWorkflowGating,
   clientStageLabelForCode,
   getEngagementWorkflowMeta,
@@ -72,7 +73,7 @@ function deriveWorkflowStatus(currentCode: string, stepCodes: string[]): string 
   const idx = Math.max(0, stepCodes.indexOf(currentCode));
   if (currentCode === 'BILLING' || currentCode === 'ARCHIVED') return 'completed';
   if (currentCode === 'FILING' || currentCode === 'FILED') return 'filed';
-  if (['MANAGER_REVIEW', 'PARTNER_REVIEW', 'CLIENT_REVIEW'].includes(currentCode)) return 'pending_review';
+  if (['SR_EXEC_REVIEW', 'MANAGER_REVIEW', 'PARTNER_REVIEW', 'CLIENT_REVIEW'].includes(currentCode)) return 'pending_review';
   if (idx <= 0) return 'not_started';
   return 'in_progress';
 }
@@ -384,6 +385,17 @@ router.post('/:id/move', async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
+    const actor = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { hierarchyLevel: { select: { code: true } } },
+    });
+    if (!canUserMoveToStep(req.user!.role, actor?.hierarchyLevel?.code, toCode, templateId)) {
+      res.status(403).json({
+        error: `Your grade cannot move engagements to "${stepDef.label}". Senior executive check requires a Senior Audit Executive (or Manager/Partner).`,
+      });
+      return;
+    }
+
     const gatingResult = await checkWorkflowGating(eng.id, eng, toCode, templateId);
     if (!gatingResult.allowed) {
       res.status(400).json({ error: gatingResult.blockers.join('; '), blockers: gatingResult.blockers });
@@ -597,12 +609,21 @@ router.get('/:id/can-move', async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const roleAllowed = canRoleMoveToStep(req.user!.role, toCode, templateId);
+    const actor = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { hierarchyLevel: { select: { code: true } } },
+    });
+    const roleAllowed = canUserMoveToStep(
+      req.user!.role,
+      actor?.hierarchyLevel?.code,
+      toCode,
+      templateId
+    );
     const gatingResult = await checkWorkflowGating(eng.id, eng, toCode, templateId);
 
     const allBlockers = [...gatingResult.blockers];
     if (!roleAllowed) {
-      allBlockers.unshift(`Your role cannot move engagements to "${stepDef.label}".`);
+      allBlockers.unshift(`Your grade cannot move engagements to "${stepDef.label}".`);
     }
 
     res.json({

@@ -55,7 +55,16 @@ interface StipendRecord {
   user: { firstName: string; lastName: string };
 }
 
-type LeaveTab = 'apply' | 'inbox' | 'calendar' | 'stipend' | 'ediary';
+type LeaveTab = 'apply' | 'inbox' | 'calendar' | 'stipend' | 'ediary' | 'compoff' | 'holidays';
+
+interface CompOffRequest {
+  id: string;
+  workDate: string;
+  days: number;
+  reason?: string | null;
+  status: string;
+  user: { firstName: string; lastName: string; initials: string };
+}
 
 export default function LeaveStipend() {
   const { user } = useAuth();
@@ -64,6 +73,11 @@ export default function LeaveStipend() {
   const isAdmin = user?.role === 'Admin';
   const canApply = Boolean(user && user.role !== 'Admin' && hasNavPermission(user, 'leave', 'apply'));
   const canManage = Boolean(user && hasNavPermission(user, 'leave', 'manage'));
+  const canCompOffManage = Boolean(
+    user && ['Partner', 'Admin', 'Manager', 'HR'].includes(user.role)
+  );
+  const canCompOffRequest = Boolean(user && user.role !== 'Admin');
+  const canManageHolidays = Boolean(user && ['Partner', 'Admin', 'HR'].includes(user.role));
 
   const [tab, setTab] = useState<LeaveTab>('apply');
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -73,6 +87,13 @@ export default function LeaveStipend() {
   const [icaiMin, setIcaiMin] = useState<Record<string, number>>({});
   const [calendar, setCalendar] = useState<LeaveRequest[]>([]);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [compOffs, setCompOffs] = useState<CompOffRequest[]>([]);
+  const [compOffForm, setCompOffForm] = useState({
+    workDate: new Date().toISOString().slice(0, 10),
+    reason: '',
+  });
+  const [holidays, setHolidays] = useState<string[]>([]);
+  const [holidayDate, setHolidayDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [applyForm, setApplyForm] = useState({
     startDate: new Date().toISOString().slice(0, 10),
@@ -87,12 +108,14 @@ export default function LeaveStipend() {
     if (canApply) tabs.push({ k: 'apply', l: 'Apply for leave' });
     if (canManage) tabs.push({ k: 'inbox', l: 'Leave management' });
     if (canApply || canManage) tabs.push({ k: 'calendar', l: 'Calendar' });
+    if (canCompOffRequest || canCompOffManage) tabs.push({ k: 'compoff', l: 'Comp-off' });
+    if (canManageHolidays) tabs.push({ k: 'holidays', l: 'Firm holidays' });
     if (isIntern) {
       tabs.push({ k: 'stipend', l: 'Stipend' });
       tabs.push({ k: 'ediary', l: 'E-Diary export' });
     }
     return tabs;
-  }, [canApply, canManage, isIntern]);
+  }, [canApply, canManage, canCompOffRequest, canCompOffManage, canManageHolidays, isIntern]);
 
   async function load() {
     const tasks: Promise<void>[] = [
@@ -103,7 +126,16 @@ export default function LeaveStipend() {
         setIcaiMin(r.data.icaiMinimum || {});
       }),
       api.get<LeaveRequest[]>(`/attendance/leaves/calendar?month=${month}`).then((r) => setCalendar(r.data)),
+      api.get<CompOffRequest[]>('/hr-masters/comp-off').then((r) => setCompOffs(r.data)).catch(() => setCompOffs([])),
     ];
+    if (canManageHolidays) {
+      tasks.push(
+        api
+          .get<{ values: string[] }>('/hr-masters/lookups?kind=firm_holiday')
+          .then((r) => setHolidays(r.data.values || []))
+          .catch(() => setHolidays([]))
+      );
+    }
     if (canManage) {
       tasks.push(
         api.get<LeaveRequest[]>('/attendance/leaves/inbox?status=Pending').then((r) => setInbox(r.data))
@@ -113,7 +145,7 @@ export default function LeaveStipend() {
     await Promise.allSettled(tasks);
   }
 
-  useEffect(() => { void load(); }, [month, canManage]);
+  useEffect(() => { void load(); }, [month, canManage, canManageHolidays]);
 
   useEffect(() => {
     const raw = searchParams.get('tab');
@@ -168,6 +200,54 @@ export default function LeaveStipend() {
     }
   }
 
+  async function applyCompOff() {
+    try {
+      await api.post('/hr-masters/comp-off', {
+        workDate: compOffForm.workDate,
+        reason: compOffForm.reason || undefined,
+      });
+      await appAlert({
+        title: 'Comp-off submitted',
+        message: 'Sent to Manager/Partner for approval. HR will credit leave after verification.',
+      });
+      setCompOffForm({ ...compOffForm, reason: '' });
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      await appAlert({ title: 'Could not submit', message: err?.response?.data?.error || 'Failed' });
+    }
+  }
+
+  async function patchCompOff(id: string, status: 'ManagerApproved' | 'HrCredited' | 'Rejected') {
+    try {
+      await api.patch(`/hr-masters/comp-off/${id}`, { status });
+      await appAlert({
+        title: 'Done',
+        message:
+          status === 'HrCredited'
+            ? 'Leave credit added to the article assistant’s firm leave balance.'
+            : status === 'ManagerApproved'
+              ? 'Forwarded to HR for leave credit.'
+              : 'Comp-off rejected.',
+      });
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      await appAlert({ title: 'Action failed', message: err?.response?.data?.error || 'Failed' });
+    }
+  }
+
+  async function addHoliday() {
+    try {
+      await api.post('/hr-masters/holidays', { date: holidayDate });
+      await appAlert({ title: 'Holiday added', message: `${holidayDate} is on the firm holiday list (comp-off eligible).` });
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      await appAlert({ title: 'Could not add', message: err?.response?.data?.error || 'Failed' });
+    }
+  }
+
   function downloadEDiary() {
     window.open(apiAbsoluteUrl('/api/articleship/e-diary/export'), '_blank');
   }
@@ -182,7 +262,7 @@ export default function LeaveStipend() {
           isAdmin
             ? 'Review and sanction leave requests for your firm.'
             : user?.role === 'HR'
-              ? 'Firm leave inbox, calendar, and leave balances for staff and articles.'
+              ? 'Firm leave inbox, calendar, comp-off credits, and balances for staff and articles.'
             : isIntern
               ? 'ICAI articleship leave balances, stipend, and e-diary.'
               : 'Submit leave requests for manager approval.'
@@ -343,6 +423,140 @@ export default function LeaveStipend() {
               </div>
             ))}
           </div>
+        </PanelCard>
+      )}
+
+      {tab === 'compoff' && (
+        <div className="space-y-4">
+          {canCompOffRequest && balance?.isArticle && (
+            <PanelCard title="Request comp-off (Sunday / firm holiday)">
+              <p className="text-xs text-muted-foreground mb-3">
+                Article assistants: work on a Sunday or firm holiday, then send for Manager/Partner approval.
+                HR verifies and adds the day to your firm leave credit.
+              </p>
+              <div className="space-y-3 max-w-xl">
+                <label className="block">
+                  <span className="text-sm text-muted-foreground">Date worked</span>
+                  <input
+                    type="date"
+                    className="input-field mt-1 w-full"
+                    value={compOffForm.workDate}
+                    onChange={(e) => setCompOffForm({ ...compOffForm, workDate: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm text-muted-foreground">Reason / notes</span>
+                  <textarea
+                    className="input-field mt-1 w-full"
+                    rows={2}
+                    value={compOffForm.reason}
+                    onChange={(e) => setCompOffForm({ ...compOffForm, reason: e.target.value })}
+                  />
+                </label>
+                <Button type="button" onClick={() => void applyCompOff()}>
+                  Submit to Manager / Partner
+                </Button>
+              </div>
+            </PanelCard>
+          )}
+          <PanelCard title="Comp-off requests" bodyClassName="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="table-header text-left">
+                    <th className="px-4 py-3">Staff</th>
+                    <th className="px-4 py-3">Work date</th>
+                    <th className="px-4 py-3 text-right">Days</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {compOffs.map((c) => (
+                    <tr key={c.id} className="border-t border-border">
+                      <td className="px-4 py-2">
+                        {c.user.firstName} {c.user.lastName}
+                      </td>
+                      <td>{new Date(c.workDate).toLocaleDateString('en-IN')}</td>
+                      <td className="text-right">{c.days}</td>
+                      <td>
+                        <ApprovalStatusBadge status={c.status} />
+                      </td>
+                      <td className="space-x-1 whitespace-nowrap">
+                        {c.status === 'Pending' &&
+                          ['Manager', 'Partner', 'Admin'].includes(user?.role || '') && (
+                            <button
+                              type="button"
+                              className="text-xs btn-secondary py-1 px-2"
+                              onClick={() => void patchCompOff(c.id, 'ManagerApproved')}
+                            >
+                              Approve (Mgr)
+                            </button>
+                          )}
+                        {c.status === 'ManagerApproved' &&
+                          ['HR', 'Partner', 'Admin'].includes(user?.role || '') && (
+                            <button
+                              type="button"
+                              className="text-xs btn-primary py-1 px-2"
+                              onClick={() => void patchCompOff(c.id, 'HrCredited')}
+                            >
+                              Credit leave (HR)
+                            </button>
+                          )}
+                        {!['HrCredited', 'Rejected'].includes(c.status) && canCompOffManage && (
+                          <button
+                            type="button"
+                            className="text-xs text-danger"
+                            onClick={() => void patchCompOff(c.id, 'Rejected')}
+                          >
+                            Reject
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {compOffs.length === 0 && (
+                    <tr>
+                      <td colSpan={5}>
+                        <EmptyState title="No comp-off requests" />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </PanelCard>
+        </div>
+      )}
+
+      {tab === 'holidays' && canManageHolidays && (
+        <PanelCard title="Firm holiday list (comp-off eligible)">
+          <p className="text-xs text-muted-foreground mb-3">
+            Sundays are always eligible. Add other firm holidays here so articles can request comp-off for those dates.
+          </p>
+          <div className="flex flex-wrap items-end gap-3 mb-4">
+            <label className="block">
+              <span className="text-sm text-muted-foreground">Date</span>
+              <input
+                type="date"
+                className="input-field mt-1"
+                value={holidayDate}
+                onChange={(e) => setHolidayDate(e.target.value)}
+              />
+            </label>
+            <Button type="button" onClick={() => void addHoliday()}>
+              Add holiday
+            </Button>
+          </div>
+          {holidays.length === 0 ? (
+            <EmptyState title="No firm holidays configured yet" />
+          ) : (
+            <ul className="text-sm space-y-1">
+              {holidays.map((d) => (
+                <li key={d}>{new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</li>
+              ))}
+            </ul>
+          )}
         </PanelCard>
       )}
 

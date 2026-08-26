@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Clock, MapPin, Calendar, CheckCircle as CheckCircle2, XCircle, SignIn as LogIn, SignOut as LogOut,
   MagnifyingGlass as Search, CaretLeft as ChevronLeft, CaretRight as ChevronRight, Plus, X, WarningCircle as AlertCircle
@@ -7,7 +7,7 @@ import {
 import api from '../services/api';
 import type { Attendance, LeaveRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { tryAttendanceCheckIn, requestAttendanceLocation, type PlaceOfWork } from '../lib/attendancePopup';
+import { tryAttendanceCheckIn, tryAttendanceResume, requestAttendanceLocation, type PlaceOfWork } from '../lib/attendancePopup';
 import { hoursBetween } from '../lib/attendanceDates';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
@@ -25,6 +25,7 @@ const PLACES: PlaceOfWork[] = ['Office', 'Client Place', 'Work from Home'];
 
 export default function AttendancePage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<'attendance' | 'leaves'>('attendance');
   const [records, setRecords] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -33,6 +34,7 @@ export default function AttendancePage() {
   const [isArticle, setIsArticle] = useState(false);
   const [placeOfWork, setPlaceOfWork] = useState<PlaceOfWork>('Office');
   const [clientName, setClientName] = useState('');
+  const [clientOptions, setClientOptions] = useState<string[]>([]);
   const [checkingIn, setCheckingIn] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
@@ -106,6 +108,13 @@ export default function AttendancePage() {
     void fetchAll();
   }, [fetchAll]);
 
+  useEffect(() => {
+    void api
+      .get<{ values: string[] }>('/hr-masters/lookups?kind=attendance_client')
+      .then((r) => setClientOptions(r.data.values || []))
+      .catch(() => setClientOptions([]));
+  }, []);
+
   const handleCheckIn = async () => {
     if (!user?.id) return;
     if (isArticle && placeOfWork === 'Client Place' && !clientName.trim()) {
@@ -123,8 +132,8 @@ export default function AttendancePage() {
           longitude: fix.longitude,
           accuracyMeters: fix.accuracyMeters,
         };
-        loadingId = gooeyToast.info('Getting GPS…', {
-          description: 'Using device coordinates (not Wi‑Fi/IP) at the office.',
+        loadingId = gooeyToast.info('Checking location…', {
+          description: 'Verifying you are within 500m of the office.',
           timing: { displayDuration: 2_147_483_647 },
           showTimestamp: false,
         });
@@ -149,15 +158,18 @@ export default function AttendancePage() {
         clientName: placeOfWork === 'Client Place' ? clientName.trim() : undefined,
       });
       if (loadingId != null) gooeyToast.dismiss(loadingId);
+      gooeyToast.dismiss();
       appToast({
         variant: 'success',
         title: 'Attendance marked',
         message:
           placeOfWork === 'Office'
-            ? `GPS check-in · ±${Math.round(gps.accuracyMeters || 0)}m`
-            : `Checked in · ${placeOfWork}`,
+            ? 'You are checked in. Select an engagement to start.'
+            : `Checked in · ${placeOfWork}. Select an engagement to start.`,
+        durationMs: 3500,
       });
       await fetchAll();
+      navigate('/time-tracker?start=1');
     } catch (err: unknown) {
       if (loadingId != null) gooeyToast.dismiss(loadingId);
       const notice = attendanceLoginNotice(err);
@@ -172,7 +184,43 @@ export default function AttendancePage() {
     }
   };
 
+  const handleResumeDay = async () => {
+    const ok = await appConfirm({
+      title: 'Resume day?',
+      message:
+        'Clears today’s check-out so you can keep working. Original check-in time stays the same.',
+      confirmLabel: 'Resume day',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
+    setCheckingIn(true);
+    try {
+      const resumed = await tryAttendanceResume();
+      if (!resumed) {
+        await appAlert('Could not resume day. Please try again.');
+        return;
+      }
+      appToast({
+        variant: 'success',
+        title: 'Day resumed',
+        message: 'Select an engagement and start your timer.',
+      });
+      await fetchAll();
+      navigate('/time-tracker?start=1');
+    } finally {
+      setCheckingIn(false);
+    }
+  };
+
   const handleCheckOut = async () => {
+    const ok = await appConfirm({
+      title: 'End day (check out)?',
+      message:
+        'This closes attendance for today. Logging out of the app does not check you out. If you check out by mistake, use Resume day.',
+      confirmLabel: 'End day',
+      cancelLabel: 'Keep working',
+    });
+    if (!ok) return;
     setCheckingIn(true);
     try {
       const { data } = await api.post<Attendance & { hoursWorked?: number }>('/attendance/check-out');
@@ -277,7 +325,12 @@ export default function AttendancePage() {
                 <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'End day (check out)'}
               </Button>
             ) : (
-              <ApprovalStatusBadge status="Approved" />
+              <div className="flex flex-wrap items-center gap-2">
+                <ApprovalStatusBadge status="Approved" />
+                <Button type="button" size="sm" disabled={checkingIn} onClick={() => void handleResumeDay()}>
+                  <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Resume day'}
+                </Button>
+              </div>
             )}
           </div>
         }
@@ -305,11 +358,17 @@ export default function AttendancePage() {
                   <span className="mb-1 block text-muted-foreground">Client name</span>
                   <input
                     className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:min-h-0 sm:py-1.5 sm:text-sm"
+                    list="attendance-client-names"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
-                    placeholder="Client name"
+                    placeholder="Select or type client name"
                     autoComplete="organization"
                   />
+                  <datalist id="attendance-client-names">
+                    {clientOptions.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
                 </label>
               )}
             </div>

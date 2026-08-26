@@ -17,9 +17,10 @@ import {
 const TIER_TO_ROLES: Record<OwnerTier, string[]> = {
   client: ['Client'],
   article: ['Staff', 'Intern', 'Manager', 'Partner', 'Admin'],
+  senior_exec: ['Staff', 'Manager', 'Partner', 'Admin'],
   manager: ['Manager', 'Partner', 'Admin'],
   partner: ['Partner', 'Admin'],
-  accounts: ['Manager', 'Partner', 'Admin', 'Staff'],
+  accounts: ['Manager', 'Partner', 'Admin', 'Staff', 'Accounts'],
   any: ['Staff', 'Intern', 'Manager', 'Partner', 'Admin'],
 };
 
@@ -57,6 +58,26 @@ export function canRoleMoveToStep(role: string, stepCode: string, templateId: Te
   const step = WORKFLOW_TEMPLATES[templateId].steps.find((s) => s.code === stepCode);
   if (!step) return false;
   return TIER_TO_ROLES[step.ownerTier].includes(role);
+}
+
+/**
+ * Grade-aware gate: Senior executive check requires Senior Audit Executive (or Manager+).
+ * Plain Audit Executives cannot advance to SR_EXEC_REVIEW / MANAGER_REVIEW.
+ */
+export function canUserMoveToStep(
+  role: string,
+  hierarchyCode: string | null | undefined,
+  stepCode: string,
+  templateId: TemplateId
+): boolean {
+  if (!canRoleMoveToStep(role, stepCode, templateId)) return false;
+  const step = WORKFLOW_TEMPLATES[templateId].steps.find((s) => s.code === stepCode);
+  if (!step) return false;
+  if (step.ownerTier === 'senior_exec') {
+    if (['Partner', 'Admin', 'Manager'].includes(role)) return true;
+    return hierarchyCode === 'SENIOR_AUDIT_EXECUTIVE';
+  }
+  return true;
 }
 
 export function stageCodeForStorage(code: string, templateId: TemplateId): string {

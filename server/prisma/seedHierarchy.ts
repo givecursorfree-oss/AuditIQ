@@ -8,7 +8,7 @@ const ROLE_DISPLAY: Record<string, { description: string }> = {
   Intern: { description: 'Intern — supervised support assignments' },
   Admin: { description: 'Firm Administrator — system and user administration' },
   Client: { description: 'Client portal access' },
-  HR: { description: 'HR Manager — attendance and leave administration' },
+  HR: { description: 'HR & Admin Manager — attendance, leave, and people administration' },
   Accounts: { description: 'Accounts Manager — billing and invoicing' },
 };
 

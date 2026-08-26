@@ -3,17 +3,18 @@ import { z } from 'zod';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
+import { listLookupValues, LOOKUP_ACTIVITY } from '../lib/hrLookups.js';
 
 const router = Router();
 router.use(authenticate);
 
-const WORK_TYPES = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'] as const;
+const FALLBACK_WORK_TYPES = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'] as const;
 const NON_BILLABLE_CATEGORIES = ['Internal Meeting', 'Office Admin', 'Exam Leave', 'Training', 'Sick Leave'] as const;
 
 const timeEntrySchema = z.object({
   date: z.string(),
   hours: z.number().min(0.25).max(24),
-  workType: z.enum(WORK_TYPES).optional(),
+  workType: z.string().min(1).max(120).optional(),
   description: z.string().optional(),
   notes: z.string().optional(),
   isBillable: z.boolean().optional(),
@@ -23,7 +24,7 @@ const timeEntrySchema = z.object({
 const timeEntryUpdateSchema = z.object({
   date: z.string().optional(),
   hours: z.number().min(0.25).max(24).optional(),
-  workType: z.enum(WORK_TYPES).optional(),
+  workType: z.string().min(1).max(120).optional(),
   description: z.string().optional(),
   notes: z.string().optional(),
   isBillable: z.boolean().optional(),
@@ -117,9 +118,20 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
   }
 });
 
-// GET /api/time-entries/meta — work-type vocabularies for the UI
-router.get('/meta/vocab', (_req, res) => {
-  res.json({ workTypes: WORK_TYPES, nonBillableCategories: NON_BILLABLE_CATEGORIES });
+// GET /api/time-entries/meta — work-type vocabularies for the UI (HR activity classification)
+router.get('/meta/vocab', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = req.user?.firmId;
+    let workTypes: string[] = [...FALLBACK_WORK_TYPES];
+    if (firmId) {
+      const activities = await listLookupValues(firmId, LOOKUP_ACTIVITY);
+      if (activities.length > 0) workTypes = activities;
+    }
+    res.json({ workTypes, nonBillableCategories: NON_BILLABLE_CATEGORIES });
+  } catch (err) {
+    logger.error('Time entry vocab error', { error: (err as Error).message });
+    res.json({ workTypes: FALLBACK_WORK_TYPES, nonBillableCategories: NON_BILLABLE_CATEGORIES });
+  }
 });
 
 // POST /api/time-entries

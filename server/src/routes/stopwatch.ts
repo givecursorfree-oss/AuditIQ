@@ -48,7 +48,7 @@ router.get('/current', async (req: AuthRequest, res: Response): Promise<void> =>
 const startSchema = z.object({
   engagementId: z.string().min(1),
   taskId: z.string().optional(),
-  workType: z.enum(['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other']).default('Audit'),
+  workType: z.string().min(1).max(120).default('Audit'),
   notes: z.string().optional(),
 });
 

@@ -108,6 +108,8 @@ export default function Clients() {
   const [searchParams] = useSearchParams();
   const engagementIdFromUrl = searchParams.get('engagementId');
   const canAssign = ['Partner', 'Admin', 'Manager'].includes(user?.role || '');
+  const canImportHrList = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+  const [importing, setImporting] = useState(false);
 
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,6 +131,28 @@ export default function Clients() {
       setMessage({ type: 'error', text: 'Failed to load clients.' });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function importHrClientList() {
+    setImporting(true);
+    setMessage(null);
+    try {
+      const { data: result } = await api.post<{
+        sourceCount: number;
+        created: number;
+        skippedExisting: number;
+        totalClientsInFirm: number;
+      }>('/hr-masters/clients/import-crm');
+      setMessage({
+        type: 'success',
+        text: `HR list: ${result.created} new clients created, ${result.skippedExisting} already existed (${result.totalClientsInFirm} total in firm).`,
+      });
+      await load();
+    } catch {
+      setMessage({ type: 'error', text: 'Failed to import HR client list.' });
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -223,6 +247,18 @@ export default function Clients() {
             <Badge variant="secondary" className="w-fit text-foreground">
               {incoming.total} incoming {incoming.total === 1 ? 'item' : 'items'} need attention
             </Badge>
+          ) : undefined
+        }
+        actions={
+          canImportHrList ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={importing}
+              onClick={() => void importHrClientList()}
+            >
+              {importing ? 'Importing…' : 'Import HR client list (689)'}
+            </Button>
           ) : undefined
         }
       />

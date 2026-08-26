@@ -4,7 +4,8 @@ import { Eye, EyeSlash as EyeOff, ArrowRight, ShieldCheck, Key as KeyRound } fro
 import { LiquidGlassCard } from '@/components/ui/liquid-glass-card';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { isAttendanceEligible, tryAttendanceCheckIn, requestAttendanceLocation } from '../lib/attendancePopup';
+import { isAttendanceEligible, tryAttendanceCheckIn, requestAttendanceLocation, fetchTodayAttendanceRecord } from '../lib/attendancePopup';
+import { attendanceDayState } from '../lib/attendanceDayGate';
 import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { formatApiError } from '@/lib/apiErrors';
 import { appToast, gooeyToast } from '@/context/AppToastContext';
@@ -71,13 +72,36 @@ export default function Login() {
   const finishLogin = async (
     loggedInUser: { id?: string; role: string }
   ) => {
-    const path = loggedInUser.role === 'Client' ? '/client/dashboard' : '/';
     if (loggedInUser.id && isAttendanceEligible(loggedInUser.role)) {
+      const today = await fetchTodayAttendanceRecord();
+      const day = attendanceDayState(today);
+
+      if (day === 'open') {
+        navigate('/time-tracker?start=1');
+        return;
+      }
+
+      if (day === 'closed') {
+        // Attendance was marked earlier; do not show "Attendance not marked".
+        appToast({
+          persist: true,
+          variant: 'info',
+          title: 'Day already ended',
+          message: 'You checked out today. Resume day on Attendance if you still need to work.',
+          action: {
+            label: 'Open Attendance',
+            onClick: () => navigate('/attendance'),
+          },
+        });
+        navigate('/attendance');
+        return;
+      }
+
       let loadingId: string | number | undefined;
       try {
         const gps = await requestAttendanceLocation({ confirm: appConfirm });
-        loadingId = gooeyToast.info('Getting GPS…', {
-          description: 'Device coordinates vs office pin (not Wi‑Fi/IP). Prefer phone.',
+        loadingId = gooeyToast.info('Checking location…', {
+          description: 'Verifying you are within 500m of the office.',
           timing: { displayDuration: 2_147_483_647 },
           showTimestamp: false,
         });
@@ -90,11 +114,15 @@ export default function Login() {
           gpsAttempted: true,
         });
         if (loadingId != null) gooeyToast.dismiss(loadingId);
+        gooeyToast.dismiss();
         appToast({
           variant: 'success',
           title: 'Attendance marked',
-          message: `GPS check-in · ±${Math.round(gps.accuracyMeters)}m`,
+          message: 'You are checked in. Select an engagement to start.',
+          durationMs: 3500,
         });
+        navigate('/time-tracker?start=1');
+        return;
       } catch (err: unknown) {
         if (loadingId != null) gooeyToast.dismiss(loadingId);
         const notice = attendanceLoginNotice(err);
@@ -108,9 +136,11 @@ export default function Login() {
             onClick: () => navigate('/attendance'),
           },
         });
+        navigate('/attendance');
+        return;
       }
     }
-    navigate(path);
+    navigate(loggedInUser.role === 'Client' ? '/client/dashboard' : '/');
   };
 
   const extractError = (err: unknown): string => formatApiError(err, 'login');

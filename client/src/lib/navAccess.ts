@@ -7,6 +7,7 @@ import {
   type NavPermission,
 } from './navCatalog';
 import { passesHierarchyNavGate, passesHierarchyRouteGate } from './hierarchyAccess';
+import { canViewManagementInsights } from './gradeCapabilities';
 
 /** Legacy paths that redirect elsewhere in App.tsx — must pass RouteGuard before Navigate runs. */
 const LEGACY_REDIRECT_PATHS = new Set([
@@ -46,6 +47,9 @@ function canAccessNavItem(user: User | null | undefined, item: NavCatalogItem): 
   if (!user) return false;
   if (!passesRoleGate(user, item)) return false;
   if (!passesHierarchyNavGate(user, item.path)) return false;
+  if (item.id === 'management-reports' && !canViewManagementInsights(user.role, user.hierarchyLevel?.code)) {
+    return false;
+  }
   if (item.permission) {
     return hasNavPermission(user, item.permission.module, item.permission.action ?? 'view');
   }
@@ -121,6 +125,14 @@ export function canAccessRoute(
     return NAV_CATALOG.filter((i) => i.path === '/leave-stipend').some((i) =>
       canAccessNavItem(user, i)
     );
+  }
+  if (path === '/leave-stipend' && tab === 'compoff') {
+    return NAV_CATALOG.filter((i) => i.path === '/leave-stipend').some((i) =>
+      canAccessNavItem(user, i)
+    );
+  }
+  if (path === '/leave-stipend' && tab === 'holidays') {
+    return Boolean(user && ['Partner', 'Admin', 'HR'].includes(user.role));
   }
   if (path === '/leave-stipend' && tab === 'ediary') {
     const stipend = NAV_CATALOG.find((i) => i.id === 'stipend');

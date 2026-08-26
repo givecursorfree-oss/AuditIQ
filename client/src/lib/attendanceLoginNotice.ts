@@ -9,47 +9,58 @@ export class LocationNeededError extends Error {
   }
 }
 
-/** Plain-language status after login check-in fails. Login still succeeded. */
+/** Shown only when attendance was not marked. Login still succeeded. */
 export function attendanceLoginNotice(err: unknown): {
   title: string;
   message: string;
   variant: 'warning' | 'error';
 } {
   if (err instanceof LocationNeededError) {
+    if (err.code === 'denied') {
+      return {
+        title: 'Attendance not marked',
+        message: 'Allow location, then check in at the office.',
+        variant: 'warning',
+      };
+    }
+    if (/accuracy|coarse|Precise/i.test(err.message)) {
+      return {
+        title: 'Attendance not marked',
+        message: err.message,
+        variant: 'warning',
+      };
+    }
     return {
-      title: 'Signed in. Attendance not marked.',
-      message:
-        err.code === 'denied'
-          ? 'Allow Precise Location on your phone, then check in at the office.'
-          : `${err.message} Prefer checking in from Attendance on your phone.`,
+      title: 'Attendance not marked',
+      message: err.message,
       variant: 'warning',
     };
   }
   const raw = err instanceof Error ? err.message : '';
   if (/WFH requires manager/i.test(raw)) {
     return {
-      title: 'Attendance not marked.',
+      title: 'Attendance not marked',
       message: raw,
       variant: 'warning',
     };
   }
-  if (/accuracy|Wi‑Fi|Wi-Fi|Precise Location|GPS within/i.test(raw)) {
+  if (/accuracy|coarse|Precise Location/i.test(raw)) {
     return {
-      title: 'Signed in. GPS not precise enough.',
-      message: `${raw}`,
+      title: 'Attendance not marked',
+      message: raw,
       variant: 'warning',
     };
   }
   if (/within \d+m/i.test(raw) || /from .+\. Check-in/i.test(raw)) {
     return {
-      title: 'Signed in. Outside the office zone.',
-      message: `${raw} You can still use the app. Check in when you arrive at the office.`,
+      title: 'Attendance not marked',
+      message: `${raw} You can still use the app.`,
       variant: 'warning',
     };
   }
   return {
-    title: 'Signed in. Attendance not marked.',
-    message: raw || 'Check in from Attendance on your phone at the office (GPS).',
+    title: 'Attendance not marked',
+    message: raw || 'Check in from Attendance at the office.',
     variant: 'warning',
   };
 }

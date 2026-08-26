@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Play, Plus, Calendar, ListChecks, BellRinging, Check } from '@phosphor-icons/react';
 import api from '../services/api';
 import { appAlert, appConfirm } from '../context/AppDialogContext';
@@ -47,10 +47,11 @@ interface Task {
   engagement?: { id: string; title: string; client: { name: string } } | null;
 }
 
-const WORK_TYPES = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'];
+const WORK_TYPES_FALLBACK = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'];
 
 export default function TimeTracker() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<'today' | 'manual' | 'tasks'>('today');
   const [stopwatch, setStopwatch] = useState<Stopwatch | null>(null);
   const [tick, setTick] = useState(0);
@@ -59,7 +60,8 @@ export default function TimeTracker() {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reminders, setReminders] = useState<{ type: string; message: string }[]>([]);
-  const [showStartForm, setShowStartForm] = useState(false);
+  const [workTypes, setWorkTypes] = useState<string[]>(WORK_TYPES_FALLBACK);
+  const [showStartForm, setShowStartForm] = useState(() => searchParams.get('start') === '1');
   const [startForm, setStartForm] = useState({ engagementId: '', workType: 'Audit', notes: '' });
 
   // Manual log form
@@ -86,6 +88,19 @@ export default function TimeTracker() {
       await Promise.all([
         loadStopwatch(),
         api.get('/engagements?limit=100').then(r => setEngagements(r.data.engagements || [])).catch(() => null),
+        api.get<{ workTypes: string[] }>('/time-entries/meta/vocab').then((r) => {
+          if (r.data.workTypes?.length) {
+            setWorkTypes(r.data.workTypes);
+            setStartForm((f) => ({
+              ...f,
+              workType: r.data.workTypes.includes(f.workType) ? f.workType : r.data.workTypes[0],
+            }));
+            setManualForm((f) => ({
+              ...f,
+              workType: r.data.workTypes.includes(f.workType) ? f.workType : r.data.workTypes[0],
+            }));
+          }
+        }).catch(() => null),
         loadEntries(),
         loadTasks(),
         loadReminders(),
@@ -130,6 +145,14 @@ export default function TimeTracker() {
   }
 
   useEffect(() => { void loadAll(); }, []);
+
+  // After attendance check-in / resume: open engagement picker once
+  useEffect(() => {
+    if (searchParams.get('start') !== '1') return;
+    setShowStartForm(true);
+    setTab('today');
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const i = setInterval(() => setNowMs(Date.now()), 60_000);
@@ -317,7 +340,7 @@ export default function TimeTracker() {
                 {engagements.map(e => <option key={e.id} value={e.id}>{e.client.name} — {e.title}</option>)}
               </select>
               <select className="input-field" aria-label="Work type" value={startForm.workType} onChange={e => setStartForm({ ...startForm, workType: e.target.value })}>
-                {WORK_TYPES.map(w => <option key={w}>{w}</option>)}
+                {workTypes.map(w => <option key={w}>{w}</option>)}
               </select>
               <input className="input-field" aria-label="Notes" placeholder="Notes (optional)" value={startForm.notes} onChange={e => setStartForm({ ...startForm, notes: e.target.value })} />
             </div>
@@ -418,7 +441,7 @@ export default function TimeTracker() {
               {engagements.map(e => <option key={e.id} value={e.id}>{e.client.name} — {e.title}</option>)}
             </select>
             <select className="input-field" aria-label="Work type" value={manualForm.workType} onChange={e => setManualForm({ ...manualForm, workType: e.target.value })}>
-              {WORK_TYPES.map(w => <option key={w}>{w}</option>)}
+              {workTypes.map(w => <option key={w}>{w}</option>)}
             </select>
             <input type="number" step={0.25} min={0.25} aria-label="Hours" className="input-field" value={manualForm.hours} onChange={e => setManualForm({ ...manualForm, hours: Number(e.target.value) })} />
             <label className="flex items-center gap-2 text-sm">
