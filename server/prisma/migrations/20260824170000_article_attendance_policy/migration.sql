@@ -1,26 +1,24 @@
--- Article Assistant attendance policy fields (HR Aug 2026)
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "lateBand" TEXT;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "clientName" TEXT;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "bioPresent" BOOLEAN;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "forgiven" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "forgivenReason" TEXT;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "forgivenById" TEXT;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "wfhApprovedById" TEXT;
-ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "gpsAccuracy" DOUBLE PRECISION;
+-- Article Assistant attendance policy fields (HR Aug 2026) — MySQL
+ALTER TABLE `Attendance` ADD COLUMN `lateBand` VARCHAR(191) NULL;
+ALTER TABLE `Attendance` ADD COLUMN `clientName` VARCHAR(191) NULL;
+ALTER TABLE `Attendance` ADD COLUMN `bioPresent` BOOLEAN NULL;
+ALTER TABLE `Attendance` ADD COLUMN `forgiven` BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE `Attendance` ADD COLUMN `forgivenReason` VARCHAR(191) NULL;
+ALTER TABLE `Attendance` ADD COLUMN `forgivenById` VARCHAR(191) NULL;
+ALTER TABLE `Attendance` ADD COLUMN `wfhApprovedById` VARCHAR(191) NULL;
+ALTER TABLE `Attendance` ADD COLUMN `gpsAccuracy` DOUBLE NULL;
 
-CREATE INDEX IF NOT EXISTS "Attendance_userId_date_idx" ON "Attendance"("userId", "date");
+CREATE TABLE `WfhApproval` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `date` DATETIME(3) NOT NULL,
+    `approvedById` VARCHAR(191) NOT NULL,
+    `note` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
-CREATE TABLE IF NOT EXISTS "WfhApproval" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "date" TIMESTAMP(3) NOT NULL,
-    "approvedById" TEXT NOT NULL,
-    "note" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "WfhApproval_pkey" PRIMARY KEY ("id")
-);
+    UNIQUE INDEX `WfhApproval_userId_date_key`(`userId`, `date`),
+    INDEX `WfhApproval_userId_idx`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE UNIQUE INDEX IF NOT EXISTS "WfhApproval_userId_date_key" ON "WfhApproval"("userId", "date");
-CREATE INDEX IF NOT EXISTS "WfhApproval_userId_idx" ON "WfhApproval"("userId");
-
-ALTER TABLE "ArticleshipRecord" ADD COLUMN IF NOT EXISTS "firmLeaveCredit" DOUBLE PRECISION NOT NULL DEFAULT 24;
+ALTER TABLE `ArticleshipRecord` ADD COLUMN `firmLeaveCredit` DOUBLE NOT NULL DEFAULT 24;
