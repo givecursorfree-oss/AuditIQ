@@ -142,11 +142,12 @@ export default function Clients() {
         sourceCount: number;
         created: number;
         skippedExisting: number;
+        activatedExisting: number;
         totalClientsInFirm: number;
       }>('/hr-masters/clients/import-crm');
       setMessage({
         type: 'success',
-        text: `HR list: ${result.created} new clients created, ${result.skippedExisting} already existed (${result.totalClientsInFirm} total in firm).`,
+        text: `HR list (${result.sourceCount}): ${result.created} created, ${result.activatedExisting} activated from Prospect, ${result.skippedExisting} already on file (${result.totalClientsInFirm} total).`,
       });
       await load();
     } catch {
@@ -241,7 +242,7 @@ export default function Clients() {
     <AppPageContainer>
       <PageHeader
         title="Clients"
-        description="View your client portfolio and assign incoming registrations to the right team."
+        description="Firm client directory for engagements and billing. Incoming is only self-registrations / unassigned work — not the full HR list."
         badge={
           incoming.total > 0 ? (
             <Badge variant="secondary" className="w-fit text-foreground">
@@ -257,7 +258,7 @@ export default function Clients() {
               disabled={importing}
               onClick={() => void importHrClientList()}
             >
-              {importing ? 'Importing…' : 'Import HR client list (689)'}
+              {importing ? 'Importing…' : 'Import / sync HR client list'}
             </Button>
           ) : undefined
         }

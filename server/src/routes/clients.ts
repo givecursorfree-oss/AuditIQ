@@ -157,7 +157,11 @@ router.get(
         }),
       ]);
 
-      const prospectClients = clients.filter((c) => c.status === 'Prospect');
+      const prospectClients = clients.filter((c) => {
+        if (c.status !== 'Prospect') return false;
+        // Bulk HR directory rows are Active. Incoming = self-reg / incomplete onboarding only.
+        return c.portalUsers.length > 0 || Boolean(c.contactEmail?.trim());
+      });
       const users = staffUserMap(staff);
       const clientsWithTeam = clients.map((c) => ({
         ...c,

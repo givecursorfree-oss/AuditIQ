@@ -62,25 +62,37 @@ export async function ensureFirmLookupsSeeded(firmId: string): Promise<void> {
 /**
  * Import HR Excel client names as real CRM Client rows (engagements/billing).
  * Idempotent: skips names that already exist for the firm (case-insensitive trim).
+ * Status Active — these are the firm's working directory, not portal self-registrations.
  */
 export async function importCrmClientsFromHrList(firmId: string): Promise<{
   sourceCount: number;
   created: number;
   skippedExisting: number;
+  activatedExisting: number;
 }> {
   const seed = loadSeedFile();
   const names = [...new Set(seed.clients.map((n) => n.trim()).filter(Boolean))];
   if (names.length === 0) {
-    return { sourceCount: 0, created: 0, skippedExisting: 0 };
+    return { sourceCount: 0, created: 0, skippedExisting: 0, activatedExisting: 0 };
   }
 
   const existing = await prisma.client.findMany({
     where: { firmId },
-    select: { name: true },
+    select: { id: true, name: true, status: true },
   });
-  const existingKey = new Set(existing.map((c) => c.name.trim().toLowerCase()));
+  const byKey = new Map(existing.map((c) => [c.name.trim().toLowerCase(), c]));
 
-  const toCreate = names.filter((n) => !existingKey.has(n.toLowerCase()));
+  const toCreate: string[] = [];
+  const toActivateIds: string[] = [];
+  for (const name of names) {
+    const row = byKey.get(name.toLowerCase());
+    if (!row) {
+      toCreate.push(name);
+      continue;
+    }
+    if (row.status === 'Prospect') toActivateIds.push(row.id);
+  }
+
   const CHUNK = 100;
   let created = 0;
   for (let i = 0; i < toCreate.length; i += CHUNK) {
@@ -89,22 +101,31 @@ export async function importCrmClientsFromHrList(firmId: string): Promise<{
       data: slice.map((name) => ({
         firmId,
         name,
-        status: 'Prospect',
+        status: 'Active',
         isActive: true,
       })),
     });
     created += result.count;
   }
 
-  // Chunk createMany — avoid empty dead branch after ensureFirmLookupsSeeded
+  let activatedExisting = 0;
+  for (let i = 0; i < toActivateIds.length; i += CHUNK) {
+    const ids = toActivateIds.slice(i, i + CHUNK);
+    const result = await prisma.client.updateMany({
+      where: { id: { in: ids }, firmId, status: 'Prospect' },
+      data: { status: 'Active', isActive: true },
+    });
+    activatedExisting += result.count;
+  }
+
   logger.info('Imported CRM clients from HR list', {
     firmId,
     sourceCount: names.length,
     created,
     skipped: names.length - toCreate.length,
+    activatedExisting,
   });
 
-  // Attendance dropdown list (if empty)
   await ensureFirmLookupsSeeded(firmId);
   const lookupCount = await prisma.firmLookupValue.count({
     where: { firmId, kind: LOOKUP_CLIENT },
@@ -125,6 +146,7 @@ export async function importCrmClientsFromHrList(firmId: string): Promise<{
     sourceCount: names.length,
     created,
     skippedExisting: names.length - toCreate.length,
+    activatedExisting,
   };
 }
 
