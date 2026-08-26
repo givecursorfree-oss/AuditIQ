@@ -10,8 +10,15 @@ router.use(authenticate);
 
 const FIRM_TIMESHEET_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
 
+/** Users who appear on firm timesheets / attendance (exclude Client portal accounts). */
+const FIRM_MEMBER_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'] as const;
+
 function canViewFirmTimesheets(role: string): boolean {
   return (FIRM_TIMESHEET_ROLES as readonly string[]).includes(role);
+}
+
+function isFirmMemberRole(role: string): boolean {
+  return (FIRM_MEMBER_ROLES as readonly string[]).includes(role);
 }
 
 function dayBounds(dateStr: string) {
@@ -48,7 +55,12 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     if (!isSelf) {
       const peer = await prisma.user.findFirst({
-        where: { id: staffId, firmId: req.user!.firmId! },
+        where: {
+          id: staffId,
+          firmId: req.user!.firmId!,
+          isActive: true,
+          role: { in: [...FIRM_MEMBER_ROLES] },
+        },
         select: { id: true },
       });
       if (!peer) {
@@ -155,7 +167,7 @@ router.get('/firm', async (req: AuthRequest, res: Response): Promise<void> => {
     const dayKey = dateOnly(dateStr);
 
     const staff = await prisma.user.findMany({
-      where: { firmId, isActive: true },
+      where: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } },
       select: { id: true, firstName: true, lastName: true, initials: true, role: true },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
@@ -275,7 +287,7 @@ router.get('/pending-review', async (req: AuthRequest, res: Response): Promise<v
     const rows = await prisma.timesheetDay.findMany({
       where: {
         status: 'Submitted',
-        user: { firmId, isActive: true },
+        user: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } },
       },
       include: {
         user: { select: { id: true, firstName: true, lastName: true, initials: true, role: true } },
