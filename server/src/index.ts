@@ -251,14 +251,19 @@ function generalRateLimitKey(req: express.Request): string {
 }
 
 // Strict limiter for credential-submitting endpoints only (brute-force defense).
-// Always keyed by IP — do not use the user key here.
+// Key by IP + email so one shared office NAT IP cannot lock every staff login.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isDev ? 1000 : 50,
+  max: isDev ? 1000 : 40,
   skip: skipRateLimitInDev,
   skipSuccessfulRequests: true,
+  keyGenerator: (req) => {
+    const email =
+      typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    return `${ipKeyGenerator(req.ip || 'unknown')}:auth:${email || 'unknown'}`;
+  },
   message: {
-    error: 'Too many sign-in attempts from this device. Please wait a few minutes and try again.',
+    error: 'Too many sign-in attempts for this account. Wait a few minutes and try again.',
   },
   standardHeaders: true,
   legacyHeaders: false,

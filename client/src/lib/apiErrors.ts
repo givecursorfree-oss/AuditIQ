@@ -21,7 +21,10 @@ export function isApiNetworkFailure(err: unknown): boolean {
 export function formatApiError(err: unknown, context: ApiErrorContext = 'generic'): string {
   if (isAxiosError(err)) {
     if (err.response?.status === 429) {
-      return 'Too many requests. Wait about a minute, then try again.';
+      return (
+        err.response.data?.error ||
+        'Too many requests. Wait about a minute, then try again.'
+      );
     }
     if (err.response?.data?.error) {
       return err.response.data.error;
