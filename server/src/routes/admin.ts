@@ -142,17 +142,26 @@ router.put('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       return;
     }
 
-    // Role table is global (no firmId): block mutations on roles used by other tenants
-    const crossFirmUser = await prisma.user.findFirst({
-      where: {
-        roleId: id,
-        OR: [{ firmId: null }, { firmId: { not: firmId } }],
-      },
-      select: { id: true },
-    });
-    if (crossFirmUser) {
-      res.status(403).json({ error: 'Role is shared across firms and cannot be modified' });
+    // System roles: allow permission toggles; do not rename (JWT / hierarchy depend on name).
+    if (existing.isSystem && data.name && data.name !== existing.name) {
+      res.status(400).json({ error: 'System role names cannot be renamed' });
       return;
+    }
+
+    // Roles are global. Partners/Admins may update permissions for their firm operations.
+    // Only block rename of a custom role that is still assigned outside this firm.
+    if (data.name && data.name !== existing.name && !existing.isSystem) {
+      const crossFirmUser = await prisma.user.findFirst({
+        where: {
+          roleId: id,
+          OR: [{ firmId: null }, { firmId: { not: firmId } }],
+        },
+        select: { id: true },
+      });
+      if (crossFirmUser) {
+        res.status(403).json({ error: 'Role is shared across firms and cannot be renamed' });
+        return;
+      }
     }
 
     // If permissionIds provided, replace all permissions
@@ -168,7 +177,7 @@ router.put('/roles/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
     const role = await prisma.role.update({
       where: { id },
       data: {
-        name: data.name,
+        name: existing.isSystem ? existing.name : data.name,
         description: data.description,
         isActive: data.isActive,
       },

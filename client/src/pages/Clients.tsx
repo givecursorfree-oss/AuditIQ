@@ -8,11 +8,14 @@ import {
   Briefcase,
   CheckCircle,
   CaretRight as ChevronRight,
+  PencilSimple as Edit2,
   Warning,
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
 import PageHeader from '../components/layout/PageHeader';
 import PageLoading from '../components/layout/PageLoading';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
@@ -20,6 +23,14 @@ import { Badge } from '../components/ui/badge';
 import { NavCountBadge } from '../components/ui/nav-count-badge';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -109,8 +120,19 @@ export default function Clients() {
   const engagementIdFromUrl = searchParams.get('engagementId');
   const canAssign = ['Partner', 'Admin', 'Manager'].includes(user?.role || '');
   const canImportHrList = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+  const canEditClient = ['Partner', 'Admin', 'Manager', 'HR'].includes(user?.role || '');
   const [importing, setImporting] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const [editingClient, setEditingClient] = useState<ClientRow | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    pan: '',
+    gstin: '',
+    contactName: '',
+    contactEmail: '',
+    contactPhone: '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
 
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -230,6 +252,45 @@ export default function Clients() {
     }
   }
 
+  function openEditClient(c: ClientRow) {
+    setEditingClient(c);
+    setEditForm({
+      name: c.name || '',
+      pan: c.pan || '',
+      gstin: c.gstin || '',
+      contactName: c.contactName || '',
+      contactEmail: c.contactEmail || '',
+      contactPhone: c.contactPhone || '',
+    });
+  }
+
+  async function saveEditClient() {
+    if (!editingClient || !editForm.name.trim()) return;
+    setEditSaving(true);
+    setMessage(null);
+    try {
+      await api.put(`/clients/${editingClient.id}`, {
+        name: editForm.name.trim(),
+        pan: editForm.pan.trim() || null,
+        gstin: editForm.gstin.trim() || null,
+        contactName: editForm.contactName.trim() || null,
+        contactEmail: editForm.contactEmail.trim() || null,
+        contactPhone: editForm.contactPhone.trim() || null,
+      });
+      setMessage({ type: 'success', text: `Updated ${editForm.name.trim()}.` });
+      setEditingClient(null);
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setMessage({
+        type: 'error',
+        text: err?.response?.data?.error || 'Could not update client.',
+      });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   const letterGateBlocked = selectedEngagement
     ? isTeamAssignmentBlocked(selectedEngagement.letterStatus, engagementHasTeam(selectedEngagement))
     : false;
@@ -258,7 +319,7 @@ export default function Clients() {
     <AppPageContainer>
       <PageHeader
         title="Clients"
-        description="Firm client directory for engagements and billing. Incoming is only self-registrations / unassigned work — not the full HR list. Import CSV columns: name, pan, gstin, contactEmail, contactPhone."
+        description="Firm client directory for engagements and billing. Use Edit on a row to update details, or Import / sync CSV (columns: name, pan, gstin, contactEmail, contactPhone) — same name updates existing clients. Incoming is only self-registrations / unassigned work."
         badge={
           incoming.total > 0 ? (
             <Badge variant="secondary" className="w-fit text-foreground">
@@ -356,14 +417,27 @@ export default function Clients() {
                         {c._count.engagements} active
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => navigate(`/engagements?client=${c.id}`)}
-                        >
-                          View
-                          <ChevronRight size={14} className="ml-1" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {canEditClient && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1"
+                              onClick={() => openEditClient(c)}
+                            >
+                              <Edit2 size={14} />
+                              Edit
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate(`/engagements?client=${c.id}`)}
+                          >
+                            View
+                            <ChevronRight size={14} className="ml-1" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -570,6 +644,84 @@ export default function Clients() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(editingClient)} onOpenChange={(open) => !open && setEditingClient(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit client</DialogTitle>
+            <DialogDescription>
+              Update details for this firm client. Matching names on CSV import also update these fields.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-client-name">Name</Label>
+              <Input
+                id="edit-client-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-client-pan">PAN</Label>
+                <Input
+                  id="edit-client-pan"
+                  value={editForm.pan}
+                  onChange={(e) => setEditForm((f) => ({ ...f, pan: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-client-gstin">GSTIN</Label>
+                <Input
+                  id="edit-client-gstin"
+                  value={editForm.gstin}
+                  onChange={(e) => setEditForm((f) => ({ ...f, gstin: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-client-contact">Contact name</Label>
+              <Input
+                id="edit-client-contact"
+                value={editForm.contactName}
+                onChange={(e) => setEditForm((f) => ({ ...f, contactName: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-client-email">Contact email</Label>
+                <Input
+                  id="edit-client-email"
+                  type="email"
+                  value={editForm.contactEmail}
+                  onChange={(e) => setEditForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-client-phone">Contact phone</Label>
+                <Input
+                  id="edit-client-phone"
+                  value={editForm.contactPhone}
+                  onChange={(e) => setEditForm((f) => ({ ...f, contactPhone: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingClient(null)} disabled={editSaving}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void saveEditClient()}
+              disabled={editSaving || !editForm.name.trim()}
+            >
+              {editSaving ? 'Saving…' : 'Save changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppPageContainer>
   );
 }

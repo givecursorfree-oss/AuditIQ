@@ -340,7 +340,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // POST /api/clients
-router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = clientSchema.parse(req.body);
     const client = await prisma.client.create({
@@ -355,7 +355,7 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
 });
 
 // PUT /api/clients/:id
-router.put('/:id', authorize('Partner', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/:id', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = clientSchema.partial().parse(req.body);
     const client = await prisma.client.updateMany({

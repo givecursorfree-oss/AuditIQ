@@ -123,7 +123,14 @@ function RoleForm({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="roleName">Role Name</Label>
-              <Input id="roleName" value={name} onChange={(e) => setName(e.target.value)} required />
+              <Input
+                id="roleName"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                disabled={Boolean(role?.isSystem)}
+                title={role?.isSystem ? 'System role names are fixed' : undefined}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="roleDesc">Description</Label>
@@ -132,7 +139,9 @@ function RoleForm({
           </div>
 
           <div>
-            <Label className="mb-3 block">Permissions</Label>
+            <Label className="mb-3 block">
+              Permissions — toggle modules below, then click Update Role
+            </Label>
             <Card className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -237,6 +246,16 @@ export default function SettingsRolesTab() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    if (!showCreate && !editingRole) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById('role-permission-editor')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  }, [showCreate, editingRole]);
+
   const handleDelete = async (id: string) => {
     const ok = await appConfirm({
       title: 'Delete role',
@@ -261,20 +280,23 @@ export default function SettingsRolesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-foreground-muted">
-          {roles.length} roles configured • Toggle module permissions to show or hide sidebar items in real time
+          {roles.length} roles configured • Click <strong>Edit permissions</strong> on a role to change module access
         </p>
-        <Button onClick={() => setShowCreate(true)}>
+        <Button onClick={() => { setEditingRole(null); setShowCreate(true); }}>
           <Plus size={16} /> New Role
         </Button>
       </div>
 
       {(showCreate || editingRole) && (
-        <RoleForm
-          role={editingRole}
-          allPermissions={allPermissions}
-          onSaved={() => { setShowCreate(false); setEditingRole(null); fetchData(); }}
-          onCancel={() => { setShowCreate(false); setEditingRole(null); }}
-        />
+        <div id="role-permission-editor">
+          <RoleForm
+            key={editingRole?.id || 'new-role'}
+            role={editingRole}
+            allPermissions={allPermissions}
+            onSaved={() => { setShowCreate(false); setEditingRole(null); fetchData(); }}
+            onCancel={() => { setShowCreate(false); setEditingRole(null); }}
+          />
+        </div>
       )}
 
       <div className="space-y-3">
@@ -303,8 +325,18 @@ export default function SettingsRolesTab() {
                 <span className="text-sm text-foreground-muted">{role.userCount} users</span>
                 <span className="text-sm text-foreground-muted">{role.permissions.length} permissions</span>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setEditingRole(role); }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowCreate(false);
+                      setEditingRole(role);
+                    }}
+                  >
                     <Edit2 size={14} />
+                    Edit permissions
                   </Button>
                   {!role.isSystem && (
                     <Button variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive" onClick={(e) => { e.stopPropagation(); handleDelete(role.id); }}>
