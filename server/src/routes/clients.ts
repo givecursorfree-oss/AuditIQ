@@ -84,9 +84,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // GET /api/clients/overview — client list + incoming requests for assignment
+// Roles must match client nav (navCatalog clients) — HR needs this for CRM list.
 router.get(
   '/overview',
-  authorize('Partner', 'Admin', 'Manager', 'Staff'),
+  authorize('Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const firmId = req.user!.firmId!;
