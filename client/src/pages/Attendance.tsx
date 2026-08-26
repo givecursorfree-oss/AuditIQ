@@ -9,6 +9,7 @@ import type { Attendance, LeaveRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { tryAttendanceCheckIn, tryAttendanceResume, requestAttendanceLocation, type PlaceOfWork } from '../lib/attendancePopup';
 import { hoursBetween } from '../lib/attendanceDates';
+import { attendanceDayState } from '../lib/attendanceDayGate';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
 import { PanelCard, MetricCard } from '../components/layout/PanelCard';
@@ -279,6 +280,8 @@ export default function AttendancePage() {
     }
   };
 
+  const dayState = attendanceDayState(todayRecord);
+
   const prevMonth = () => {
     setCalendarMonth(({ month, year }) =>
       month === 1 ? { month: 12, year: year - 1 } : { month: month - 1, year }
@@ -310,34 +313,55 @@ export default function AttendancePage() {
       <PanelCard
         title="Today"
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" asChild>
-              <Link to="/leave-stipend">
-                <Plus size={16} className="mr-1" /> Apply leave
-              </Link>
-            </Button>
-            {!todayRecord ? (
-              <Button type="button" size="sm" disabled={checkingIn} onClick={() => void handleCheckIn()}>
-                <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check in'}
-              </Button>
-            ) : !todayRecord.checkOut ? (
-              <Button type="button" size="sm" variant="destructive" disabled={checkingIn} onClick={() => void handleCheckOut()}>
-                <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'End day (check out)'}
-              </Button>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <ApprovalStatusBadge status="Approved" />
-                <Button type="button" size="sm" disabled={checkingIn} onClick={() => void handleResumeDay()}>
-                  <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Resume day'}
-                </Button>
-              </div>
-            )}
-          </div>
+          <Button type="button" variant="outline" size="sm" asChild>
+            <Link to="/leave-stipend">
+              <Plus size={16} className="mr-1" /> Apply leave
+            </Link>
+          </Button>
         }
       >
         <p className="mb-2 text-sm text-muted-foreground">
           {todayLabel || '\u00a0'}
         </p>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {dayState === 'none' && (
+            <Button type="button" size="default" disabled={checkingIn} onClick={() => void handleCheckIn()}>
+              <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check in'}
+            </Button>
+          )}
+          {dayState === 'open' && (
+            <Button
+              type="button"
+              size="default"
+              variant="destructive"
+              disabled={checkingIn}
+              onClick={() => void handleCheckOut()}
+            >
+              <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'End day (check out)'}
+            </Button>
+          )}
+          {dayState === 'closed' && (
+            <>
+              <ApprovalStatusBadge status="Approved" />
+              <Button type="button" size="default" disabled={checkingIn} onClick={() => void handleResumeDay()}>
+                <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Resume day'}
+              </Button>
+            </>
+          )}
+        </div>
+        {dayState === 'open' && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Day is open. Use <strong>End day (check out)</strong> when you finish work. Logging out of the app does not
+            check you out.
+          </p>
+        )}
+        {dayState === 'closed' && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Day ended. Use <strong>Resume day</strong> if you checked out by mistake and still need to work.
+          </p>
+        )}
+
         {!todayRecord && isArticle && (
           <div className="mb-3 flex flex-col gap-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
@@ -402,13 +426,13 @@ export default function AttendancePage() {
                 {todayRecord.lateBand === 'soft_late' ? 'Late (10:06–10:35)' : 'Late (after 10:35)'}
               </span>
             )}
-            {todayRecord.checkOut && (
+            {dayState === 'closed' && todayRecord?.checkOut && (
               <span className="flex items-center gap-1 text-sm text-foreground">
                 <LogOut size={14} className="text-danger" />
                 {new Date(todayRecord.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
-            {(todayRecord.hoursWorked != null || (todayRecord.checkIn && todayRecord.checkOut)) && (
+            {(todayRecord.hoursWorked != null || dayState === 'closed') && (
               <span className="text-sm text-muted-foreground">
                 {Number(todayRecord.hoursWorked ?? hoursBetween(todayRecord.checkIn, todayRecord.checkOut) ?? 0).toFixed(1)} hrs
               </span>

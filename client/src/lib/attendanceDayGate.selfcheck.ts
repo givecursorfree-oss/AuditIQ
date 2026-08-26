@@ -19,4 +19,19 @@ assert(
   'check-in+out → closed'
 );
 
+assert(
+  attendanceDayState({
+    checkIn: '2026-08-25T06:21:00Z',
+    checkOut: '',
+  }) === 'open',
+  'empty checkOut → open (End day available)'
+);
+assert(
+  attendanceDayState({
+    checkIn: '2026-08-25T06:21:00Z',
+    checkOut: null,
+  }) === 'open',
+  'null checkOut → open'
+);
+
 console.log('attendanceDayGate.selfcheck: ok');
