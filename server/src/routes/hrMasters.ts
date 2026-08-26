@@ -1,16 +1,19 @@
-import { Router, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest, authorize } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import {
   ensureFirmLookupsSeeded,
   importCrmClientsFromHrList,
+  importCrmClientsFromRows,
   isCompOffEligibleDate,
   listLookupValues,
   LOOKUP_ACTIVITY,
   LOOKUP_CLIENT,
   LOOKUP_HOLIDAY,
+  parseHrClientCsv,
 } from '../lib/hrLookups.js';
 import {
   canHrCreditCompOff,
@@ -24,6 +27,18 @@ import {
 
 const router = Router();
 router.use(authenticate);
+
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok =
+      file.mimetype.includes('csv') ||
+      file.mimetype === 'text/plain' ||
+      file.originalname.toLowerCase().endsWith('.csv');
+    cb(ok ? null : new Error('Only CSV files are allowed'), ok);
+  },
+});
 
 function requireFirmId(req: AuthRequest, res: Response): string | null {
   const firmId = req.user!.firmId;
@@ -76,8 +91,7 @@ router.post('/lookups/seed', authorize('Partner', 'Admin', 'HR'), async (req: Au
 
 /**
  * POST /api/hr-masters/clients/import-crm
- * Creates real Client rows from HR Excel list (689) for engagements/billing.
- * Skips names that already exist. Also seeds attendance lookups if empty.
+ * Seed-file fallback (bundled 689 names). Prefer CSV upload for updates.
  */
 router.post('/clients/import-crm', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -91,6 +105,50 @@ router.post('/clients/import-crm', authorize('Partner', 'Admin', 'HR'), async (r
     res.status(500).json({ error: 'Failed to import CRM clients' });
   }
 });
+
+/**
+ * POST /api/hr-masters/clients/import-csv
+ * multipart field "file" — CSV with columns: name, pan, gstin, contactEmail, contactPhone
+ * (name required; others optional). Creates/updates Active CRM clients.
+ */
+router.post(
+  '/clients/import-csv',
+  authorize('Partner', 'Admin', 'HR'),
+  (req: AuthRequest, res: Response, next: NextFunction) => {
+    csvUpload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : 'Upload failed' });
+        return;
+      }
+      next();
+    });
+  },
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const firmId = requireFirmId(req, res);
+      if (!firmId) return;
+      const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) {
+        res.status(400).json({ error: 'Upload a CSV file (columns: name, pan, gstin, contactEmail, contactPhone)' });
+        return;
+      }
+      const text = file.buffer.toString('utf8');
+      const rows = parseHrClientCsv(text);
+      if (rows.length === 0) {
+        res.status(400).json({
+          error: 'No client rows found. Use a header row with name (and optional pan, gstin, contactEmail, contactPhone).',
+        });
+        return;
+      }
+      const result = await importCrmClientsFromRows(firmId, rows);
+      const totalClients = await prisma.client.count({ where: { firmId } });
+      res.json({ ...result, totalClientsInFirm: totalClients });
+    } catch (err) {
+      logger.error('CRM CSV import error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to import CSV clients' });
+    }
+  }
+);
 
 /** POST /api/hr-masters/holidays — add firm holiday YYYY-MM-DD */
 router.post('/holidays', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {

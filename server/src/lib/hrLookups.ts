@@ -59,95 +59,198 @@ export async function ensureFirmLookupsSeeded(firmId: string): Promise<void> {
   });
 }
 
+export type HrClientCsvRow = {
+  name: string;
+  pan?: string;
+  gstin?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+};
+
+/** Minimal CSV parser (quoted fields, commas). No new dependency. */
+export function parseHrClientCsv(text: string): HrClientCsvRow[] {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) return [];
+
+  function splitLine(line: string): string[] {
+    const out: string[] = [];
+    let cur = '';
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQ = !inQ;
+        }
+      } else if (ch === ',' && !inQ) {
+        out.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out;
+  }
+
+  const header = splitLine(lines[0]).map((h) => h.toLowerCase().replace(/[\s_]+/g, ''));
+  const idx = (aliases: string[]) => {
+    for (const a of aliases) {
+      const i = header.indexOf(a);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+
+  const nameI = idx(['name', 'clientname', 'client', 'legalname']);
+  const panI = idx(['pan']);
+  const gstinI = idx(['gstin', 'gst']);
+  const emailI = idx(['contactemail', 'email']);
+  const phoneI = idx(['contactphone', 'phone', 'mobile']);
+
+  // No header row — treat first column as name (legacy one-column list)
+  const hasHeader = nameI >= 0 || header.some((h) => ['pan', 'gstin', 'email'].includes(h));
+  const start = hasHeader ? 1 : 0;
+  const nCol = hasHeader ? nameI : 0;
+  if (nCol < 0) return [];
+
+  const rows: HrClientCsvRow[] = [];
+  const seen = new Set<string>();
+  for (let li = start; li < lines.length; li++) {
+    const cols = splitLine(lines[li]);
+    const name = (cols[nCol] || '').trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({
+      name,
+      pan: panI >= 0 ? cols[panI]?.trim() || undefined : undefined,
+      gstin: gstinI >= 0 ? cols[gstinI]?.trim() || undefined : undefined,
+      contactEmail: emailI >= 0 ? cols[emailI]?.trim() || undefined : undefined,
+      contactPhone: phoneI >= 0 ? cols[phoneI]?.trim() || undefined : undefined,
+    });
+  }
+  return rows;
+}
+
 /**
- * Import HR Excel client names as real CRM Client rows (engagements/billing).
- * Idempotent: skips names that already exist for the firm (case-insensitive trim).
- * Status Active — these are the firm's working directory, not portal self-registrations.
+ * Upsert CRM clients from HR CSV/seed rows.
+ * Creates Active clients; updates pan/gstin/contact on match; activates Prospect matches.
  */
-export async function importCrmClientsFromHrList(firmId: string): Promise<{
+export async function importCrmClientsFromRows(
+  firmId: string,
+  rows: HrClientCsvRow[]
+): Promise<{
   sourceCount: number;
   created: number;
+  updated: number;
   skippedExisting: number;
   activatedExisting: number;
 }> {
-  const seed = loadSeedFile();
-  const names = [...new Set(seed.clients.map((n) => n.trim()).filter(Boolean))];
-  if (names.length === 0) {
-    return { sourceCount: 0, created: 0, skippedExisting: 0, activatedExisting: 0 };
+  const unique = rows.filter((r) => r.name.trim());
+  if (unique.length === 0) {
+    return { sourceCount: 0, created: 0, updated: 0, skippedExisting: 0, activatedExisting: 0 };
   }
 
   const existing = await prisma.client.findMany({
     where: { firmId },
-    select: { id: true, name: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      pan: true,
+      gstin: true,
+      contactEmail: true,
+      contactPhone: true,
+    },
   });
   const byKey = new Map(existing.map((c) => [c.name.trim().toLowerCase(), c]));
 
-  const toCreate: string[] = [];
-  const toActivateIds: string[] = [];
-  for (const name of names) {
-    const row = byKey.get(name.toLowerCase());
-    if (!row) {
-      toCreate.push(name);
+  let created = 0;
+  let updated = 0;
+  let activatedExisting = 0;
+  let skippedExisting = 0;
+
+  for (const row of unique) {
+    const key = row.name.trim().toLowerCase();
+    const found = byKey.get(key);
+    if (!found) {
+      await prisma.client.create({
+        data: {
+          firmId,
+          name: row.name.trim(),
+          status: 'Active',
+          isActive: true,
+          pan: row.pan || null,
+          gstin: row.gstin || null,
+          contactEmail: row.contactEmail || null,
+          contactPhone: row.contactPhone || null,
+        },
+      });
+      created++;
       continue;
     }
-    if (row.status === 'Prospect') toActivateIds.push(row.id);
+
+    const patch: Record<string, unknown> = {};
+    if (found.status === 'Prospect') {
+      patch.status = 'Active';
+      patch.isActive = true;
+      activatedExisting++;
+    }
+    if (row.pan && row.pan !== found.pan) patch.pan = row.pan;
+    if (row.gstin && row.gstin !== found.gstin) patch.gstin = row.gstin;
+    if (row.contactEmail && row.contactEmail !== found.contactEmail) patch.contactEmail = row.contactEmail;
+    if (row.contactPhone && row.contactPhone !== found.contactPhone) patch.contactPhone = row.contactPhone;
+
+    if (Object.keys(patch).length > 0) {
+      await prisma.client.update({ where: { id: found.id }, data: patch });
+      updated++;
+    } else {
+      skippedExisting++;
+    }
   }
 
-  const CHUNK = 100;
-  let created = 0;
-  for (let i = 0; i < toCreate.length; i += CHUNK) {
-    const slice = toCreate.slice(i, i + CHUNK);
-    const result = await prisma.client.createMany({
-      data: slice.map((name) => ({
-        firmId,
-        name,
-        status: 'Active',
-        isActive: true,
-      })),
-    });
-    created += result.count;
-  }
+  // Keep attendance client-name lookup in sync with CSV names
+  const names = unique.map((r) => r.name.trim());
+  await prisma.firmLookupValue.createMany({
+    data: names.map((value, i) => ({
+      firmId,
+      kind: LOOKUP_CLIENT,
+      value,
+      sortOrder: i,
+    })),
+    skipDuplicates: true,
+  });
 
-  let activatedExisting = 0;
-  for (let i = 0; i < toActivateIds.length; i += CHUNK) {
-    const ids = toActivateIds.slice(i, i + CHUNK);
-    const result = await prisma.client.updateMany({
-      where: { id: { in: ids }, firmId, status: 'Prospect' },
-      data: { status: 'Active', isActive: true },
-    });
-    activatedExisting += result.count;
-  }
-
-  logger.info('Imported CRM clients from HR list', {
+  logger.info('Imported CRM clients from rows', {
     firmId,
-    sourceCount: names.length,
+    sourceCount: unique.length,
     created,
-    skipped: names.length - toCreate.length,
+    updated,
     activatedExisting,
+    skippedExisting,
   });
-
-  await ensureFirmLookupsSeeded(firmId);
-  const lookupCount = await prisma.firmLookupValue.count({
-    where: { firmId, kind: LOOKUP_CLIENT },
-  });
-  if (lookupCount === 0 && names.length > 0) {
-    await prisma.firmLookupValue.createMany({
-      data: names.map((value, i) => ({
-        firmId,
-        kind: LOOKUP_CLIENT,
-        value,
-        sortOrder: i,
-      })),
-      skipDuplicates: true,
-    });
-  }
 
   return {
-    sourceCount: names.length,
+    sourceCount: unique.length,
     created,
-    skippedExisting: names.length - toCreate.length,
+    updated,
+    skippedExisting,
     activatedExisting,
   };
+}
+
+/** Seed-file import (bundled 689 list) — names only. */
+export async function importCrmClientsFromHrList(firmId: string) {
+  const seed = loadSeedFile();
+  return importCrmClientsFromRows(
+    firmId,
+    seed.clients.map((name) => ({ name }))
+  );
 }
 
 export async function listLookupValues(firmId: string, kind: string): Promise<string[]> {

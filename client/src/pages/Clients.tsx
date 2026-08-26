@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Buildings,
@@ -110,6 +110,7 @@ export default function Clients() {
   const canAssign = ['Partner', 'Admin', 'Manager'].includes(user?.role || '');
   const canImportHrList = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
   const [importing, setImporting] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,25 +136,40 @@ export default function Clients() {
   }
 
   async function importHrClientList() {
+    csvInputRef.current?.click();
+  }
+
+  async function onCsvSelected(file: File | null) {
+    if (!file) return;
     setImporting(true);
     setMessage(null);
     try {
+      const form = new FormData();
+      form.append('file', file);
       const { data: result } = await api.post<{
         sourceCount: number;
         created: number;
+        updated: number;
         skippedExisting: number;
         activatedExisting: number;
         totalClientsInFirm: number;
-      }>('/hr-masters/clients/import-crm');
+      }>('/hr-masters/clients/import-csv', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       setMessage({
         type: 'success',
-        text: `HR list (${result.sourceCount}): ${result.created} created, ${result.activatedExisting} activated from Prospect, ${result.skippedExisting} already on file (${result.totalClientsInFirm} total).`,
+        text: `CSV (${result.sourceCount} rows): ${result.created} created, ${result.updated} updated, ${result.activatedExisting} activated (${result.totalClientsInFirm} total in firm).`,
       });
       await load();
-    } catch {
-      setMessage({ type: 'error', text: 'Failed to import HR client list.' });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setMessage({
+        type: 'error',
+        text: err?.response?.data?.error || 'Failed to import CSV. Use columns: name, pan, gstin, contactEmail, contactPhone.',
+      });
     } finally {
       setImporting(false);
+      if (csvInputRef.current) csvInputRef.current.value = '';
     }
   }
 
@@ -242,7 +258,7 @@ export default function Clients() {
     <AppPageContainer>
       <PageHeader
         title="Clients"
-        description="Firm client directory for engagements and billing. Incoming is only self-registrations / unassigned work — not the full HR list."
+        description="Firm client directory for engagements and billing. Incoming is only self-registrations / unassigned work — not the full HR list. Import CSV columns: name, pan, gstin, contactEmail, contactPhone."
         badge={
           incoming.total > 0 ? (
             <Badge variant="secondary" className="w-fit text-foreground">
@@ -252,14 +268,24 @@ export default function Clients() {
         }
         actions={
           canImportHrList ? (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={importing}
-              onClick={() => void importHrClientList()}
-            >
-              {importing ? 'Importing…' : 'Import / sync HR client list'}
-            </Button>
+            <>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                aria-label="Upload HR client CSV"
+                onChange={(e) => void onCsvSelected(e.target.files?.[0] ?? null)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={importing}
+                onClick={() => void importHrClientList()}
+              >
+                {importing ? 'Importing…' : 'Import / sync HR client list'}
+              </Button>
+            </>
           ) : undefined
         }
       />

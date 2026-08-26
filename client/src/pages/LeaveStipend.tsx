@@ -147,6 +147,18 @@ export default function LeaveStipend() {
 
   useEffect(() => { void load(); }, [month, canManage, canManageHolidays]);
 
+  // Real-time calendar: refresh while Calendar tab is open
+  useEffect(() => {
+    if (tab !== 'calendar') return;
+    const id = window.setInterval(() => {
+      void api
+        .get<LeaveRequest[]>(`/attendance/leaves/calendar?month=${month}`)
+        .then((r) => setCalendar(r.data))
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [tab, month]);
+
   useEffect(() => {
     const raw = searchParams.get('tab');
     const q = ((raw === 'manage' ? 'inbox' : raw) as LeaveTab | null);
@@ -403,10 +415,21 @@ export default function LeaveStipend() {
         <PanelCard
           title="Leave calendar"
           action={
-            <input type="month" aria-label="Leave calendar month" className="input-field w-auto" value={month} onChange={(e) => setMonth(e.target.value)} />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Live · refreshes every 30s</span>
+              <input
+                type="month"
+                aria-label="Leave calendar month"
+                className="input-field w-auto"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+              />
+            </div>
           }
         >
-          <div className="space-y-2">
+          <LeaveMonthOverview month={month} leaves={calendar} />
+          <div className="mt-4 space-y-2 border-t border-border pt-4">
+            <p className="text-sm font-medium">Approved leaves this month</p>
             {calendar.length === 0 && (
               <EmptyState title="No approved leaves in this month" />
             )}
@@ -611,6 +634,78 @@ export default function LeaveStipend() {
         </PanelCard>
       )}
     </AppPageContainer>
+  );
+}
+
+function LeaveMonthOverview({ month, leaves }: { month: string; leaves: LeaveRequest[] }) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const firstDow = new Date(y, m - 1, 1).getDay(); // 0=Sun
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  function dayKey(d: number) {
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  function leavesOnDay(d: number) {
+    const key = dayKey(d);
+    const t = new Date(`${key}T12:00:00`).getTime();
+    return leaves.filter((l) => {
+      const from = new Date(l.fromDate);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date(l.toDate);
+      to.setHours(23, 59, 59, 999);
+      return t >= from.getTime() && t <= to.getTime();
+    });
+  }
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div>
+      <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground mb-1">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} className="py-1">{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (d == null) return <div key={`e-${i}`} className="min-h-16 rounded-md bg-muted/20" />;
+          const onDay = leavesOnDay(d);
+          const isToday = dayKey(d) === todayKey;
+          return (
+            <div
+              key={d}
+              className={`min-h-16 rounded-md border p-1 text-left ${
+                isToday ? 'border-primary bg-primary/5' : 'border-border bg-card'
+              } ${onDay.length ? 'ring-1 ring-warning/40' : ''}`}
+            >
+              <div className="text-xs font-semibold text-foreground">{d}</div>
+              <div className="mt-0.5 space-y-0.5 overflow-hidden">
+                {onDay.slice(0, 3).map((l) => (
+                  <div
+                    key={l.id}
+                    className="truncate rounded px-0.5 text-[10px] leading-tight bg-warning/15 text-foreground"
+                    title={`${l.user.firstName} ${l.user.lastName} — ${l.type}`}
+                  >
+                    {l.user.initials || l.user.firstName.slice(0, 1)} · {l.type}
+                  </div>
+                ))}
+                {onDay.length > 3 && (
+                  <div className="text-[10px] text-muted-foreground">+{onDay.length - 3} more</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {leaves.length} approved leave{leaves.length === 1 ? '' : 's'} overlapping this month.
+      </p>
+    </div>
   );
 }
 
