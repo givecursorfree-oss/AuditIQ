@@ -8,7 +8,16 @@ export type { LocationFailCode } from './attendanceLoginNotice';
 export { getPreciseGps, isLikelyMobileDevice, MAX_OFFICE_GPS_ACCURACY_M } from './attendanceGps';
 export type { GpsFix } from './attendanceGps';
 
-const ATTENDANCE_AUTO_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'] as const;
+/** Firm staff who must mark attendance after login. Client portal excluded. */
+const ATTENDANCE_AUTO_ROLES = [
+  'Partner',
+  'Admin',
+  'Manager',
+  'Staff',
+  'Intern',
+  'HR',
+  'Accounts',
+] as const;
 
 type AttendanceMethod = 'auto-dashboard' | 'manual' | 'manual-login';
 

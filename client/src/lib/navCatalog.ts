@@ -51,7 +51,7 @@ export const NAV_CATALOG: NavCatalogItem[] = [
   { id: 'time-tracker', path: '/time-tracker', label: 'Time & Billing', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts', 'HR'], permission: { module: 'attendance', action: 'view' } },
   { id: 'timesheets', path: '/timesheets', label: 'Timesheets', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'attendance', action: 'view' } },
   { id: 'claims-pending', path: '/claims/pending', label: 'Claim Approvals', group: 'Team', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'approvals', action: 'view' }, sidebarHidden: true },
-  { id: 'attendance', path: '/attendance', label: 'Attendance', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'attendance', action: 'view' } },
+  { id: 'attendance', path: '/attendance', label: 'Attendance', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts', 'HR'], permission: { module: 'attendance', action: 'view' } },
   { id: 'leave-apply', path: '/leave-stipend', label: 'Apply Leave', group: 'Team', tab: 'apply', roles: ['Partner', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'leave', action: 'apply' } },
   { id: 'leave-manage', path: '/leave-stipend', label: 'Leave Management', group: 'Team', tab: 'inbox', roles: ['Partner', 'Admin', 'Manager', 'HR'], permission: { module: 'leave', action: 'manage' } },
   { id: 'leave-compoff', path: '/leave-stipend', label: 'Comp-off', group: 'Team', tab: 'compoff', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'leave', action: 'apply' }, sidebarHidden: true },
