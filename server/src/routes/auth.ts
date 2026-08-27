@@ -640,6 +640,7 @@ async function issueSession(
       firm: user.firm ?? undefined,
       presenceStatus: staffRoles.includes(user.role) ? 'online' : user.presenceStatus,
       twoFactorEnabled: user.twoFactorEnabled,
+      mustChangePassword: user.mustChangePassword ?? false,
       permissions,
     },
     ...extra,
@@ -990,6 +991,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response): Promise
         initials: true, role: true, designation: true, phone: true,
         firmId: true, isActive: true, createdAt: true, emailVerified: true,
         presenceStatus: true, presenceUpdatedAt: true, twoFactorEnabled: true,
+        mustChangePassword: true,
         roleRef: { select: { id: true, name: true } },
         hierarchyLevel: { select: { id: true, code: true, title: true } },
         firm: { select: { id: true, name: true } },
@@ -1007,6 +1009,80 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response): Promise
   } catch (err) {
     logger.error('Auth/me error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
+
+// POST /api/auth/change-password — authenticated password update (mandatory first login or self-service)
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+router.post('/change-password', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+    if (!PASSWORD_STRENGTH.test(newPassword)) {
+      res.status(400).json({
+        error: 'Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.',
+      });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      res.status(400).json({ error: 'Incorrect current password' });
+      return;
+    }
+
+    const isSame = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSame) {
+      res.status(400).json({ error: 'New password must be different from current password' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+        passwordResetTokenHash: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    await prisma.clientPortalUser.updateMany({
+      where: { userId: user.id },
+      data: { passwordHash },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: 'PASSWORD_CHANGE',
+        entity: 'User',
+        entityId: user.id,
+        userId: user.id,
+        ipAddress: clientIp(req),
+      },
+    });
+
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: err.errors[0]?.message || 'Validation failed' });
+      return;
+    }
+    logger.error('Change password error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to change password' });
   }
 });
 

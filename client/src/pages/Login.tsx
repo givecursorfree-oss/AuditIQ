@@ -101,7 +101,7 @@ export default function Login() {
       try {
         const gps = await requestAttendanceLocation({ confirm: appConfirm });
         loadingId = gooeyToast.info('Checking location…', {
-          description: 'Verifying you are within 500m of the office.',
+          description: 'Verifying your location at the office.',
           timing: { displayDuration: 2_147_483_647 },
           showTimestamp: false,
         });

@@ -18,6 +18,7 @@ export interface User {
   presenceStatus?: 'online' | 'offline';
   presenceUpdatedAt?: string;
   twoFactorEnabled?: boolean;
+  mustChangePassword?: boolean;
   createdAt?: string;
   /** `module:action` keys from RBAC; `*` for Admin/Partner */
   permissions?: string[];

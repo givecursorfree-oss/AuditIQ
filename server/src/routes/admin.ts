@@ -393,7 +393,7 @@ router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
         isActive: profileFields.isActive,
         initials,
         ...(passwordHash
-          ? { passwordHash, refreshTokenHash: null, refreshToken: null }
+          ? { passwordHash, refreshTokenHash: null, refreshToken: null, mustChangePassword: true }
           : {}),
       },
       select: {
@@ -492,6 +492,7 @@ router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, re
         phone: data.phone,
         firmId: req.user!.firmId,
         emailVerified: true,
+        mustChangePassword: true,
       },
       select: {
         id: true,

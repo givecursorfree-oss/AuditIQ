@@ -134,7 +134,7 @@ export default function AttendancePage() {
           accuracyMeters: fix.accuracyMeters,
         };
         loadingId = gooeyToast.info('Checking location…', {
-          description: 'Verifying you are within 500m of the office.',
+          description: 'Verifying your location at the office.',
           timing: { displayDuration: 2_147_483_647 },
           showTimestamp: false,
         });

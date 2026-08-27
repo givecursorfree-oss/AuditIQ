@@ -785,7 +785,7 @@ async function main() {
   const office = await prisma.office.create({
     data: {
       name: 'M K Dandeker & Co LLP', address: 'M K Dandeker & Co LLP',
-      latitude: 13.0762097, longitude: 80.2375391, geofenceRadius: 500, firmId: firm.id,
+      latitude: 13.076222, longitude: 80.237540, geofenceRadius: 1500, firmId: firm.id,
     },
   });
 

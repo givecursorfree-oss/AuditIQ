@@ -51,10 +51,10 @@ export function attendanceLoginNotice(err: unknown): {
       variant: 'warning',
     };
   }
-  if (/within \d+m/i.test(raw) || /from .+\. Check-in/i.test(raw)) {
+  if (/outside the office|within \d+m|from .+\. Check-in/i.test(raw)) {
     return {
       title: 'Attendance not marked',
-      message: `${raw} You can still use the app.`,
+      message: 'You are outside the office check-in area. You can still use the app.',
       variant: 'warning',
     };
   }

@@ -75,6 +75,7 @@ model User {
   emailVerified              Boolean   @default(false)
   emailVerificationToken     String?   @unique
   emailVerificationExpires   DateTime?
+  mustChangePassword         Boolean   @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

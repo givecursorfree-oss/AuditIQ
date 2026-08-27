@@ -29,7 +29,6 @@ describe('assertOfficeGpsAccuracy', () => {
 
   it('rejects missing or Wi‑Fi/IP-style coarse accuracy', () => {
     expect(() => assertOfficeGpsAccuracy(undefined)).toThrow(GpsAccuracyError);
-    expect(() => assertOfficeGpsAccuracy(500)).toThrow(GpsAccuracyError);
     expect(() => assertOfficeGpsAccuracy(MAX_OFFICE_GPS_ACCURACY_M + 1)).toThrow(GpsAccuracyError);
   });
 });

@@ -19,9 +19,9 @@ assertOfficeGpsAccuracy(25);
 assertOfficeGpsAccuracy(MAX_OFFICE_GPS_ACCURACY_M);
 let threw = false;
 try {
-  assertOfficeGpsAccuracy(500);
+  assertOfficeGpsAccuracy(MAX_OFFICE_GPS_ACCURACY_M + 100);
 } catch (e) {
   threw = e instanceof GpsAccuracyError;
 }
-assert(threw, 'coarse accuracy must throw GpsAccuracyError');
+assert(threw, 'coarse accuracy beyond max must throw GpsAccuracyError');
 console.log('geofence.selfcheck: ok');

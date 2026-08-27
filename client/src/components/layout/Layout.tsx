@@ -12,6 +12,7 @@ import { NavBadgesProvider } from '../../context/NavBadgesContext';
 import { SidebarProvider, SidebarInset } from '../ui/sidebar';
 import { PageShell } from './PageShell';
 import { LayoutSessionBootstrap } from './LayoutSessionBootstrap';
+import { MandatoryPasswordChangeModal } from '../auth/MandatoryPasswordChangeModal';
 import ProductTourHost from '../onboarding/ProductTourHost';
 
 export default function Layout() {
@@ -40,6 +41,7 @@ export default function Layout() {
                     </PageShell>
                   </main>
                   <LayoutSessionBootstrap />
+                  <MandatoryPasswordChangeModal />
                 </div>
               </div>
             </SidebarInset>

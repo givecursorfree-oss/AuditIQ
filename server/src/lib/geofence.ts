@@ -4,9 +4,9 @@ import prisma from './prisma.js';
  * Office attendance: device GPS vs firm office pin (500m fence).
  * Accuracy gate rejects only absurdly coarse fixes; distance is the real check.
  */
-export const MKD_OFFICE_LAT = 13.0762097;
-export const MKD_OFFICE_LNG = 80.2375391;
-export const DEFAULT_GEOFENCE_RADIUS_M = 500;
+export const MKD_OFFICE_LAT = 13.076222;
+export const MKD_OFFICE_LNG = 80.237540;
+export const DEFAULT_GEOFENCE_RADIUS_M = 1500;
 
 /** Must stay in sync with client MAX_OFFICE_GPS_ACCURACY_M */
 export const MAX_OFFICE_GPS_ACCURACY_M = 2500;
@@ -97,7 +97,7 @@ export async function resolveOfficeCheckIn(
   const radius = nearest.office.geofenceRadius || DEFAULT_GEOFENCE_RADIUS_M;
   if (nearest.meters > radius) {
     throw new GeofenceError(
-      `You are ${Math.round(nearest.meters)}m from ${nearest.office.name}. Check-in is allowed within ${radius}m.`
+      `You are outside the office check-in area (${nearest.office.name}).`
     );
   }
   return { officeId: nearest.office.id, meters: nearest.meters };
