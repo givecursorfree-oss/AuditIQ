@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { gooeyToast } from './AppToastContext';
 import AttendanceCheckInPopup from '../components/AttendanceCheckInPopup';
 import type { AttendancePopupDetails } from '../lib/attendancePopup';
 
@@ -22,6 +23,7 @@ export function AttendanceConfirmationProvider({ children }: { children: ReactNo
   const [details, setDetails] = useState<AttendancePopupDetails | null>(null);
 
   const showConfirmation = useCallback((d: AttendancePopupDetails) => {
+    gooeyToast.dismiss();
     setDetails(d);
   }, []);
 
@@ -31,6 +33,7 @@ export function AttendanceConfirmationProvider({ children }: { children: ReactNo
 
   useEffect(() => {
     const onConfirmed = (e: Event) => {
+      gooeyToast.dismiss();
       const d = (e as CustomEvent<AttendancePopupDetails>).detail;
       if (d) setDetails(d);
     };

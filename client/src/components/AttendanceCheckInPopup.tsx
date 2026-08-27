@@ -1,5 +1,7 @@
 import { m } from 'motion/react';
+import { useEffect } from 'react';
 import { CheckCircle2 } from 'lucide-react';
+import { gooeyToast } from '@/context/AppToastContext';
 import {
   OrderConfirmationCard,
   OrderConfirmationCardPopup,
@@ -20,6 +22,12 @@ export default function AttendanceCheckInPopup({
   onDismiss,
 }: AttendanceCheckInPopupProps) {
   const { user } = useAuth();
+
+  useEffect(() => {
+    if (open) {
+      gooeyToast.dismiss();
+    }
+  }, [open]);
 
   const handleDismiss = () => {
     if (user?.id) markAttendancePopupShown(user.id);
