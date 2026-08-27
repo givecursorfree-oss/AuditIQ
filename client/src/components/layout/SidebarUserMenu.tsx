@@ -1,4 +1,5 @@
-import { CaretUp, Check } from '@phosphor-icons/react';
+import { useState } from 'react';
+import { CaretUp, Check, Key } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { usePresence } from '../../context/PresenceContext';
 import { formatRoleLabel, formatStaffTitle } from '../../lib/roleLabels';
@@ -19,6 +20,7 @@ import {
 import { Status, StatusIndicator, StatusLabel } from '../ui/status';
 import { SidebarMenuButton } from '../ui/sidebar';
 import { GradientAvatar } from '../ui/gradient-avatar';
+import { UserChangePasswordDialog } from '../auth/UserChangePasswordDialog';
 import { cn } from '../../lib/utils';
 
 const presenceDotClass: Record<PresenceStatus, string> = {
@@ -31,6 +33,7 @@ const presenceDotClass: Record<PresenceStatus, string> = {
 export default function SidebarUserMenu({ className }: { className?: string }) {
   const { user } = useAuth();
   const { myStatus, setMyStatus, updating } = usePresence();
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   if (!user) return null;
 
@@ -166,7 +169,20 @@ export default function SidebarUserMenu({ className }: { className?: string }) {
             </div>
           </>
         )}
+
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => setChangePasswordOpen(true)}
+          className="flex items-center gap-2 cursor-pointer text-foreground"
+        >
+          <Key size={15} className="text-foreground-muted" />
+          <span>Change password</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
+      <UserChangePasswordDialog
+        open={changePasswordOpen}
+        onOpenChange={setChangePasswordOpen}
+      />
     </DropdownMenu>
   );
 }
