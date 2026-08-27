@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { DownloadSimple, ArrowsClockwise } from '@phosphor-icons/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DownloadSimple, ArrowsClockwise, Buildings, Briefcase, House, MapPin } from '@phosphor-icons/react';
 import api from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,11 +20,16 @@ export interface StaffStatusRow {
   name: string;
   initials: string;
   role: string;
+  designation?: string | null;
   activityStatus: 'active' | 'away' | 'offline';
   presenceStatus?: string;
   isAvailable?: boolean;
   awayMinutes: number | null;
   clockInTime: string | null;
+  attendanceLocation?: string | null;
+  attendanceClientName?: string | null;
+  attendanceStatus?: string | null;
+  attendanceCheckOut?: string | null;
   todayLoggedHours: number;
   currentEngagement: {
     id: string;
@@ -61,11 +66,70 @@ function statusBadge(row: StaffStatusRow) {
   );
 }
 
+function locationBadge(row: StaffStatusRow) {
+  const loc = row.attendanceLocation;
+  if (loc === 'Office') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+        <Buildings size={13} className="shrink-0" />
+        Office
+      </span>
+    );
+  }
+  if (loc === 'Client Place') {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded w-fit">
+          <Briefcase size={13} className="shrink-0" />
+          Client Place
+        </span>
+        {row.attendanceClientName && (
+          <span className="text-xs text-muted-foreground truncate max-w-[170px]" title={row.attendanceClientName}>
+            {row.attendanceClientName}
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (loc === 'Work from Home') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">
+        <House size={13} className="shrink-0" />
+        WFH
+      </span>
+    );
+  }
+  if (row.clockInTime) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <MapPin size={13} />
+        Checked in
+      </span>
+    );
+  }
+  return <span className="text-xs text-muted-foreground">—</span>;
+}
+
 function exportCsv(rows: StaffStatusRow[]) {
-  const header = ['Staff', 'Status', 'Engagement', 'Client', 'Stage', 'Time on task', 'Clock-in', 'Today logged (h)'];
+  const header = [
+    'Staff',
+    'Role',
+    'Status',
+    'Attendance Location',
+    'Attendance Client',
+    'Active Engagement',
+    'Engagement Client',
+    'Stage',
+    'Time on task',
+    'Clock-in',
+    'Today logged (h)',
+  ];
   const lines = rows.map((r) => [
     r.name,
+    r.role,
     r.activityStatus,
+    r.attendanceLocation ?? '',
+    r.attendanceClientName ?? '',
     r.currentEngagement?.name ?? '',
     r.currentEngagement?.clientName ?? '',
     r.currentEngagement?.stage ?? '',
@@ -122,12 +186,15 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
   }, [selectedStaffId]);
 
   const onlineCount = rows.filter((r) => isStaffAvailable(r)).length;
+  const officeCount = rows.filter((r) => r.attendanceLocation === 'Office').length;
+  const clientCount = rows.filter((r) => r.attendanceLocation === 'Client Place').length;
+  const wfhCount = rows.filter((r) => r.attendanceLocation === 'Work from Home').length;
   const todayLabel = todayDateFormatter.format(new Date());
 
   return (
     <PanelCard
       className={cn('mb-4 sm:mb-6', className)}
-      title="Team presence"
+      title="Team presence & location"
       action={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => void load()} aria-label="Refresh team presence">
@@ -140,9 +207,29 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
       }
       bodyClassName="p-0"
     >
-      <p className="px-4 py-2 text-xs text-muted-foreground border-b border-border">
-        {todayLabel} · {onlineCount} of {rows.length} available
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs text-muted-foreground border-b border-border">
+        <span>{todayLabel}</span>
+        <span>•</span>
+        <span>{onlineCount} of {rows.length} available</span>
+        <span>•</span>
+        <div className="flex items-center gap-3 text-foreground">
+          <span className="inline-flex items-center gap-1 font-medium">
+            <Buildings size={14} className="text-muted-foreground" aria-hidden />
+            <span>{officeCount}</span>
+            <span className="text-muted-foreground font-normal">Office</span>
+          </span>
+          <span className="inline-flex items-center gap-1 font-medium">
+            <Briefcase size={14} className="text-muted-foreground" aria-hidden />
+            <span>{clientCount}</span>
+            <span className="text-muted-foreground font-normal">Client Place</span>
+          </span>
+          <span className="inline-flex items-center gap-1 font-medium">
+            <House size={14} className="text-muted-foreground" aria-hidden />
+            <span>{wfhCount}</span>
+            <span className="text-muted-foreground font-normal">WFH</span>
+          </span>
+        </div>
+      </div>
 
       {loading ? (
         <LoadingCenter label="Loading team presence…" className="py-12" />
@@ -151,12 +238,13 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">Team presence: staff availability, current engagement, and logged hours</caption>
+            <caption className="sr-only">Team presence: staff availability, location, current engagement, and logged hours</caption>
             <thead>
               <tr className="table-header text-left border-b border-border">
                 <th className="px-4 py-3 font-medium">Staff</th>
                 <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Engagement</th>
+                <th className="px-4 py-3 font-medium">Location (Attendance)</th>
+                <th className="px-4 py-3 font-medium">Active task</th>
                 <th className="px-4 py-3 font-medium">Stage</th>
                 <th className="px-4 py-3 font-medium">Time on task</th>
                 <th className="px-4 py-3 font-medium">Clock-in</th>
@@ -175,9 +263,10 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
                 >
                   <td className="px-4 py-3">
                     <div className="font-medium">{r.name}</div>
-                    <div className="text-xs text-muted-foreground">{r.role}</div>
+                    <div className="text-xs text-muted-foreground">{r.designation || r.role}</div>
                   </td>
                   <td className="px-4 py-3">{statusBadge(r)}</td>
+                  <td className="px-4 py-3 min-w-[160px]">{locationBadge(r)}</td>
                   <td className="px-4 py-3 max-w-[180px] truncate">
                     {r.currentEngagement ? (
                       <>

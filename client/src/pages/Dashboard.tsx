@@ -33,6 +33,7 @@ import { formatApiError } from '@/lib/apiErrors';
 
 const PARTNER_ADMIN_ROLES = ['Admin', 'Partner'];
 const FIRM_LEADERSHIP_ROLES = ['Admin', 'Partner', 'Manager'];
+const SHOW_PRESENCE_ROLES = ['Admin', 'Partner', 'Manager', 'HR'];
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -177,6 +178,7 @@ export default function Dashboard() {
   const role = user?.role || '';
   const isPartnerAdmin = PARTNER_ADMIN_ROLES.includes(role);
   const isFirmLeadership = FIRM_LEADERSHIP_ROLES.includes(role);
+  const isPresenceViewer = SHOW_PRESENCE_ROLES.includes(role);
   const isTeam = ['Manager', 'Staff', 'Intern'].includes(role);
   const isClient = role === 'Client';
   const isIntern = role === 'Intern';
@@ -327,7 +329,7 @@ export default function Dashboard() {
 
       <DashboardStatsCards stats={statCards} />
 
-      {isFirmLeadership && (
+      {isPresenceViewer && (
         <AdminPresenceDashboard />
       )}
 

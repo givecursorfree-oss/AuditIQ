@@ -118,15 +118,15 @@ export default function AttendancePage() {
 
   const handleCheckIn = async () => {
     if (!user?.id) return;
-    if (isArticle && placeOfWork === 'Client Place' && !clientName.trim()) {
-      await appAlert('Enter the client name for Client Place check-in.');
+    if (placeOfWork === 'Client Place' && !clientName.trim()) {
+      await appAlert('Enter or select the client name for Client Place check-in.');
       return;
     }
     setCheckingIn(true);
     let loadingId: string | number | undefined;
     try {
       let gps: { latitude?: number; longitude?: number; accuracyMeters?: number } = {};
-      if (!isArticle || placeOfWork === 'Office') {
+      if (placeOfWork === 'Office') {
         const fix = await requestAttendanceLocation({ confirm: appConfirm });
         gps = {
           latitude: fix.latitude,
@@ -142,7 +142,9 @@ export default function AttendancePage() {
         loadingId = gooeyToast.info('Checking attendance…', {
           description:
             placeOfWork === 'Work from Home'
-              ? 'WFH requires prior manager approval.'
+              ? isArticle
+                ? 'WFH requires prior manager approval.'
+                : 'Recording Work from Home attendance.'
               : 'Recording Client Place attendance.',
           timing: { displayDuration: 2_147_483_647 },
           showTimestamp: false,
@@ -155,7 +157,7 @@ export default function AttendancePage() {
         longitude: gps.longitude,
         accuracyMeters: gps.accuracyMeters,
         gpsAttempted: placeOfWork === 'Office',
-        placeOfWork: isArticle ? placeOfWork : 'Office',
+        placeOfWork,
         clientName: placeOfWork === 'Client Place' ? clientName.trim() : undefined,
       });
       if (loadingId != null) gooeyToast.dismiss(loadingId);
@@ -362,7 +364,7 @@ export default function AttendancePage() {
           </p>
         )}
 
-        {!todayRecord && isArticle && (
+        {!todayRecord && (
           <div className="mb-3 flex flex-col gap-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="text-sm w-full sm:w-auto">
@@ -398,12 +400,19 @@ export default function AttendancePage() {
             </div>
             {placeOfWork === 'Work from Home' && (
               <p className="text-xs text-muted-foreground">
-                Manager must approve WFH for today before you can check in.
+                {isArticle
+                  ? 'Manager must approve WFH for today before you can check in.'
+                  : 'Marking attendance as Work from Home.'}
               </p>
             )}
             {placeOfWork === 'Office' && (
               <p className="text-xs text-muted-foreground">
                 Office check-in uses your phone GPS coordinates against the office pin (not Wi‑Fi/IP). Works on mobile browsers over HTTPS.
+              </p>
+            )}
+            {placeOfWork === 'Client Place' && (
+              <p className="text-xs text-muted-foreground">
+                Select or type the client name where you are working today.
               </p>
             )}
           </div>
@@ -440,11 +449,13 @@ export default function AttendancePage() {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            {!isArticle || placeOfWork === 'Office'
+            {placeOfWork === 'Office'
               ? 'Not checked in. Use your phone GPS (Precise Location) at the office. Wi‑Fi/IP location is not accepted.'
               : placeOfWork === 'Work from Home'
-                ? 'Not checked in. WFH needs manager approval for today.'
-                : 'Not checked in. Enter client name, then check in.'}
+                ? isArticle
+                  ? 'Not checked in. WFH needs manager approval for today.'
+                  : 'Not checked in. Select Work from Home, then check in.'
+                : 'Not checked in. Select or enter client name, then check in.'}
           </p>
         )}
       </PanelCard>

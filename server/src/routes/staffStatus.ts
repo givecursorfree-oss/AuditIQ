@@ -10,7 +10,7 @@ import { enrichTask } from '../lib/taskHelpers.js';
 const router = Router();
 router.use(authenticate);
 
-const STAFF_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'];
+const STAFF_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR', 'Accounts'];
 
 function elapsedSecondsSince(start: Date | null | undefined, isPaused: boolean, pausedAt: Date | null | undefined): number {
   if (!start) return 0;
@@ -18,8 +18,8 @@ function elapsedSecondsSince(start: Date | null | undefined, isPaused: boolean, 
   return Math.max(0, Math.floor((end - start.getTime()) / 1000));
 }
 
-/** GET /api/staff/statuses — live team presence for admin (poll every 15s) */
-router.get('/statuses', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+/** GET /api/staff/statuses — live team presence for admin/HR (poll every 15s) */
+router.get('/statuses', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firmId = req.user!.firmId;
     if (!firmId) {
@@ -49,7 +49,15 @@ router.get('/statuses', authorize('Partner', 'Admin', 'Manager'), async (req: Au
         },
         attendances: {
           where: { date: attendanceDayFilter() },
-          select: { checkIn: true, checkOut: true, totalActiveSeconds: true, totalAwaySeconds: true },
+          select: {
+            checkIn: true,
+            checkOut: true,
+            location: true,
+            clientName: true,
+            status: true,
+            totalActiveSeconds: true,
+            totalAwaySeconds: true,
+          },
           take: 1,
         },
       },
@@ -108,6 +116,10 @@ router.get('/statuses', authorize('Partner', 'Admin', 'Manager'), async (req: Au
           isAvailable: isLoggedIn,
           awayMinutes,
           clockInTime: att?.checkIn?.toISOString() ?? null,
+          attendanceLocation: att?.location ?? null,
+          attendanceClientName: att?.clientName ?? null,
+          attendanceStatus: att?.status ?? null,
+          attendanceCheckOut: att?.checkOut?.toISOString() ?? null,
           todayLoggedHours: hoursMap.get(s.id) ?? 0,
           todayActiveSeconds: att?.totalActiveSeconds ?? 0,
           todayAwaySeconds: att?.totalAwaySeconds ?? 0,

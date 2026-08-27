@@ -368,9 +368,8 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
     let gpsAccuracy: number | undefined;
     let wfhApprovedById: string | undefined;
 
-    // Non-articles: Office + geofence only. Articles: place-of-work rules.
-    // App check-in is source of truth (Google form skipped); Bio is cross-verify later.
-    const needsGeofence = !isArticle || place === PLACE_OFFICE;
+    // For Office check-in: require geofence. For Client Place / WFH: record GPS if available.
+    const needsGeofence = place === PLACE_OFFICE;
     if (needsGeofence) {
       if (body.latitude == null || body.longitude == null) {
         res.status(400).json({ error: 'Location is required for Office check-in' });
@@ -404,7 +403,7 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       wfhApprovedById = wfh.approvedById;
     }
 
-    if (isArticle && place === PLACE_CLIENT && !body.clientName?.trim()) {
+    if (place === PLACE_CLIENT && !body.clientName?.trim()) {
       res.status(400).json({ error: 'Client name is required for Client Place check-in' });
       return;
     }
@@ -419,8 +418,8 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       gpsLng: gpsLng ?? null,
       gpsAccuracy: gpsAccuracy ?? null,
       officeId: officeId ?? null,
-      location: isArticle ? place : PLACE_OFFICE,
-      clientName: isArticle && place === PLACE_CLIENT ? body.clientName!.trim() : null,
+      location: place,
+      clientName: place === PLACE_CLIENT ? body.clientName!.trim() : null,
       lateBand: isArticle ? lateBand : null,
       status,
       wfhApprovedById: wfhApprovedById ?? null,

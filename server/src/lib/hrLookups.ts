@@ -260,7 +260,22 @@ export async function listLookupValues(firmId: string, kind: string): Promise<st
     orderBy: [{ sortOrder: 'asc' }, { value: 'asc' }],
     select: { value: true },
   });
-  return rows.map((r) => r.value);
+  const lookupValues = rows.map((r) => r.value);
+  if (kind === LOOKUP_CLIENT) {
+    const clients = await prisma.client.findMany({
+      where: { firmId, isActive: true },
+      select: { name: true },
+    });
+    const set = new Set<string>();
+    for (const v of lookupValues) {
+      if (v.trim()) set.add(v.trim());
+    }
+    for (const c of clients) {
+      if (c.name?.trim()) set.add(c.name.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }
+  return lookupValues;
 }
 
 /** IST calendar date YYYY-MM-DD from a Date. */
