@@ -37,6 +37,9 @@ export default function AttendancePage() {
   const [clientName, setClientName] = useState('');
   const [clientOptions, setClientOptions] = useState<string[]>([]);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [locationFilter, setLocationFilter] = useState('all');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
     return { month: d.getMonth() + 1, year: d.getFullYear() };
@@ -82,8 +85,11 @@ export default function AttendancePage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const attendanceQuery = selectedDate
+        ? `?date=${encodeURIComponent(selectedDate)}`
+        : `?month=${curYear}-${String(curMonth).padStart(2, '0')}`;
       const [attRes, leavesRes, summaryRes, balanceRes] = await Promise.all([
-        api.get<Attendance[]>('/attendance'),
+        api.get<Attendance[]>(`/attendance${attendanceQuery}`),
         api.get<LeaveRequest[]>('/attendance/leaves'),
         api.get(`/attendance/summary?month=${curYear}-${String(curMonth).padStart(2, '0')}`),
         api
@@ -103,7 +109,7 @@ export default function AttendancePage() {
     } finally {
       setLoading(false);
     }
-  }, [curMonth, curYear]);
+  }, [curMonth, curYear, selectedDate]);
 
   useEffect(() => {
     void fetchAll();
@@ -283,13 +289,20 @@ export default function AttendancePage() {
   };
 
   const dayState = attendanceDayState(todayRecord);
+  const filteredRecords = records.filter((record) => {
+    const matchesStatus = statusFilter === 'all' || record.status.toLowerCase() === statusFilter;
+    const matchesLocation = locationFilter === 'all' || (record.location || '') === locationFilter;
+    return matchesStatus && matchesLocation;
+  });
 
   const prevMonth = () => {
+    setSelectedDate('');
     setCalendarMonth(({ month, year }) =>
       month === 1 ? { month: 12, year: year - 1 } : { month: month - 1, year }
     );
   };
   const nextMonth = () => {
+    setSelectedDate('');
     setCalendarMonth(({ month, year }) =>
       month === 12 ? { month: 1, year: year + 1 } : { month: month + 1, year }
     );
@@ -302,6 +315,29 @@ export default function AttendancePage() {
         description={`${MONTHS[curMonth - 1]} ${curYear}`}
         actions={
           <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Calendar size={15} />
+              <span className="hidden sm:inline">View date</span>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedDate(value);
+                  if (value) {
+                    const [year, month] = value.split('-').map(Number);
+                    setCalendarMonth({ year, month });
+                  }
+                }}
+                className="h-9 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+                aria-label="View attendance date"
+              />
+            </label>
+            {selectedDate && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedDate('')}>
+                Month
+              </Button>
+            )}
             <Button type="button" size="sm" variant="outline" onClick={prevMonth} aria-label="Previous month">
               <ChevronLeft size={16} />
             </Button>
@@ -489,6 +525,60 @@ export default function AttendancePage() {
         )}
       </div>
 
+      {tab === 'attendance' && (
+        <PanelCard title="Filter attendance records">
+          <div className="flex flex-wrap items-end gap-3 px-4 pb-4">
+            <label className="text-sm">
+              <span className="mb-1 block text-xs text-muted-foreground">Status</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-10 min-w-36 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                aria-label="Filter attendance by status"
+              >
+                <option value="all">All statuses</option>
+                <option value="present">Present</option>
+                <option value="late">Late</option>
+                <option value="half-day">Half-day</option>
+                <option value="absent">Absent</option>
+                <option value="leave">Leave</option>
+                <option value="wfh-pending">WFH pending</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-xs text-muted-foreground">Location</span>
+              <select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                className="h-10 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                aria-label="Filter attendance by location"
+              >
+                <option value="all">All locations</option>
+                <option value="Office">Office</option>
+                <option value="Client Place">Client Place</option>
+                <option value="Work from Home">Work from Home</option>
+              </select>
+            </label>
+            {(statusFilter !== 'all' || locationFilter !== 'all') && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setStatusFilter('all');
+                  setLocationFilter('all');
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+            <span className="ml-auto text-xs text-muted-foreground">
+              Showing {filteredRecords.length} of {records.length} record{records.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </PanelCard>
+      )}
+
       {/* Leave Request Form Modal */}
       {showLeaveForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -540,7 +630,7 @@ export default function AttendancePage() {
         </div>
       ) : tab === 'attendance' ? (
         <div className="space-y-1">
-          {records.map(r => (
+          {filteredRecords.map(r => (
             <div key={r.id} className="card flex items-center justify-between py-3">
               <div className="flex items-center gap-3">
                 <div className="icon-well-sm">
@@ -558,7 +648,13 @@ export default function AttendancePage() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-4 text-sm">
+              <div className="flex flex-wrap items-center justify-end gap-2 text-sm sm:gap-4">
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium capitalize text-primary">
+                  {r.status || '—'}
+                </span>
+                <span className="hidden max-w-36 truncate text-xs text-muted-foreground sm:inline">
+                  {r.location || 'Not recorded'}
+                </span>
                 <span className="text-muted-foreground">{r.checkIn ? new Date(r.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
                 <span className="text-muted-foreground">→</span>
                 <span className="text-muted-foreground">{r.checkOut ? new Date(r.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
@@ -571,7 +667,11 @@ export default function AttendancePage() {
               </div>
             </div>
           ))}
-          {records.length === 0 && <p className="text-center text-muted-foreground py-8">No attendance records this month</p>}
+          {filteredRecords.length === 0 && (
+            <p className="text-center text-muted-foreground py-8">
+              {records.length === 0 ? 'No attendance records for this selection' : 'No records match the selected filters'}
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-2">

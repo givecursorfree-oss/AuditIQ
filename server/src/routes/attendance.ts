@@ -152,14 +152,30 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     if (date) {
-      const d = new Date(String(date));
-      where.date = d;
+      const dateKey = String(date);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+        res.status(400).json({ error: 'date must use YYYY-MM-DD format' });
+        return;
+      }
+      // Attendance dates are stored at the start of the IST calendar day.
+      where.date = attendanceDayFilter(new Date(`${dateKey}T12:00:00+05:30`));
     } else if (month) {
-      const [y, m] = String(month).split('-').map(Number);
-      where.date = {
-        gte: new Date(y, m - 1, 1),
-        lt: new Date(y, m, 1),
-      };
+      const monthKey = String(month);
+      const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
+      if (!match) {
+        res.status(400).json({ error: 'month must use YYYY-MM format' });
+        return;
+      }
+      const year = Number(match[1]);
+      const monthNumber = Number(match[2]);
+      if (monthNumber < 1 || monthNumber > 12) {
+        res.status(400).json({ error: 'month must use YYYY-MM format' });
+        return;
+      }
+      const monthStart = new Date(`${monthKey}-01T00:00:00+05:30`);
+      const nextMonth = monthNumber === 12 ? `${year + 1}-01` : `${year}-${String(monthNumber + 1).padStart(2, '0')}`;
+      const monthEnd = new Date(`${nextMonth}-01T00:00:00+05:30`);
+      where.date = { gte: monthStart, lt: monthEnd };
     }
 
     const records = await prisma.attendance.findMany({
