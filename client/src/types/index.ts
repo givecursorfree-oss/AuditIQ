@@ -265,7 +265,7 @@ export interface Attendance {
   bioPresent?: boolean | null;
   forgiven?: boolean;
   isArticle?: boolean;
-  user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email'>;
+  user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email'> & { role?: string };
   office?: { name: string };
 }
 

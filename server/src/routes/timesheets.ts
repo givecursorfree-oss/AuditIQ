@@ -22,15 +22,45 @@ function isFirmMemberRole(role: string): boolean {
 }
 
 function dayBounds(dateStr: string) {
-  const start = new Date(dateStr);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+  return {
+    start: new Date(`${dateStr}T00:00:00.000+05:30`),
+    end: new Date(`${dateStr}T23:59:59.999+05:30`),
+  };
 }
 
 function dateOnly(dateStr: string): Date {
   return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+function monthBounds(month: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) throw new Error('month must use YYYY-MM format');
+  const year = Number(match[1]);
+  const monthNumber = Number(match[2]);
+  if (monthNumber < 1 || monthNumber > 12) throw new Error('month must use YYYY-MM format');
+  const nextMonth =
+    monthNumber === 12
+      ? `${year + 1}-01`
+      : `${year}-${String(monthNumber + 1).padStart(2, '0')}`;
+  return {
+    start: new Date(`${month}-01T00:00:00.000+05:30`),
+    end: new Date(`${nextMonth}-01T00:00:00.000+05:30`),
+    dayKeyStart: dateOnly(`${month}-01`),
+    dayKeyEnd: dateOnly(`${nextMonth}-01`),
+  };
+}
+
+function istDateKey(value: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+function csvCell(value: unknown): string {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
 async function actorHierarchyCode(userId: string): Promise<string | null> {
@@ -230,6 +260,159 @@ router.get('/firm', async (req: AuthRequest, res: Response): Promise<void> => {
   } catch (err) {
     logger.error('Firm timesheets error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to load firm timesheets' });
+  }
+});
+
+/** GET /api/timesheets/firm/export?month=YYYY-MM — HR month CSV export. */
+router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!canViewFirmTimesheets(req.user!.role)) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
+
+    const month = String(req.query.month || '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      res.status(400).json({ error: 'month query required (YYYY-MM)' });
+      return;
+    }
+    const { start, end, dayKeyStart, dayKeyEnd } = monthBounds(month);
+    const staff = await prisma.user.findMany({
+      where: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } },
+      select: { id: true, firstName: true, lastName: true, role: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    const ids = staff.map((member) => member.id);
+
+    const [entries, attendances, days] = await Promise.all([
+      prisma.timeEntry.findMany({
+        where: { userId: { in: ids }, date: { gte: start, lt: end } },
+        select: { userId: true, date: true, hours: true, startedAt: true, endedAt: true },
+      }),
+      prisma.attendance.findMany({
+        where: { userId: { in: ids }, date: { gte: start, lt: end } },
+        select: {
+          userId: true,
+          date: true,
+          checkIn: true,
+          checkOut: true,
+          status: true,
+          location: true,
+          clientName: true,
+        },
+      }),
+      prisma.timesheetDay.findMany({
+        where: { userId: { in: ids }, date: { gte: dayKeyStart, lt: dayKeyEnd } },
+        select: { userId: true, date: true, status: true },
+      }),
+    ]);
+
+    const timeByKey = new Map<
+      string,
+      { hours: number; entries: number; checkIn: Date | null; checkOut: Date | null }
+    >();
+    const attendanceByKey = new Map<
+      string,
+      {
+        checkIn: Date | null;
+        checkOut: Date | null;
+        status: string;
+        location: string | null;
+        clientName: string | null;
+      }
+    >();
+    const attestationByKey = new Map<string, string>();
+    const recordKeys = new Set<string>();
+
+    for (const entry of entries) {
+      const key = `${entry.userId}|${istDateKey(entry.date)}`;
+      const current = timeByKey.get(key) || { hours: 0, entries: 0, checkIn: null, checkOut: null };
+      current.hours += entry.hours;
+      current.entries += 1;
+      if (entry.startedAt && (!current.checkIn || entry.startedAt < current.checkIn)) {
+        current.checkIn = entry.startedAt;
+      }
+      if (entry.endedAt && (!current.checkOut || entry.endedAt > current.checkOut)) {
+        current.checkOut = entry.endedAt;
+      }
+      timeByKey.set(key, current);
+      recordKeys.add(key);
+    }
+
+    for (const attendance of attendances) {
+      const key = `${attendance.userId}|${istDateKey(attendance.date)}`;
+      attendanceByKey.set(key, attendance);
+      recordKeys.add(key);
+    }
+
+    for (const day of days) {
+      const key = `${day.userId}|${day.date.toISOString().slice(0, 10)}`;
+      attestationByKey.set(key, day.status);
+      recordKeys.add(key);
+    }
+
+    const staffById = new Map(staff.map((member) => [member.id, member]));
+    const dateTime = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+    const dateOnly = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'short',
+    });
+    const formatDateTime = (value: Date | null | undefined) => (value ? dateTime.format(value) : '');
+    const rows = Array.from(recordKeys)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => {
+        const separator = key.indexOf('|');
+        const userId = key.slice(0, separator);
+        const date = key.slice(separator + 1);
+        const member = staffById.get(userId);
+        const time = timeByKey.get(key);
+        const attendance = attendanceByKey.get(key);
+        return [
+          dateOnly.format(new Date(`${date}T12:00:00+05:30`)),
+          member ? `${member.firstName} ${member.lastName}`.trim() : '',
+          member?.role || '',
+          time?.hours.toFixed(2) || '0.00',
+          time?.entries || 0,
+          formatDateTime(time?.checkIn),
+          formatDateTime(time?.checkOut),
+          attendance?.status || '',
+          attendance?.location || '',
+          attendance?.clientName || '',
+          attestationByKey.get(key) || 'Draft',
+        ];
+      });
+
+    const headers = [
+      'Date',
+      'Staff',
+      'Role',
+      'Hours',
+      'Time entries',
+      'First start',
+      'Last end',
+      'Attendance status',
+      'Location',
+      'Client',
+      'Attestation',
+    ];
+    const csv = '\uFEFF' + [headers, ...rows]
+      .map((row) => row.map(csvCell).join(','))
+      .join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="timesheets-${month}.csv"`);
+    res.send(csv);
+  } catch (err) {
+    logger.error('Timesheet export error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to export timesheets' });
   }
 });
 

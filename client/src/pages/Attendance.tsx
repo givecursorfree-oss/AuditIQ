@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Clock, MapPin, Calendar, CheckCircle as CheckCircle2, XCircle, SignIn as LogIn, SignOut as LogOut,
-  MagnifyingGlass as Search, CaretLeft as ChevronLeft, CaretRight as ChevronRight, Plus, X, WarningCircle as AlertCircle
+  CaretLeft as ChevronLeft, CaretRight as ChevronRight, DownloadSimple, Plus, X
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import type { Attendance, LeaveRequest } from '../types';
@@ -18,15 +18,18 @@ import { Button } from '@/components/ui/button';
 import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
 import { appToast, gooeyToast } from '@/context/AppToastContext';
+import { downloadCsv } from '@/lib/downloadCsv';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 /** Must match server leaveCreateSchema */
 const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Holiday', 'Exam', 'Study'] as const;
 const PLACES: PlaceOfWork[] = ['Office', 'Client Place', 'Work from Home'];
+const FIRM_ATTENDANCE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
 
 export default function AttendancePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const canViewFirmAttendance = Boolean(user && FIRM_ATTENDANCE_ROLES.includes(user.role));
   const [tab, setTab] = useState<'attendance' | 'leaves'>('attendance');
   const [records, setRecords] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
@@ -37,6 +40,7 @@ export default function AttendancePage() {
   const [clientName, setClientName] = useState('');
   const [clientOptions, setClientOptions] = useState<string[]>([]);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
@@ -308,6 +312,35 @@ export default function AttendancePage() {
     );
   };
 
+  const exportAttendanceMonth = async () => {
+    if (!canViewFirmAttendance || exporting) return;
+    const monthKey = `${curYear}-${String(curMonth).padStart(2, '0')}`;
+    setExporting(true);
+    try {
+      const { data } = await api.get<Attendance[]>(`/attendance?month=${monthKey}`);
+      downloadCsv(
+        `attendance-${monthKey}.csv`,
+        ['Date', 'Staff', 'Role', 'Status', 'Location', 'Client', 'Check-in', 'Check-out', 'Hours', 'Method'],
+        data.map((record) => [
+          new Date(record.date).toLocaleDateString('en-IN'),
+          record.user ? `${record.user.firstName} ${record.user.lastName}`.trim() : '',
+          record.user?.role || '',
+          record.status,
+          record.location || '',
+          record.clientName || '',
+          record.checkIn ? new Date(record.checkIn).toLocaleString('en-IN') : '',
+          record.checkOut ? new Date(record.checkOut).toLocaleString('en-IN') : '',
+          record.hoursWorked ?? hoursBetween(record.checkIn, record.checkOut) ?? '',
+          record.method,
+        ])
+      );
+    } catch {
+      await appAlert({ title: 'Export failed', message: 'Could not export attendance records for this month.' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <AppPageContainer className="space-y-6">
       <PageHeader
@@ -315,6 +348,12 @@ export default function AttendancePage() {
         description={`${MONTHS[curMonth - 1]} ${curYear}`}
         actions={
           <div className="flex items-center gap-2">
+            {canViewFirmAttendance && (
+              <Button type="button" size="sm" variant="outline" onClick={() => void exportAttendanceMonth()} disabled={exporting}>
+                <DownloadSimple size={16} className="mr-1" />
+                {exporting ? 'Exporting…' : 'Export month'}
+              </Button>
+            )}
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Calendar size={15} />
               <span className="hidden sm:inline">View date</span>
@@ -441,11 +480,6 @@ export default function AttendancePage() {
                   : 'Marking attendance as Work from Home.'}
               </p>
             )}
-            {placeOfWork === 'Office' && (
-              <p className="text-xs text-muted-foreground">
-                Office check-in uses your phone GPS coordinates against the office pin (not Wi‑Fi/IP). Works on mobile browsers over HTTPS.
-              </p>
-            )}
             {placeOfWork === 'Client Place' && (
               <p className="text-xs text-muted-foreground">
                 Select or type the client name where you are working today.
@@ -486,7 +520,7 @@ export default function AttendancePage() {
         ) : (
           <p className="text-sm text-muted-foreground">
             {placeOfWork === 'Office'
-              ? 'Not checked in. Use your phone GPS (Precise Location) at the office. Wi‑Fi/IP location is not accepted.'
+              ? 'Not checked in.'
               : placeOfWork === 'Work from Home'
                 ? isArticle
                   ? 'Not checked in. WFH needs manager approval for today.'

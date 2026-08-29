@@ -10,8 +10,11 @@ export interface AuthRequest extends Request {
     email: string;
     role: string;
     firmId: string | null;
+    mustChangePassword: boolean;
   };
 }
+
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set(['/me', '/change-password', '/logout']);
 
 export async function authenticate(
   req: AuthRequest,
@@ -33,7 +36,14 @@ export async function authenticate(
     const payload = jwt.verify(token, getEnv().JWT_SECRET) as NonNullable<AuthRequest['user']>;
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, email: true, role: true, firmId: true, isActive: true },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        firmId: true,
+        isActive: true,
+        mustChangePassword: true,
+      },
     });
 
     if (!user || !user.isActive) {
@@ -46,7 +56,17 @@ export async function authenticate(
       email: user.email,
       role: user.role,
       firmId: user.firmId,
+      mustChangePassword: user.mustChangePassword,
     };
+
+    if (user.mustChangePassword && !PASSWORD_CHANGE_ALLOWED_PATHS.has(req.path)) {
+      res.status(403).json({
+        error: 'Password change required before accessing the application',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
+      return;
+    }
+
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });

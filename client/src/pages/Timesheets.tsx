@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { canAttestTimesheets } from '@/lib/gradeCapabilities';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
+import { DownloadSimple as Download } from '@phosphor-icons/react';
+import { downloadBlob } from '@/lib/downloadCsv';
 
 interface Timesheet {
   date: string;
@@ -62,6 +64,7 @@ export default function Timesheets() {
   const [firmRows, setFirmRows] = useState<FirmRow[]>([]);
   const [pending, setPending] = useState<PendingDay[]>([]);
   const [mode, setMode] = useState<'firm' | 'detail' | 'review'>(canFirm ? 'firm' : 'detail');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (user?.id && !staffId) setStaffId(user.id);
@@ -115,6 +118,23 @@ export default function Timesheets() {
     }
   }
 
+  async function exportTimesheetsMonth() {
+    if (!canFirm || exporting) return;
+    const month = date.slice(0, 7);
+    setExporting(true);
+    try {
+      const response = await api.get<Blob>('/timesheets/firm/export', {
+        params: { month },
+        responseType: 'blob',
+      });
+      downloadBlob(`timesheets-${month}.csv`, response.data);
+    } catch {
+      await appAlert({ title: 'Export failed', message: 'Could not export timesheet records for this month.' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <AppPageContainer>
       <PageHeader
@@ -130,6 +150,12 @@ export default function Timesheets() {
           <Label>Date</Label>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
+        {canFirm && (
+          <Button type="button" variant="outline" size="sm" onClick={() => void exportTimesheetsMonth()} disabled={exporting}>
+            <Download size={16} className="mr-1" />
+            {exporting ? 'Exporting…' : `Export ${date.slice(0, 7)}`}
+          </Button>
+        )}
         <div className="flex flex-wrap gap-2">
           {canFirm && (
             <Button type="button" variant={mode === 'firm' ? 'default' : 'outline'} size="sm" onClick={() => setMode('firm')}>

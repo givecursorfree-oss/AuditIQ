@@ -182,7 +182,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       where,
       orderBy: { date: 'desc' },
       include: {
-        user: { select: { firstName: true, lastName: true, initials: true, email: true } },
+        user: { select: { firstName: true, lastName: true, initials: true, email: true, role: true } },
         office: { select: { name: true } },
       },
     });

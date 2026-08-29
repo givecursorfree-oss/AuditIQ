@@ -114,10 +114,14 @@ io.use(async (socket, next) => {
   try {
     const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { isActive: true },
+      select: { isActive: true, mustChangePassword: true },
     });
     if (!dbUser?.isActive) {
       next(new Error('Account disabled'));
+      return;
+    }
+    if (dbUser.mustChangePassword) {
+      next(new Error('Password change required'));
       return;
     }
   } catch {
