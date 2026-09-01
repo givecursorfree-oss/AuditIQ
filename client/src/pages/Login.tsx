@@ -298,9 +298,6 @@ export default function Login() {
                 {loading ? 'Verifying…' : 'Verify and sign in'}
                 {!loading && <ShieldCheck size={18} />}
               </button>
-              <p className="text-xs text-foreground-muted text-center">
-                Next, allow location. Attendance is marked when you are at the office (phone GPS).
-              </p>
               <button
                 type="button"
                 onClick={() => { setPreAuthToken(null); setTotpCode(''); setError(''); }}
@@ -370,11 +367,7 @@ export default function Login() {
               <p className="text-xs text-foreground-muted text-center">
                 Allow location when asked. You stay signed in even if attendance is not marked.
               </p>
-            ) : (
-              <p className="text-xs text-foreground-muted text-center">
-                After sign-in, your browser will ask for location. Attendance uses phone GPS at the office. Desktop location is often rejected.
-              </p>
-            )}
+            ) : null}
           </form>
           )}
 
