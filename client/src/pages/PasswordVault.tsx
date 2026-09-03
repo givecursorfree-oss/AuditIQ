@@ -9,6 +9,7 @@ import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import PageHeader from '@/components/layout/PageHeader';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
 import { appToast } from '@/context/AppToastContext';
+import { Button } from '@/components/ui/button';
 
 interface VaultEntry {
   id: string;
@@ -168,13 +169,13 @@ export default function PasswordVault() {
         actions={
           <div className="flex gap-2">
             {isPartner && (
-              <button type="button" className="btn-secondary flex items-center gap-2" onClick={() => void openAudit()}>
+              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void openAudit()}>
                 <ClockCounterClockwise size={16} /> Audit log
-              </button>
+              </Button>
             )}
-            <button type="button" className="btn-primary flex items-center gap-2" onClick={openCreate}>
+            <Button type="button" size="sm" className="gap-2" onClick={openCreate}>
               <Plus size={16} /> Add credential
-            </button>
+            </Button>
           </div>
         }
       />
@@ -247,8 +248,8 @@ export default function PasswordVault() {
               onChange={v => setForm({ ...form, password: v })} />
             <Input label="Notes" value={form.notes} onChange={v => setForm({ ...form, notes: v })} />
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="button" className="btn-primary" onClick={() => void submit()}>Save</button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+              <Button type="button" size="sm" onClick={() => void submit()}>Save</Button>
             </div>
           </div>
         </Modal>

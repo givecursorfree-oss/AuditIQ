@@ -67,13 +67,13 @@ export default function AttendanceCheckInPopup({
             className="relative"
           >
             <m.div
-              className="absolute -inset-1 rounded-2xl bg-emerald-500/20 blur-md"
+              className="absolute -inset-1 rounded-2xl bg-primary/20 blur-md"
               animate={{ opacity: [0.4, 0.75, 0.4] }}
               transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
               aria-hidden
             />
             <OrderConfirmationCard
-              className="shadow-2xl border-emerald-500/30 relative"
+              className="shadow-2xl border-primary/30 relative"
               title={details.kind === 'check-out' ? 'Checked out' : 'Attendance marked'}
               buttonText="Got it"
               icon={
@@ -82,7 +82,7 @@ export default function AttendanceCheckInPopup({
                   animate={{ scale: 1, rotate: 0 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.15 }}
                 >
-                  <CheckCircle2 className="h-14 w-14 text-emerald-500" />
+                  <CheckCircle2 className="h-14 w-14 text-primary" />
                 </m.div>
               }
               onGoToAccount={handleDismiss}

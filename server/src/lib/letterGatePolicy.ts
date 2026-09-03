@@ -14,20 +14,13 @@ export type TeamAssignmentGateResult =
   | { allowed: true }
   | { allowed: false; error: string; letterStatus: string };
 
-/** MKD policy: initial team assignment requires signed letter; updates anytime once team exists. */
+/** MKD policy: managers may assign/update team at any stage (letter gate relaxed per firm request). */
 export function assertTeamAssignmentAllowed(
-  letterStatus: string,
-  assigningTeam: boolean,
-  hasExistingTeam = false
+  _letterStatus: string,
+  _assigningTeam: boolean,
+  _hasExistingTeam = false
 ): TeamAssignmentGateResult {
-  if (!assigningTeam) return { allowed: true };
-  if (hasExistingTeam) return { allowed: true };
-  if (!needsSignedLetterForTeamAssignment(letterStatus)) return { allowed: true };
-  return {
-    allowed: false,
-    error: 'Waiting for client to sign engagement letter',
-    letterStatus,
-  };
+  return { allowed: true };
 }
 
 export function engagementHasTeam(eng: {

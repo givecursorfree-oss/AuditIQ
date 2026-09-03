@@ -65,6 +65,7 @@ export default function Timesheets() {
   const [pending, setPending] = useState<PendingDay[]>([]);
   const [mode, setMode] = useState<'firm' | 'detail' | 'review'>(canFirm ? 'firm' : 'detail');
   const [exporting, setExporting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.id && !staffId) setStaffId(user.id);
@@ -72,27 +73,39 @@ export default function Timesheets() {
 
   useEffect(() => {
     if (!user || !canFirm) return;
+    setLoadError(null);
     void api
       .get<{ rows: FirmRow[] }>(`/timesheets/firm?date=${date}`)
       .then((r) => setFirmRows(r.data.rows || []))
-      .catch(() => setFirmRows([]));
+      .catch(() => {
+        setFirmRows([]);
+        setLoadError('Failed to load.');
+      });
   }, [user, date, canFirm]);
 
   useEffect(() => {
     if (!user || mode === 'firm' || mode === 'review') return;
     const id = staffId || user.id;
+    setLoadError(null);
     void api
       .get<Timesheet>(`/timesheets?staffId=${id}&date=${date}`)
       .then((r) => setSheet(r.data))
-      .catch(() => setSheet(null));
+      .catch(() => {
+        setSheet(null);
+        setLoadError('Failed to load.');
+      });
   }, [user, date, staffId, mode]);
 
   useEffect(() => {
     if (!user || !canAttest || mode !== 'review') return;
+    setLoadError(null);
     void api
       .get<PendingDay[]>('/timesheets/pending-review')
       .then((r) => setPending(r.data || []))
-      .catch(() => setPending([]));
+      .catch(() => {
+        setPending([]);
+        setLoadError('Failed to load.');
+      });
   }, [user, canAttest, mode]);
 
   async function submitDay() {
@@ -145,6 +158,7 @@ export default function Timesheets() {
             : 'Daily hours — submit for Manager / Senior Executive approval'
         }
       />
+      {loadError && <p className="text-sm text-destructive mb-4">{loadError}</p>}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="max-w-xs">
           <Label>Date</Label>
@@ -194,10 +208,10 @@ export default function Timesheets() {
                     </td>
                     <td className="py-2">{new Date(row.date).toLocaleDateString('en-IN')}</td>
                     <td className="py-2 space-x-2">
-                      <Button type="button" size="sm" onClick={() => void reviewDay(row.id, 'Approved')}>
+                      <Button type="button" size="sm" variant="success" onClick={() => void reviewDay(row.id, 'Approved')}>
                         Approve
                       </Button>
-                      <Button type="button" size="sm" variant="outline" onClick={() => void reviewDay(row.id, 'Rejected')}>
+                      <Button type="button" size="sm" variant="destructive" onClick={() => void reviewDay(row.id, 'Rejected')}>
                         Reject
                       </Button>
                     </td>

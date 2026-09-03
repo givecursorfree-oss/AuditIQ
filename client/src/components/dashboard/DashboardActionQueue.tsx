@@ -119,7 +119,7 @@ export function DashboardActionQueue({ queue, loading }: DashboardActionQueuePro
                         <p className="text-sm text-muted-foreground truncate">{item.subtitle}</p>
                         <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                           {isApprove ? (
-                            <span className="font-medium text-primary">Approve to continue</span>
+                            <span className="font-medium text-success">Approve to continue</span>
                           ) : (
                             <span>Assign partner and team</span>
                           )}

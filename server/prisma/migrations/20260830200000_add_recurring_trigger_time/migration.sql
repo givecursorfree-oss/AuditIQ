@@ -1,0 +1,2 @@
+ALTER TABLE `RecurringSchedule`
+  ADD COLUMN `triggerTime` VARCHAR(191) NOT NULL DEFAULT '09:00';

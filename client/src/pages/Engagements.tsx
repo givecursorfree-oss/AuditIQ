@@ -17,7 +17,10 @@ import { Button } from '@/components/ui/button';
 import { modalBackdropProps } from '@/lib/interactiveProps';
 import { PanelCard } from '@/components/layout/PanelCard';
 import { EmptyState } from '@/components/layout/StatePanels';
+import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { EngagementLifecycleBadge, ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
+import { formatApiError } from '@/lib/apiErrors';
+import { appAlert } from '@/context/AppDialogContext';
 import {
   SERVICE_CATALOG,
   WORKFLOW_DOMAIN_LABELS,
@@ -58,6 +61,7 @@ export default function Engagements() {
   const [selectedEng, setSelectedEng] = useState<string | null>(null);
   const [signoffs, setSignoffs] = useState<SignOff[]>([]);
   const [showSignoffModal, setShowSignoffModal] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchEngagements = useCallback(() => {
     const params = new URLSearchParams();
@@ -65,9 +69,11 @@ export default function Engagements() {
     if (filterStatus) params.set('status', filterStatus);
     if (filterType) params.set('type', filterType);
 
+    setLoadError(null);
+    setLoading(true);
     api.get(`/engagements?${params.toString()}`)
       .then(({ data }) => setEngagements(data.engagements || []))
-      .catch(console.error)
+      .catch((e) => setLoadError(formatApiError(e)))
       .finally(() => setLoading(false));
   }, [search, filterStatus, filterType]);
 
@@ -89,7 +95,7 @@ export default function Engagements() {
       const { data } = await api.get(`/signoffs?engagementId=${selectedEng}`);
       setSignoffs(data);
     } catch (err) {
-      console.error(err);
+      void appAlert({ title: 'Sign-off failed', message: formatApiError(err) });
     }
   };
 
@@ -101,7 +107,7 @@ export default function Engagements() {
         setSignoffs(data);
       }
     } catch (err) {
-      console.error(err);
+      void appAlert({ title: 'Update failed', message: formatApiError(err) });
     }
   };
 
@@ -131,6 +137,10 @@ export default function Engagements() {
           </div>
         }
       />
+
+      {loadError && (
+        <ErrorBanner message={loadError} onRetry={fetchEngagements} className="mb-4" />
+      )}
 
       <PageToolbar>
         <div className="relative w-full sm:flex-1 sm:max-w-sm">
@@ -242,8 +252,8 @@ export default function Engagements() {
                               <ApprovalStatusBadge status={s.status} />
                               {s.status === 'Pending' && ['Partner', 'Manager'].includes(user?.role || '') && (
                                 <div className="flex gap-1">
-                                  <button type="button" onClick={() => handleSignoffAction(s.id, 'Approved')} className="text-xs px-2 py-1 rounded bg-success/10 text-success hover:bg-success/20">Approve</button>
-                                  <button type="button" onClick={() => handleSignoffAction(s.id, 'Rejected')} className="text-xs px-2 py-1 rounded bg-danger/10 text-danger hover:bg-danger/20">Reject</button>
+                                  <Button type="button" size="sm" variant="success" onClick={() => handleSignoffAction(s.id, 'Approved')}>Approve</Button>
+                                  <Button type="button" size="sm" variant="destructive" onClick={() => handleSignoffAction(s.id, 'Rejected')}>Reject</Button>
                                 </div>
                               )}
                             </div>
@@ -394,6 +404,7 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
     enabled: false,
     frequency: 'monthly' as 'monthly' | 'quarterly' | 'yearly',
     triggerDay: 1,
+    triggerTime: '09:00',
     autoCreateStartDate: new Date().toISOString().slice(0, 10),
     autoCreateEndDate: '',
     autoSendDataRequestLetter: true,
@@ -460,6 +471,7 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
           ? {
               frequency: recurring.frequency,
               triggerDay: recurring.triggerDay,
+              triggerTime: recurring.triggerTime,
               autoCreateStartDate: recurring.autoCreateStartDate,
               autoCreateEndDate: recurring.autoCreateEndDate || null,
               autoSendDataRequestLetter: recurring.autoSendDataRequestLetter,
@@ -633,6 +645,17 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
                   />
                 </div>
                 <div>
+                  <label htmlFor="eng-recurring-trigger-time" className="block text-xs text-foreground-muted mb-1">Trigger time</label>
+                  <input
+                    id="eng-recurring-trigger-time"
+                    type="time"
+                    aria-label="Trigger time"
+                    value={recurring.triggerTime}
+                    onChange={(e) => setRecurring((r) => ({ ...r, triggerTime: e.target.value }))}
+                    className="input-field"
+                  />
+                </div>
+                <div>
                   <label htmlFor="eng-recurring-start-date" className="block text-xs text-foreground-muted mb-1">Auto-create from</label>
                   <input
                     id="eng-recurring-start-date"
@@ -666,10 +689,10 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
             )}
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
+            <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" className="flex-1" disabled={saving}>
               {saving ? 'Creating...' : 'Create Engagement'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

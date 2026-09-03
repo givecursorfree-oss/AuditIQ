@@ -52,7 +52,7 @@ async function main() {
   await clearDatabase(prisma);
 
   // ─── Permissions (modules × actions) ───
-  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals'];
+  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals', 'expenses'];
   const actions = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
 
   const permissionData: { module: string; action: string; description: string }[] = [];
@@ -98,7 +98,7 @@ async function main() {
       name: 'Manager', description: 'Audit manager with review and approval rights', isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'clients', 'invoices', 'vault', 'approvals'],
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'clients', 'invoices', 'vault', 'approvals', 'expenses'],
           ['view', 'create', 'edit', 'approve', 'export', 'apply', 'manage']
         ).map((pid) => ({ permissionId: pid })),
       },
@@ -110,7 +110,7 @@ async function main() {
       name: 'Staff', description: 'Audit staff / article clerk with standard access', isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'invoices'],
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'invoices', 'expenses'],
           ['view', 'create', 'edit', 'apply']
         ).map((pid) => ({ permissionId: pid })),
       },
@@ -122,8 +122,8 @@ async function main() {
       name: 'Intern', description: 'Intern with limited view-only access', isSystem: false,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'],
-          ['view', 'apply']
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages', 'expenses'],
+          ['view', 'apply', 'create']
         ).map((pid) => ({ permissionId: pid })),
       },
     },
@@ -1553,18 +1553,9 @@ async function main() {
         status: 'sent',
         sentAt: daysAgo(30),
       },
-      {
-        clientId: clients[1].id,
-        engagementId: eng2.id,
-        templateKey: 'deadline-reminder',
-        toAddress: 'ramesh@tcs.com',
-        subject: 'Upcoming deadline: Tax audit report — 3 days',
-        body: '<p>Reminder: Tax audit report due shortly. Pending documents may delay filing.</p>',
-        status: 'queued',
-      },
     ],
   });
-  console.log('✅ Comms log: 4 entries');
+  console.log('✅ Comms log: 3 entries');
 
   // Extra notifications for new modules
   await prisma.notification.createMany({

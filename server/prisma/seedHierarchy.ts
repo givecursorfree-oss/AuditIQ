@@ -55,6 +55,21 @@ export async function seedHierarchyAndRoles(prisma: PrismaClient) {
   const byCode = Object.fromEntries(levels.map((l) => [l.code, l.id]));
 
   const users = await prisma.user.findMany({ select: { id: true, email: true, role: true } });
+  const byEmail = Object.fromEntries(users.map((u) => [u.email, u.id]));
+
+  const reportsToByEmail: Record<string, string> = {
+    'intern@mkd.co': 'manager@mkd.co',
+    'executive@mkd.co': 'manager@mkd.co',
+    'senior.exec@mkd.co': 'senior.manager@mkd.co',
+  };
+  for (const [email, managerEmail] of Object.entries(reportsToByEmail)) {
+    const userId = byEmail[email];
+    const managerId = byEmail[managerEmail];
+    if (userId && managerId) {
+      await prisma.user.update({ where: { id: userId }, data: { reportsToId: managerId } });
+    }
+  }
+
   for (const u of users) {
     if (u.role === 'Client') {
       await prisma.user.update({

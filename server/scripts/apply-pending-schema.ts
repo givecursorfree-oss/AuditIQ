@@ -54,6 +54,9 @@ async function main(): Promise<void> {
   if (!(await columnExists('User', 'lastDigestSentAt'))) {
     await safe('ALTER TABLE `User` ADD COLUMN `lastDigestSentAt` DATETIME(3) NULL');
   }
+  if (!(await columnExists('User', 'sessionStartedAt'))) {
+    await safe('ALTER TABLE `User` ADD COLUMN `sessionStartedAt` DATETIME(3) NULL');
+  }
   if (!(await columnExists('Engagement', 'teamLastChangedById'))) {
     await safe('ALTER TABLE `Engagement` ADD COLUMN `teamLastChangedById` VARCHAR(191) NULL');
     await safe('ALTER TABLE `Engagement` ADD COLUMN `teamLastChangedAt` DATETIME(3) NULL');

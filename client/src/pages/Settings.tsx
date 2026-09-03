@@ -6,6 +6,7 @@ import {
   Key as KeyRound,
   ClockCounterClockwise as History,
   EnvelopeSimple as Mail,
+  Keyboard,
 } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 
@@ -18,14 +19,16 @@ import SettingsRolesTab from './settings/SettingsRolesTab';
 import SettingsFirmTab from './settings/SettingsFirmTab';
 import SettingsCommsLogTab from './settings/SettingsCommsLogTab';
 import SettingsAuditLogTab from './settings/SettingsAuditLogTab';
+import SettingsShortcutsTab from './settings/SettingsShortcutsTab';
 
-type Tab_ = 'users' | 'roles' | 'firm' | 'security' | 'comms' | 'audit-log';
+type Tab_ = 'users' | 'roles' | 'firm' | 'security' | 'comms' | 'audit-log' | 'shortcuts';
 
 const SETTINGS_TABS: { id: Tab_; label: string; icon: React.ElementType }[] = [
   { id: 'users', label: 'Users', icon: Users },
   { id: 'roles', label: 'Roles & Permissions', icon: Shield },
   { id: 'firm', label: 'Firm Settings', icon: Building2 },
   { id: 'security', label: 'Security', icon: KeyRound },
+  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
   { id: 'comms', label: 'Comms Log', icon: Mail },
   { id: 'audit-log', label: 'Audit Log', icon: History },
 ];
@@ -47,7 +50,7 @@ export default function Settings() {
   }
 
   const visibleTabs = currentUser?.role === 'Manager'
-    ? SETTINGS_TABS.filter((t) => t.id === 'users')
+    ? SETTINGS_TABS.filter((t) => t.id === 'users' || t.id === 'shortcuts')
     : SETTINGS_TABS;
 
   const requestedTab = searchParams.get('tab') as Tab_ | null;
@@ -68,7 +71,7 @@ export default function Settings() {
         onValueChange={(v) => setSearchParams(v === 'users' ? {} : { tab: v }, { replace: true })}
         className="space-y-6"
       >
-        <TabsList className="w-full sm:w-fit">
+        <TabsList className="w-full sm:w-fit flex-wrap h-auto">
           {visibleTabs.map((t) => (
             <TabsTrigger key={t.id} value={t.id} className="gap-2">
               <t.icon size={16} />
@@ -81,6 +84,7 @@ export default function Settings() {
         <TabsContent value="roles"><SettingsRolesTab /></TabsContent>
         <TabsContent value="firm"><SettingsFirmTab /></TabsContent>
         <TabsContent value="security"><TwoFactorSettings /></TabsContent>
+        <TabsContent value="shortcuts"><SettingsShortcutsTab /></TabsContent>
         <TabsContent value="comms"><SettingsCommsLogTab /></TabsContent>
         <TabsContent value="audit-log"><SettingsAuditLogTab /></TabsContent>
       </Tabs>

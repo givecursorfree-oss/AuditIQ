@@ -302,7 +302,7 @@ function StepperIndicator({ children, className }: React.ComponentProps<'div'>) 
       data-state={state}
       className={cn(
         'relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-card bg-muted text-xs font-medium text-foreground-muted',
-        'data-[state=completed]:border-primary data-[state=completed]:bg-primary data-[state=completed]:text-primary-foreground',
+        'data-[state=completed]:border-success data-[state=completed]:bg-success data-[state=completed]:text-white',
         'data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground',
         className
       )}
@@ -348,18 +348,9 @@ function StepperTitle({ children, className }: React.ComponentProps<'h3'>) {
   );
 }
 
-function StepperDescription({ children, className }: React.ComponentProps<'div'>) {
-  const { state } = useStepItem();
-
-  return (
-    <div
-      data-slot="stepper-description"
-      data-state={state}
-      className={cn('text-sm text-muted-foreground', className)}
-    >
-      {children}
-    </div>
-  );
+/** ponytail: step descriptions suppressed app-wide (no explanatory UI). */
+function StepperDescription(_props: React.ComponentProps<'div'>) {
+  return null;
 }
 
 function StepperNav({ children, className }: React.ComponentProps<'nav'>) {

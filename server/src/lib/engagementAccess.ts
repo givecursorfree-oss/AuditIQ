@@ -1,15 +1,92 @@
 import { Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
-import { isFirmLeadershipRole } from '../lib/permissions.js';
 import type { AuthRequest } from '../middleware/auth.js';
+import {
+  assignedEngagementWhere,
+  engagementAccessWhereForProfile,
+  hasFirmWideEngagementAccess,
+  isAccountsManager,
+  type EngagementAccessProfile,
+} from './engagementAccessPolicy.js';
+
+export type { EngagementAccessProfile } from './engagementAccessPolicy.js';
+
+export async function loadEngagementAccessProfile(userId: string): Promise<EngagementAccessProfile | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      firmId: true,
+      reportsToId: true,
+      hierarchyLevel: { select: { code: true } },
+    },
+  });
+  if (!user) return null;
+  return {
+    userId: user.id,
+    role: user.role,
+    firmId: user.firmId,
+    hierarchyCode: user.hierarchyLevel?.code ?? null,
+    reportsToId: user.reportsToId,
+  };
+}
+
+function profileFromArgs(
+  userId: string,
+  role: string,
+  firmId: string | null,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
+): EngagementAccessProfile {
+  return { userId, role, firmId, hierarchyCode: hierarchyCode ?? null, reportsToId: reportsToId ?? null };
+}
+
+async function resolveProfile(
+  userId: string,
+  role: string,
+  firmId: string | null,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
+): Promise<EngagementAccessProfile> {
+  if (hierarchyCode !== undefined) {
+    return profileFromArgs(userId, role, firmId, hierarchyCode, reportsToId);
+  }
+  const loaded = await loadEngagementAccessProfile(userId);
+  if (loaded) return loaded;
+  return profileFromArgs(userId, role, firmId, null, null);
+}
+
+function matchesAssignedEngagement(
+  userId: string,
+  engagement: {
+    partnerInChargeId: string | null;
+    managerId: string | null;
+    articleAssistantId: string | null;
+  },
+  isMember: boolean,
+  hasTask: boolean
+): boolean {
+  return (
+    engagement.partnerInChargeId === userId ||
+    engagement.managerId === userId ||
+    engagement.articleAssistantId === userId ||
+    isMember ||
+    hasTask
+  );
+}
 
 export async function canAccessEngagement(
   userId: string,
   role: string,
   firmId: string | null,
-  engagementId: string
+  engagementId: string,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
 ): Promise<boolean> {
+  const profile = await resolveProfile(userId, role, firmId, hierarchyCode, reportsToId);
+
   const engagement = await prisma.engagement.findUnique({
     where: { id: engagementId },
     select: {
@@ -17,47 +94,81 @@ export async function canAccessEngagement(
       partnerInChargeId: true,
       managerId: true,
       articleAssistantId: true,
+      currentStage: true,
+      filedAt: true,
+      archivedAt: true,
     },
   });
   if (!engagement) return false;
-  if (!firmId || engagement.firmId !== firmId) return false;
-  if (isFirmLeadershipRole(role)) return true;
+  if (!profile.firmId || engagement.firmId !== profile.firmId) return false;
 
-  if (
-    engagement.partnerInChargeId === userId ||
-    engagement.managerId === userId ||
-    engagement.articleAssistantId === userId
-  ) {
-    return true;
+  if (hasFirmWideEngagementAccess(profile.role, profile.hierarchyCode)) return true;
+
+  if (isAccountsManager(profile.role, profile.hierarchyCode)) {
+    const billingStage = ['Billing', 'BILLING'].includes(engagement.currentStage);
+    const pendingBilling =
+      engagement.filedAt != null &&
+      engagement.archivedAt == null &&
+      !billingStage;
+    return billingStage || pendingBilling;
   }
 
   const member = await prisma.engagementMember.findFirst({
-    where: { userId, engagementId },
+    where: { userId: profile.userId, engagementId },
+    select: { id: true },
   });
-  if (member) return true;
 
   const linkedTask = await prisma.task.findFirst({
     where: {
       engagementId,
-      OR: [{ assigneeId: userId }, { createdById: userId }],
+      OR: [{ assigneeId: profile.userId }, { createdById: profile.userId }],
     },
     select: { id: true },
   });
-  return !!linkedTask;
+
+  if (
+    matchesAssignedEngagement(
+      profile.userId,
+      engagement,
+      !!member,
+      !!linkedTask
+    )
+  ) {
+    return true;
+  }
+
+  // Intern: inherit supervisor's engagements
+  if (profile.reportsToId && (profile.role === 'Intern' || profile.hierarchyCode === 'INTERN')) {
+    const supMember = await prisma.engagementMember.findFirst({
+      where: { userId: profile.reportsToId, engagementId },
+    });
+    if (supMember) return true;
+    if (
+      engagement.partnerInChargeId === profile.reportsToId ||
+      engagement.managerId === profile.reportsToId ||
+      engagement.articleAssistantId === profile.reportsToId
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
-/** Send 403/404 and return false if access denied. */
 export async function requireEngagementAccess(
   req: AuthRequest,
   res: Response,
   engagementId: string
 ): Promise<boolean> {
   const user = req.user!;
+  const profile = await resolveProfile(user.id, user.role, user.firmId);
   const allowed = await canAccessEngagement(
     user.id,
     user.role,
     user.firmId,
-    engagementId
+    engagementId,
+    profile.hierarchyCode,
+    profile.reportsToId
   );
   if (!allowed) {
     res.status(403).json({ error: 'Access denied to this engagement' });
@@ -114,92 +225,66 @@ export async function requireForm3cdClauseAccess(
   return requireReportAccess(req, res, clause.reportId);
 }
 
-/** Prisma filter: only engagements this user may see. */
 export async function engagementIdsFilter(
   userId: string,
   role: string,
-  firmId: string | null
+  firmId: string | null,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
 ): Promise<{ engagementId: { in: string[] } }> {
-  if (!firmId) return { engagementId: { in: [] } };
-
-  if (isFirmLeadershipRole(role)) {
-    const engagements = await prisma.engagement.findMany({
-      where: { firmId },
-      select: { id: true },
-    });
-    return { engagementId: { in: engagements.map((e) => e.id) } };
-  }
-
-  const memberships = await prisma.engagementMember.findMany({
-    where: { userId },
-    select: { engagementId: true },
-  });
-  const taskEngagements = await prisma.task.findMany({
-    where: {
-      engagementId: { not: null },
-      OR: [{ assigneeId: userId }, { createdById: userId }],
-    },
-    select: { engagementId: true },
-    distinct: ['engagementId'],
-  });
-  const ids = [
-    ...new Set([
-      ...memberships.map((m) => m.engagementId),
-      ...taskEngagements.map((t) => t.engagementId).filter((id): id is string => id != null),
-    ]),
-  ];
+  const ids = await listAccessibleEngagementIds(userId, role, firmId, hierarchyCode, reportsToId);
   return { engagementId: { in: ids } };
 }
 
-/** Prisma where: firm engagements visible to this user (Admin/Partner = all; others = assigned only). */
 export function engagementAccessWhere(
   userId: string,
   role: string,
-  firmId: string | null
+  firmId: string | null,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
 ): Prisma.EngagementWhereInput {
-  if (!firmId) return { id: { in: [] } };
-  if (isFirmLeadershipRole(role)) return { firmId };
-
-  return {
-    firmId,
-    OR: [
-      { members: { some: { userId } } },
-      { partnerInChargeId: userId },
-      { managerId: userId },
-      { articleAssistantId: userId },
-      { tasks: { some: { OR: [{ assigneeId: userId }, { createdById: userId }] } } },
-    ],
-  };
+  return engagementAccessWhereForProfile(
+    profileFromArgs(userId, role, firmId, hierarchyCode, reportsToId)
+  );
 }
 
-/** Engagement IDs a user may access (team assignment, membership, or privileged firm-wide). */
+export async function engagementAccessWhereForUser(userId: string): Promise<Prisma.EngagementWhereInput> {
+  const profile = await loadEngagementAccessProfile(userId);
+  if (!profile) return { id: { in: [] } };
+  return engagementAccessWhereForProfile(profile);
+}
+
 export async function listAccessibleEngagementIds(
   userId: string,
   role: string,
-  firmId: string | null
+  firmId: string | null,
+  hierarchyCode?: string | null,
+  reportsToId?: string | null
 ): Promise<string[]> {
+  const where = engagementAccessWhere(userId, role, firmId, hierarchyCode, reportsToId);
   if (!firmId) return [];
-
-  if (isFirmLeadershipRole(role)) {
-    const rows = await prisma.engagement.findMany({
-      where: { firmId },
-      select: { id: true },
-    });
-    return rows.map((r) => r.id);
-  }
-
-  const engagements = await prisma.engagement.findMany({
-    where: {
-      firmId,
-      OR: [
-        { members: { some: { userId } } },
-        { partnerInChargeId: userId },
-        { managerId: userId },
-        { articleAssistantId: userId },
-        { tasks: { some: { OR: [{ assigneeId: userId }, { createdById: userId }] } } },
-      ],
-    },
-    select: { id: true },
-  });
-  return engagements.map((e) => e.id);
+  const rows = await prisma.engagement.findMany({ where, select: { id: true } });
+  return rows.map((r) => r.id);
 }
+
+/** All user IDs on an engagement team (managers + staff + partner). */
+export async function getEngagementTeamMemberIds(engagementId: string): Promise<string[]> {
+  const eng = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    select: {
+      partnerInChargeId: true,
+      managerId: true,
+      articleAssistantId: true,
+      members: { select: { userId: true } },
+    },
+  });
+  if (!eng) return [];
+  const ids = new Set<string>();
+  if (eng.partnerInChargeId) ids.add(eng.partnerInChargeId);
+  if (eng.managerId) ids.add(eng.managerId);
+  if (eng.articleAssistantId) ids.add(eng.articleAssistantId);
+  for (const m of eng.members) ids.add(m.userId);
+  return Array.from(ids);
+}
+
+export { assignedEngagementWhere, hasFirmWideEngagementAccess };

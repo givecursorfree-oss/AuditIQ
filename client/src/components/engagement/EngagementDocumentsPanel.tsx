@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
-import { DownloadSimple, Eye, FileText, ShieldCheck } from '@phosphor-icons/react';
+import { useMemo, useState } from 'react';
+import { DownloadSimple, Eye, FileText, ShieldCheck, UploadSimple } from '@phosphor-icons/react';
+import api from '@/services/api';
 import ClientSubmissionsPanel, {
   type ChecklistPayload,
   type SubmissionDocument,
@@ -28,6 +29,7 @@ interface KycDoc {
 interface Props {
   submissions: ChecklistPayload | null;
   kyc: KycDoc[];
+  engagementId: string;
   engagementDocuments: Array<{
     id: string;
     originalName: string;
@@ -100,6 +102,7 @@ function ClientUploadRow({
 export default function EngagementDocumentsPanel({
   submissions,
   kyc,
+  engagementId,
   engagementDocuments,
   canManage,
   isPartner,
@@ -111,6 +114,25 @@ export default function EngagementDocumentsPanel({
   onSetKycStatus,
   onReload,
 }: Props) {
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadFirmFile(file: File) {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('engagementId', engagementId);
+      formData.append('category', 'Workpaper');
+      formData.append('folder', 'Current File');
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      onReload();
+    } finally {
+      setUploading(false);
+    }
+  }
+
   const checklistTitleByDocId = useMemo(() => {
     const map = new Map<string, string>();
     for (const item of submissions?.items ?? []) {
@@ -282,6 +304,22 @@ export default function EngagementDocumentsPanel({
           <p className="text-xs text-muted-foreground mb-3">
             Internal files and staff uploads for this engagement.
           </p>
+          {canManage && (
+            <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm text-primary">
+              <UploadSimple size={16} />
+              {uploading ? 'Uploading…' : 'Upload firm document'}
+              <input
+                type="file"
+                className="sr-only"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadFirmFile(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          )}
           <ul className="divide-y divide-border text-sm">
             {otherFiles.map((f) => (
               <li key={f.id} className="flex items-center justify-between gap-2 py-2.5">

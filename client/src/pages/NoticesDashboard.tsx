@@ -20,6 +20,7 @@ interface Dashboard {
 export default function NoticesDashboard() {
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [notices, setNotices] = useState<{ id: string; subject: string; portal: string; dueDate?: string }[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -28,12 +29,17 @@ export default function NoticesDashboard() {
     ]).then(([d, n]) => {
       setDash(d.data);
       setNotices(n.data.slice(0, 20));
+      setLoadError(null);
+    }).catch(() => {
+      setLoadError('Failed to load.');
     });
   }, []);
 
   return (
     <AppPageContainer>
       <PageHeader title="Notice dashboard" description="Government portal notices by due date" />
+
+      {loadError && <p className="text-sm text-destructive mb-4">{loadError}</p>}
 
       {dash?.integration && (
         <div
@@ -60,68 +66,97 @@ export default function NoticesDashboard() {
             {dash.integration.message && (
               <p className="mt-1 text-muted-foreground">{dash.integration.message}</p>
             )}
-            {!dash.integration.configured && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Set <code className="rounded bg-muted px-1">PORTAL_SYNC_PROVIDER=playwright</code> on the server and add
-                credentials in the vault. Manual notice entry still works.
-              </p>
-            )}
           </div>
         </div>
       )}
 
       {dash && (
-        <PanelCard title="Summary" className="mb-4">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th scope="col" className="py-2 text-left">
-                    Portal
-                  </th>
-                  <th className="py-2">Overdue</th>
-                  <th className="py-2">Due 7 days</th>
-                  <th className="py-2">Due 30 days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {NOTICE_PORTALS.map((p) => (
-                  <tr key={p} className="border-b border-border/50">
-                    <td className="py-2 font-medium">{p.replace('_', ' ')}</td>
-                    <td className="py-2 text-center">{dash.matrix[p]?.overdue ?? 0}</td>
-                    <td className="py-2 text-center">{dash.matrix[p]?.due7 ?? 0}</td>
-                    <td className="py-2 text-center">{dash.matrix[p]?.due30 ?? 0}</td>
+        <>
+          <PanelCard title="Summary by due date" className="mb-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th scope="col" className="py-2 text-left">Portal</th>
+                    <th scope="col" className="py-2 text-right">Overdue</th>
+                    <th scope="col" className="py-2 text-right">Due 7d</th>
+                    <th scope="col" className="py-2 text-right">Due 30d</th>
                   </tr>
-                ))}
-                <tr className="font-semibold">
-                  <td className="py-2">TOTAL</td>
-                  <td className="py-2 text-center">{dash.total.overdue}</td>
-                  <td className="py-2 text-center">{dash.total.due7}</td>
-                  <td className="py-2 text-center">{dash.total.due30}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </PanelCard>
+                </thead>
+                <tbody>
+                  {NOTICE_PORTALS.map((p) => (
+                    <tr key={p} className="border-b border-border/50">
+                      <td className="py-2">{p.replace('_', ' ')}</td>
+                      <td className="py-2 text-right font-medium text-destructive">
+                        {dash.matrix[p]?.overdue ?? 0}
+                      </td>
+                      <td className="py-2 text-right">{dash.matrix[p]?.due7 ?? 0}</td>
+                      <td className="py-2 text-right">{dash.matrix[p]?.due30 ?? 0}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-medium">
+                    <td className="py-2">Total</td>
+                    <td className="py-2 text-right">{dash.total.overdue}</td>
+                    <td className="py-2 text-right">{dash.total.due7}</td>
+                    <td className="py-2 text-right">{dash.total.due30}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </PanelCard>
+
+          <PanelCard title="By adjudication level" className="mb-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th scope="col" className="py-2 text-left">Portal</th>
+                    <th scope="col" className="py-2 text-left">Level</th>
+                    <th scope="col" className="py-2 text-right">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {NOTICE_PORTALS.flatMap((portal) => {
+                    const levels = dash.byLevel[portal] ?? {};
+                    const entries = Object.entries(levels);
+                    if (entries.length === 0) {
+                      return (
+                        <tr key={portal} className="border-b border-border/50">
+                          <td className="py-2">{portal.replace('_', ' ')}</td>
+                          <td className="py-2 text-muted-foreground" colSpan={2}>—</td>
+                        </tr>
+                      );
+                    }
+                    return entries.map(([level, count]) => (
+                      <tr key={`${portal}-${level}`} className="border-b border-border/50">
+                        <td className="py-2">{portal.replace('_', ' ')}</td>
+                        <td className="py-2">{level}</td>
+                        <td className="py-2 text-right">{count}</td>
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </PanelCard>
+        </>
       )}
+
       <PanelCard title="Recent notices">
         {notices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No notices. Sync from client vault credentials or add manually.</p>
+          <p className="text-sm text-muted-foreground">No notices yet. Sync from client vault or add manually.</p>
         ) : (
-          <ul className="space-y-2 text-sm">
+          <ul className="divide-y text-sm">
             {notices.map((n) => (
-              <li key={n.id} className="flex justify-between gap-2 border-b py-2">
-                <Link to={`/notices/${n.id}`} className="text-primary hover:underline">
-                  {n.subject}
-                </Link>
-                <span className="text-muted-foreground shrink-0">{n.portal}</span>
+              <li key={n.id} className="py-2 flex justify-between gap-2">
+                <span className="truncate">{n.subject}</span>
+                <Button asChild variant="link" size="sm" className="shrink-0">
+                  <Link to={`/notices/${n.id}`}>View</Link>
+                </Button>
               </li>
             ))}
           </ul>
         )}
-        <Button asChild variant="outline" size="sm" className="mt-3">
-          <Link to="/vault">Portal credentials</Link>
-        </Button>
       </PanelCard>
     </AppPageContainer>
   );

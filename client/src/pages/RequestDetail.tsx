@@ -150,7 +150,7 @@ export default function RequestDetailPage() {
         actions={
           <>
             {showApprove && (
-              <Button type="button" size="sm" disabled={busy} onClick={() => void approve()}>
+              <Button type="button" size="sm" variant="success" disabled={busy} onClick={() => void approve()}>
                 {approveCreateButtonLabel(serviceCount, busy)}
               </Button>
             )}

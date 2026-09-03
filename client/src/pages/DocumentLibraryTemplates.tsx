@@ -67,6 +67,7 @@ interface TemplateSendRow {
   filledSubject?: string | null;
 
   sentAt: string;
+  scheduledAt?: string | null;
 
   deliveryStatus: string;
 
@@ -157,6 +158,7 @@ export default function DocumentLibraryTemplates() {
   const [sendTpl, setSendTpl] = useState<DocumentTemplate | null>(null);
 
   const [sendClientId, setSendClientId] = useState('');
+  const [sendAt, setSendAt] = useState('');
 
   const [editorOpen, setEditorOpen] = useState(false);
 
@@ -374,19 +376,25 @@ export default function DocumentLibraryTemplates() {
 
       const client = clients.find((c) => c.id === sendClientId);
 
-      await api.post(`/templates/${sendTpl.id}/send`, { clientId: sendClientId });
+      await api.post(`/templates/${sendTpl.id}/send`, {
+        clientId: sendClientId,
+        scheduledAt: sendAt ? new Date(sendAt).toISOString() : undefined,
+      });
 
       showToast({
 
-        title: 'Template sent',
+        title: sendAt ? 'Template scheduled' : 'Template sent',
 
-        message: `"${sendTpl.name}" emailed to ${client?.name ?? 'client'}.`,
+        message: sendAt
+          ? `"${sendTpl.name}" is scheduled for ${new Date(sendAt).toLocaleString('en-IN')}.`
+          : `"${sendTpl.name}" emailed to ${client?.name ?? 'client'}.`,
 
         variant: 'success',
 
       });
 
       setSendTpl(null);
+      setSendAt('');
 
       setTab('history');
 
@@ -514,11 +522,25 @@ export default function DocumentLibraryTemplates() {
 
           </select>
 
+          <label className="block text-sm max-w-md">
+            <span className="block text-foreground-muted mb-1">Send now or schedule for later</span>
+            <input
+              className="input-field w-full"
+              type="datetime-local"
+              value={sendAt}
+              min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+              onChange={(e) => setSendAt(e.target.value)}
+            />
+            <span className="block text-xs text-foreground-muted mt-1">
+              Leave blank to send immediately. Times use the server timezone.
+            </span>
+          </label>
+
           <div className="flex gap-2">
 
             <Button type="button" size="sm" disabled={busy || !sendClientId} onClick={() => void sendTemplate()}>
 
-              {busy ? 'Sending…' : 'Send email'}
+              {busy ? 'Processing…' : sendAt ? 'Schedule email' : 'Send email'}
 
             </Button>
 
@@ -698,7 +720,7 @@ export default function DocumentLibraryTemplates() {
 
                     <p className="text-foreground-muted text-xs">
 
-                      To {s.client.name} · {new Date(s.sentAt).toLocaleString('en-IN')} · {s.deliveryStatus}
+                      To {s.client.name} · {s.scheduledAt ? `scheduled ${new Date(s.scheduledAt).toLocaleString('en-IN')}` : new Date(s.sentAt).toLocaleString('en-IN')} · {s.deliveryStatus}
 
                     </p>
 

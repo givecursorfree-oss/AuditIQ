@@ -1,24 +1,68 @@
-# Local document search only (Typesense + Tika) — no MySQL/JWT required.
+# Local document search + receipt OCR (Typesense + Tika + PaddleOCR)
+
 # Usage: npm run search:up
+
 services:
+
   typesense:
+
     image: typesense/typesense:29.0
+
     restart: unless-stopped
+
     ports:
+
       - "8108:8108"
+
     environment:
+
       TYPESENSE_DATA_DIR: /data
+
       TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-auditiq-typesense-dev-key}
+
       TYPESENSE_ENABLE_CORS: "true"
+
     volumes:
+
       - typesense_data:/data
+
     command: "--data-dir /data --api-key=${TYPESENSE_API_KEY:-auditiq-typesense-dev-key} --enable-cors"
 
+
+
   tika:
+
     image: apache/tika:3.3.0.0-full
+
     restart: unless-stopped
+
     ports:
+
       - "9998:9998"
 
+
+
+  paddleocr:
+
+    build: ./services/paddleocr-sidecar
+
+    restart: unless-stopped
+
+    ports:
+
+      - "8090:8090"
+
+    deploy:
+
+      resources:
+
+        limits:
+
+          memory: 2G
+
+
+
 volumes:
+
   typesense_data:
+

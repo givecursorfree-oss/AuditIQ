@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { CaretUp, Check, Key } from '@phosphor-icons/react';
+import { CaretUp, Check, Key, Keyboard } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { usePresence } from '../../context/PresenceContext';
+import { useLayoutChrome } from '../../context/LayoutChromeContext';
 import { formatRoleLabel, formatStaffTitle } from '../../lib/roleLabels';
 import {
   isStaffPresenceRole,
@@ -33,6 +34,7 @@ const presenceDotClass: Record<PresenceStatus, string> = {
 export default function SidebarUserMenu({ className }: { className?: string }) {
   const { user } = useAuth();
   const { myStatus, setMyStatus, updating } = usePresence();
+  const { openShortcutsHelp } = useLayoutChrome();
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   if (!user) return null;
@@ -171,6 +173,20 @@ export default function SidebarUserMenu({ className }: { className?: string }) {
         )}
 
         <DropdownMenuSeparator />
+        {!isClientUser && (
+          <DropdownMenuItem
+            onClick={() => openShortcutsHelp()}
+            className="flex items-center justify-between gap-2 cursor-pointer text-foreground"
+          >
+            <span className="flex items-center gap-2">
+              <Keyboard size={15} className="text-foreground-muted" />
+              <span>Keyboard shortcuts</span>
+            </span>
+            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              ?
+            </kbd>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem
           onClick={() => setChangePasswordOpen(true)}
           className="flex items-center gap-2 cursor-pointer text-foreground"

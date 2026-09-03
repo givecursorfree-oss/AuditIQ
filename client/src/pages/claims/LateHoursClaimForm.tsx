@@ -15,6 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { appAlert } from '@/context/AppDialogContext';
+import { formatApiError } from '@/lib/apiErrors';
 
 export function LateHoursClaimForm() {
   const [form, setForm] = useState({
@@ -34,11 +36,15 @@ export function LateHoursClaimForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await api.post('/claims/late-hours', {
-      ...form,
-      engagementId: form.engagementId || undefined,
-    });
-    setSubmitted(true);
+    try {
+      await api.post('/claims/late-hours', {
+        ...form,
+        engagementId: form.engagementId || undefined,
+      });
+      setSubmitted(true);
+    } catch (err) {
+      void appAlert({ title: 'Submit failed', message: formatApiError(err) });
+    }
   }
 
   if (submitted) {
@@ -46,8 +52,8 @@ export function LateHoursClaimForm() {
       <AppPageContainer>
         <PageHeader title="Late hours claim" />
         <p className="text-sm">Claim submitted for manager approval.</p>
-        <Link to="/claims/pending" className="text-primary text-sm underline">
-          View approvals
+        <Link to="/claims" className="text-primary text-sm underline">
+          Back to claims
         </Link>
       </AppPageContainer>
     );

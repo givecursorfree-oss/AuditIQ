@@ -4,14 +4,20 @@ import prisma from '../lib/prisma.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { io } from '../index.js';
 import logger from '../lib/logger.js';
-import { requireEngagementAccess } from '../lib/engagementAccess.js';
-import { getEngagementStaffIds } from '../lib/engagementTeam.js';
+import { requireEngagementAccess, getEngagementTeamMemberIds } from '../lib/engagementAccess.js';
 import {
   enrichTask,
   isTaskCompleted,
   normalizeTaskStatus,
   TASK_STATUSES,
 } from '../lib/taskHelpers.js';
+import {
+  isValidPipelineStageForEngagement,
+  pipelineStepsForEngagement,
+  resolveTaskPipelineStage,
+  type EngagementPipelineContext,
+} from '../lib/taskPipeline.js';
+import { syncAttendanceFromTaskCompletion } from '../lib/taskAttendanceSync.js';
 
 const router = Router();
 router.use(authenticate);
@@ -107,6 +113,7 @@ const createSchema = z.object({
   notes: z.string().optional(),
   assigneeId: z.string().min(1),
   engagementId: z.string().optional(),
+  pipelineStage: z.string().optional(),
 });
 
 const updateSchema = z.object({
@@ -119,12 +126,37 @@ const updateSchema = z.object({
   estimatedHours: z.number().optional().nullable(),
   notes: z.string().optional().nullable(),
   assigneeId: z.string().optional(),
+  pipelineStage: z.string().optional().nullable(),
 });
 
 const statusOnlySchema = z.object({
   status: z.enum([...TASK_STATUSES, 'Open', 'In Progress', 'Done']),
   notes: z.string().optional(),
 });
+
+async function loadEngagementPipelineContext(
+  engagementId: string | null | undefined
+): Promise<EngagementPipelineContext | null> {
+  if (!engagementId) return null;
+  const eng = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    select: {
+      currentStage: true,
+      serviceCode: true,
+      workflowDomain: true,
+      type: true,
+    },
+  });
+  return eng;
+}
+
+async function handleTaskCompleted(taskId: string): Promise<void> {
+  try {
+    await syncAttendanceFromTaskCompletion(taskId);
+  } catch (err) {
+    logger.warn('Task attendance sync failed', { taskId, error: (err as Error).message });
+  }
+}
 
 /** GET /api/tasks — my tasks, team scope, or engagement filter */
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -155,11 +187,34 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       include: {
         assignee: { select: { id: true, firstName: true, lastName: true, initials: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
-        engagement: { select: { id: true, title: true, client: { select: { name: true } } } },
+        engagement: {
+          select: {
+            id: true,
+            title: true,
+            currentStage: true,
+            serviceCode: true,
+            workflowDomain: true,
+            type: true,
+            client: { select: { name: true } },
+          },
+        },
       },
       orderBy: [{ dueDate: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
     });
-    res.json(tasks.map(enrichTask));
+
+    const pipelineContext = engagementId ? await loadEngagementPipelineContext(engagementId) : null;
+    const enriched = tasks.map((t) =>
+      enrichTask(t, pipelineContext ?? t.engagement ?? undefined)
+    );
+
+    if (engagementId && pipelineContext) {
+      res.json({
+        tasks: enriched,
+        pipelineSteps: pipelineStepsForEngagement(pipelineContext),
+      });
+      return;
+    }
+    res.json(enriched);
   } catch (err) {
     logger.error('List tasks error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to load tasks' });
@@ -183,9 +238,15 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     if (body.engagementId) {
-      const staffIds = await getEngagementStaffIds(body.engagementId);
-      if (staffIds.length > 0 && !staffIds.includes(body.assigneeId)) {
-        res.status(400).json({ error: 'Assignee must be on the engagement team staff list' });
+      const teamIds = await getEngagementTeamMemberIds(body.engagementId);
+      if (teamIds.length === 0) {
+        res.status(400).json({
+          error: 'Save the engagement team before assigning tasks',
+        });
+        return;
+      }
+      if (!teamIds.includes(body.assigneeId)) {
+        res.status(400).json({ error: 'Assignee must be on the engagement team' });
         return;
       }
     }
@@ -200,6 +261,25 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     const dueDate = body.dueDate ? new Date(body.dueDate) : null;
+    const engagementContext = body.engagementId
+      ? await loadEngagementPipelineContext(body.engagementId)
+      : null;
+
+    let pipelineStage: string | undefined;
+    if (body.pipelineStage && engagementContext) {
+      if (!isValidPipelineStageForEngagement(body.pipelineStage, engagementContext)) {
+        res.status(400).json({ error: 'Invalid pipeline stage for this engagement' });
+        return;
+      }
+      pipelineStage = body.pipelineStage;
+    } else if (engagementContext) {
+      pipelineStage = resolveTaskPipelineStage({
+        title: body.title,
+        explicitStage: body.pipelineStage,
+        engagement: engagementContext,
+      });
+    }
+
     const task = await prisma.task.create({
       data: {
         title: body.title,
@@ -212,27 +292,23 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         assigneeId: body.assigneeId,
         createdById: req.user!.id,
         engagementId: body.engagementId,
+        pipelineStage,
         status: 'not_started',
       },
       include: {
         assignee: { select: { id: true, firstName: true, lastName: true } },
-        engagement: { select: { id: true, title: true } },
+        engagement: {
+          select: {
+            id: true,
+            title: true,
+            currentStage: true,
+            serviceCode: true,
+            workflowDomain: true,
+            type: true,
+          },
+        },
       },
     });
-
-    // Assigning a task should reflect the person on the engagement team.
-    if (body.engagementId) {
-      await prisma.engagementMember.upsert({
-        where: { engagementId_userId: { engagementId: body.engagementId, userId: task.assigneeId } },
-        update: {},
-        create: {
-          engagementId: body.engagementId,
-          userId: task.assigneeId,
-          teamRole: 'Staff',
-          role: 'Preparer',
-        },
-      });
-    }
 
     if (task.assigneeId !== req.user!.id) {
       const link = body.engagementId
@@ -248,7 +324,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         },
       });
     }
-    res.status(201).json(enrichTask(task));
+    res.status(201).json(enrichTask(task, engagementContext ?? task.engagement ?? undefined));
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -282,10 +358,14 @@ router.patch('/:id/status', async (req: AuthRequest, res: Response): Promise<voi
     }
     const updated = await prisma.task.update({ where: { id: existing.id }, data });
     await notifyAssignerOnStatusChange(existing, req.user!.id, status);
-    if (status === 'completed' && !isTaskCompleted(prevStatus) && existing.engagementId) {
-      emitTaskCompleted(existing, req.user!.id);
+    if (status === 'completed' && !isTaskCompleted(prevStatus)) {
+      if (existing.engagementId) emitTaskCompleted(existing, req.user!.id);
+      await handleTaskCompleted(existing.id);
     }
-    res.json(enrichTask(updated));
+    const pipelineContext = existing.engagementId
+      ? await loadEngagementPipelineContext(existing.engagementId)
+      : null;
+    res.json(enrichTask(updated, pipelineContext ?? undefined));
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -325,7 +405,26 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       }
     }
 
+    const engagementContext = existing.engagementId
+      ? await loadEngagementPipelineContext(existing.engagementId)
+      : null;
+
+    if (body.pipelineStage != null && engagementContext) {
+      if (
+        body.pipelineStage !== '' &&
+        !isValidPipelineStageForEngagement(body.pipelineStage, engagementContext)
+      ) {
+        res.status(400).json({ error: 'Invalid pipeline stage for this engagement' });
+        return;
+      }
+      if (!isManager(req.user!.role)) {
+        res.status(403).json({ error: 'Only managers can change pipeline stage' });
+        return;
+      }
+    }
+
     const data: Record<string, unknown> = { ...body };
+    if (body.pipelineStage === '') data.pipelineStage = null;
     if (body.status) data.status = normalizeTaskStatus(body.status);
     if (body.dueDate === null) data.dueDate = null;
     else if (body.dueDate) data.dueDate = new Date(body.dueDate);
@@ -357,10 +456,11 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       const wasCompleted = isTaskCompleted(existing.status);
       if (!wasCompleted) {
         emitTaskCompleted(existing, req.user!.id);
+        await handleTaskCompleted(existing.id);
       }
     }
 
-    res.json(enrichTask(updated));
+    res.json(enrichTask(updated, engagementContext ?? undefined));
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });

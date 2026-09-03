@@ -3,8 +3,9 @@ import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import { clientQueryAccessWhere } from '../lib/clientAuditQueries.js';
 import {
-  engagementAccessWhere,
+  engagementAccessWhereForUser,
   listAccessibleEngagementIds,
+  loadEngagementAccessProfile,
 } from '../lib/engagementAccess.js';
 import { isFirmLeadershipRole, isPrivilegedRole } from '../lib/permissions.js';
 import logger from '../lib/logger.js';
@@ -20,11 +21,18 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const firmId = user.firmId;
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const engWhere = engagementAccessWhere(user.id, user.role, firmId);
+    const engWhere = await engagementAccessWhereForUser(user.id);
+    const profile = await loadEngagementAccessProfile(user.id);
     const privileged = isPrivilegedRole(user.role);
     const accessibleIds = privileged
       ? null
-      : await listAccessibleEngagementIds(user.id, user.role, firmId);
+      : await listAccessibleEngagementIds(
+          user.id,
+          user.role,
+          firmId,
+          profile?.hierarchyCode,
+          profile?.reportsToId
+        );
 
     const clientWhere = privileged
       ? { firmId: firmId!, isActive: true }
@@ -187,7 +195,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 router.get('/deadlines', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const engWhere = engagementAccessWhere(user.id, user.role, user.firmId);
+    const engWhere = await engagementAccessWhereForUser(user.id);
     const deadlines = await prisma.deadline.findMany({
       where: {
         engagement: engWhere,
@@ -279,7 +287,7 @@ router.get('/compliance-calendar', async (req: AuthRequest, res: Response): Prom
         : allStatutory.slice(0, 5);
 
     const user = req.user!;
-    const engWhere = engagementAccessWhere(user.id, user.role, user.firmId);
+    const engWhere = await engagementAccessWhereForUser(user.id);
     const engagementDeadlines = await prisma.deadline.findMany({
       where: {
         engagement: engWhere,
@@ -324,7 +332,7 @@ router.get('/compliance-calendar', async (req: AuthRequest, res: Response): Prom
 router.get('/chart-data', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const user = req.user!;
-    const engWhere = engagementAccessWhere(user.id, user.role, user.firmId);
+    const engWhere = await engagementAccessWhereForUser(user.id);
     const now = new Date();
     const months: { month: string; completed: number; active: number }[] = [];
 

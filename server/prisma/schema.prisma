@@ -68,6 +68,7 @@ model User {
   totpSecret       String?  @db.Text // AES-256-GCM encrypted TOTP secret
   refreshToken     String?  @db.Text // legacy plaintext (cleared on next login)
   refreshTokenHash String?  @unique // SHA-256 hash of the active refresh token
+  sessionStartedAt DateTime? // wall-clock start of current login (absolute session cap)
   failedLoginCount Int      @default(0)
   lockedUntil      DateTime?
   passwordResetTokenHash String?   @unique
@@ -153,6 +154,16 @@ model User {
   compOffRequests          CompOffRequest[]   @relation("CompOffRequester")
   compOffManagerApprovals  CompOffRequest[]   @relation("CompOffManager")
   compOffHrCredits         CompOffRequest[]   @relation("CompOffHr")
+  expenseClaims            ExpenseClaim[]     @relation("ExpenseClaimStaff")
+  expenseClaimsReviewed    ExpenseClaim[]     @relation("ExpenseClaimManager")
+  expenseClaimsPaid        ExpenseClaim[]     @relation("ExpenseClaimPayer")
+  expenseClaimsAsPayer     ExpenseClaim[]     @relation("ExpenseClaimExpensePayer")
+  expenseClaimParticipants ExpenseClaimParticipant[]
+  expenseClaimManagerApprovals ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalManager")
+  expenseClaimManagerReviews   ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalReviewer")
+  claimBatchesCreated      ClaimBatch[]       @relation("ClaimBatchCreator")
+  claimBatchesPartnerApproved ClaimBatch[]    @relation("ClaimBatchPartner")
+  claimAuditEvents         ClaimAuditEvent[]  @relation("ClaimAuditActor")
 
   @@index([firmId])
   @@index([roleId])
@@ -172,11 +183,14 @@ model Firm {
   pincode        String?
   phone          String?
   email          String?
-  website        String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  website                     String?
+  expenseSubmissionWindowDays Int      @default(3)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
 
-  users       User[]
+  users         User[]
+  expenseClaims ExpenseClaim[]
+  claimBatches  ClaimBatch[]
   clients     Client[]
   engagements Engagement[]
   offices     Office[]
@@ -228,12 +242,15 @@ model Client {
   invoices      Invoice[]
   portalUsers   ClientPortalUser[]
   commsLog      CommsLog[]
+  emailOutbox   EmailOutbox[]
   auditQueries  ClientAuditQuery[]
   requests      ClientRequest[]
   templateSends TemplateSend[]
   engagementLetters EngagementLetter[]
   recurringSchedules RecurringSchedule[]
   governmentNotices  GovernmentNotice[]
+  expenseClaims      ExpenseClaim[]
+  expenseClaimParticipants ExpenseClaimParticipant[]
 
   @@index([firmId])
   @@index([status])
@@ -312,6 +329,7 @@ model Engagement {
   invoices         Invoice[]
   udinEntries      UdinLog[]
   commsLog         CommsLog[]
+  emailOutbox      EmailOutbox[]
   auditQueries     ClientAuditQuery[]
   periods          EngagementPeriod[]
   engagementLetter EngagementLetter?
@@ -319,6 +337,8 @@ model Engagement {
   governmentNotices GovernmentNotice[]
   lateHoursClaims  LateHoursClaim[]
   deptVisitClaims  DeptVisitClaim[]
+  expenseClaims    ExpenseClaim[]
+  expenseClaimParticipants ExpenseClaimParticipant[]
 
   @@index([clientId])
   @@index([firmId])
@@ -392,6 +412,7 @@ model TemplateSend {
   filledSubject String?
   filledContent String   @db.LongText
   sentAt        DateTime @default(now())
+  scheduledAt   DateTime?
   deliveryStatus String  @default("sent") // sent | delivered | failed
 
   templateId   String
@@ -1456,6 +1477,8 @@ model Task {
   estimatedHours   Float?
   notes            String?   @db.Text
   completedAt      DateTime?
+  /// Workflow step code (DATA_REQUEST, ARTICLE_TASK, FILING, …) — see workflowCatalog
+  pipelineStage    String?
 
   assigneeId   String
   assignee     User        @relation("TaskAssignee", fields: [assigneeId], references: [id])
@@ -1471,6 +1494,7 @@ model Task {
   @@index([assigneeId])
   @@index([status])
   @@index([dueDate])
+  @@index([pipelineStage])
   // engagementId indexed by Task_engagementId_fkey — do not add @@index([engagementId]) (db push conflict)
 }
 
@@ -1724,7 +1748,7 @@ model CommsLog {
   ccAddress    String?
   subject      String
   body         String    @db.LongText
-  status       String    @default("queued") // queued | sent | failed
+  status       String    @default("failed") // sent | failed; queued is legacy only
   errorMessage String?   @db.Text
   sentAt       DateTime?
   metadata     String?   @db.Text // JSON
@@ -1735,6 +1759,39 @@ model CommsLog {
   @@index([engagementId])
   @@index([status])
   @@index([templateKey])
+}
+
+// ─── Outbound email outbox ───
+
+model EmailOutbox {
+  id            String    @id @default(uuid())
+  clientId      String?
+  client        Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  engagementId  String?
+  engagement    Engagement? @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+  toAddress     String
+  ccAddress     String?
+  subject       String
+  body          String    @db.LongText
+  templateKey   String    @default("other")
+  metadata      String?   @db.LongText
+  attachments   String?   @db.LongText
+  scheduledAt   DateTime
+  status        String    @default("scheduled") // scheduled | processing | sent | failed | cancelled
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  retryAt       DateTime?
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  failedAt      DateTime?
+  errorMessage  String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([status, retryAt])
+  @@index([clientId])
+  @@index([engagementId])
 }
 
 // ─── MKD office hierarchy & workflow periods ───
@@ -1779,6 +1836,7 @@ model RecurringSchedule {
   isActive                  Boolean   @default(true)
   frequency                 String    // monthly | quarterly | yearly
   triggerDay                Int?
+  triggerTime               String    @default("09:00") // local server time, HH:mm
   triggerDates              String?   @db.Text // JSON array for quarterly
   triggerMonth              String?
   autoCreateStartDate       DateTime
@@ -1818,10 +1876,158 @@ model LateHoursClaim {
   reviewedAt            DateTime?
   managerNotes          String?   @db.Text
   createdAt             DateTime  @default(now())
+  expenseClaim          ExpenseClaim?
 
   @@index([staffId])
   @@index([status])
   @@index([date])
+}
+
+model ExpenseClaim {
+  id                  String    @id @default(uuid())
+  firmId              String
+  firm                Firm      @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  staffId             String
+  staff               User      @relation("ExpenseClaimStaff", fields: [staffId], references: [id])
+  claimType           String    // food | travel
+  lateHoursClaimId    String?   @unique
+  lateHoursClaim      LateHoursClaim? @relation(fields: [lateHoursClaimId], references: [id], onDelete: SetNull)
+  expenseDate         DateTime  @db.Date
+  amount              Decimal   @db.Decimal(12, 2)
+  approvedAmount      Decimal?  @db.Decimal(12, 2)
+  engagementId        String?
+  engagement          Engagement? @relation(fields: [engagementId], references: [id])
+  clientId            String?
+  client              Client?   @relation(fields: [clientId], references: [id])
+  workType            String?
+  workTypeOther       String?
+  description         String?   @db.Text
+  claimStatus         String    @default("pending_approval") // pending_approval | partially_approved | approved | rejected
+  processingStatus    String    @default("unprocessed") // unprocessed | in_batch | partner_approved | accounts_approved | paid
+  policyFlags         Json?
+  ocrDetectedAmount   Decimal?  @db.Decimal(12, 2)
+  ocrStatus           String    @default("pending") // pending | completed | failed
+  expensePayerId      String?
+  expensePayer        User?     @relation("ExpenseClaimExpensePayer", fields: [expensePayerId], references: [id])
+  participantCount    Int       @default(1)
+  managerReviewedById String?
+  managerReviewedBy   User?     @relation("ExpenseClaimManager", fields: [managerReviewedById], references: [id])
+  managerReviewedAt   DateTime?
+  rejectReasonInternal String?  @db.Text
+  partialApproveReason String? @db.Text
+  batchId             String?
+  batch               ClaimBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  paidById            String?
+  paidBy              User?     @relation("ExpenseClaimPayer", fields: [paidById], references: [id])
+  paidAt              DateTime?
+  paymentRef          String?
+  paymentMode         String?
+  submittedAt         DateTime  @default(now())
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  receipts            ExpenseClaimReceipt[]
+  auditEvents         ClaimAuditEvent[]
+  participants        ExpenseClaimParticipant[]
+  managerApprovals    ExpenseClaimManagerApproval[]
+
+  @@index([firmId])
+  @@index([staffId])
+  @@index([claimStatus])
+  @@index([processingStatus])
+  @@index([expenseDate])
+  @@index([batchId])
+  @@index([claimType])
+  @@index([expensePayerId])
+}
+
+model ExpenseClaimParticipant {
+  id            String       @id @default(uuid())
+  claimId       String
+  claim         ExpenseClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  engagementId  String?
+  engagement    Engagement?  @relation(fields: [engagementId], references: [id])
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
+  workType      String?
+  workTypeOther String?
+  amountShare   Decimal      @db.Decimal(12, 2)
+  managerId     String?
+
+  @@index([claimId])
+  @@index([userId])
+  @@index([managerId])
+}
+
+model ExpenseClaimManagerApproval {
+  id                   String       @id @default(uuid())
+  claimId              String
+  claim                ExpenseClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  managerId            String
+  manager              User         @relation("ClaimManagerApprovalManager", fields: [managerId], references: [id])
+  status               String       @default("pending") // pending | approved | partially_approved | rejected
+  teamAmount           Decimal      @db.Decimal(12, 2)
+  approvedAmount       Decimal?     @db.Decimal(12, 2)
+  rejectReasonInternal String?      @db.Text
+  partialApproveReason String?      @db.Text
+  reviewedById         String?
+  reviewedBy           User?        @relation("ClaimManagerApprovalReviewer", fields: [reviewedById], references: [id])
+  reviewedAt           DateTime?
+
+  @@unique([claimId, managerId])
+  @@index([claimId])
+  @@index([managerId])
+  @@index([status])
+}
+
+model ExpenseClaimReceipt {
+  id             String       @id @default(uuid())
+  expenseClaimId String
+  expenseClaim   ExpenseClaim @relation(fields: [expenseClaimId], references: [id], onDelete: Cascade)
+  fileName       String
+  storagePath    String
+  mimeType       String?
+  uploadedAt     DateTime     @default(now())
+
+  @@index([expenseClaimId])
+}
+
+model ClaimBatch {
+  id                  String    @id @default(uuid())
+  firmId              String
+  firm                Firm      @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  label               String
+  batchType           String?   // food | travel | mixed
+  status              String    @default("draft") // draft | partner_approved | accounts_approved | paid
+  createdById         String
+  createdBy           User      @relation("ClaimBatchCreator", fields: [createdById], references: [id])
+  partnerApprovedById String?
+  partnerApprovedBy   User?     @relation("ClaimBatchPartner", fields: [partnerApprovedById], references: [id])
+  partnerApprovedAt   DateTime?
+  accountsApprovedAt  DateTime?
+  paidAt              DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  claims              ExpenseClaim[]
+
+  @@index([firmId])
+  @@index([status])
+}
+
+model ClaimAuditEvent {
+  id        String       @id @default(uuid())
+  claimId   String
+  claim     ExpenseClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  batchId   String?
+  actorId   String?
+  actor     User?        @relation("ClaimAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  details   Json?
+  createdAt DateTime     @default(now())
+
+  @@index([claimId])
+  @@index([batchId])
 }
 
 model DeptVisitClaim {

@@ -7,7 +7,7 @@ import { generateEngagementLetterPdf } from '../lib/engagementLetterPdf.js';
 import { provisionClientFolders } from '../lib/folderProvisioner.js';
 import { generateSuggestedTasks, generateDataChecklist } from '../lib/suggestedTasks.js';
 import { notifyClientPortalUsers } from '../lib/clientScope.js';
-import { engagementAccessWhere, requireEngagementAccess } from '../lib/engagementAccess.js';
+import { engagementAccessWhereForUser, requireEngagementAccess, getEngagementTeamMemberIds } from '../lib/engagementAccess.js';
 import logger from '../lib/logger.js';
 import { SERVICE_CATALOG, WORKFLOW_TEMPLATES, resolveTemplateId } from '../lib/workflowCatalog.js';
 import { inferDomainFromEngagementType } from '../lib/workflowEngine.js';
@@ -45,6 +45,7 @@ const engagementSchema = z.object({
     .object({
       frequency: z.enum(['monthly', 'quarterly', 'yearly']),
       triggerDay: z.number().int().min(1).max(31).optional(),
+      triggerTime: z.string().regex(/^\d{2}:\d{2}$/).default('09:00'),
       autoCreateStartDate: z.string().optional(),
       autoCreateEndDate: z.string().optional().nullable(),
       autoSendDataRequestLetter: z.boolean().default(true),
@@ -67,7 +68,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const skip = (Number(query.page) - 1) * Number(query.limit);
 
     const user = req.user!;
-    const accessWhere = engagementAccessWhere(user.id, user.role, user.firmId);
+    const accessWhere = await engagementAccessWhereForUser(user.id);
     const where: Record<string, unknown> = { ...accessWhere };
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
@@ -120,7 +121,7 @@ router.get('/portfolio', async (req: AuthRequest, res: Response): Promise<void> 
       res.status(400).json({ error: 'service query parameter is required' });
       return;
     }
-    const accessWhere = engagementAccessWhere(user.id, user.role, user.firmId);
+    const accessWhere = await engagementAccessWhereForUser(user.id);
 
     const engagements = await prisma.engagement.findMany({
       where: {
@@ -432,6 +433,7 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
       const fields = catalogRule ? ruleToScheduleFields(catalogRule) : {
         frequency: recurringSchedule.frequency,
         triggerDay: recurringSchedule.triggerDay ?? null,
+        triggerTime: recurringSchedule.triggerTime,
         triggerDates: null as string | null,
         triggerMonth: null as string | null,
       };
@@ -444,6 +446,7 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
         isActive: true,
         frequency: fields.frequency,
         triggerDay: fields.triggerDay ?? recurringSchedule.triggerDay ?? null,
+        triggerTime: recurringSchedule.triggerTime ?? fields.triggerTime,
         triggerDates: fields.triggerDates,
         triggerMonth: fields.triggerMonth,
         autoCreateStartDate,

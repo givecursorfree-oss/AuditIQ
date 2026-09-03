@@ -79,6 +79,137 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
   }
 });
 
+// ─── Form 3CD + Observations MUST be registered before /:id (Express shadowing) ───
+
+// GET /api/reports/form3cd/:id — report id OR engagement id (UI picks engagement)
+router.get('/form3cd/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = String(req.params.id);
+    let reportId: string | null = null;
+
+    const asReport = await prisma.report.findFirst({
+      where: { id, engagement: { firmId: req.user!.firmId! } },
+      select: { id: true },
+    });
+    if (asReport) {
+      if (!(await requireReportAccess(req, res, asReport.id))) return;
+      reportId = asReport.id;
+    } else {
+      if (!(await requireEngagementAccess(req, res, id))) return;
+      const report = await prisma.report.findFirst({
+        where: {
+          engagementId: id,
+          OR: [
+            { type: { contains: '3CD' } },
+            { type: { contains: 'Tax Audit' } },
+            { form3cdData: { some: {} } },
+          ],
+        },
+        orderBy: { generatedAt: 'desc' },
+        select: { id: true },
+      });
+      reportId = report?.id ?? null;
+    }
+
+    if (!reportId) {
+      res.json([]);
+      return;
+    }
+    const clauses = await prisma.form3CDClause.findMany({
+      where: { reportId },
+      orderBy: { clauseNumber: 'asc' },
+    });
+    res.json(clauses);
+  } catch (err) {
+    logger.error('List Form3CD clauses error:', err);
+    res.status(500).json({ error: 'Failed to fetch clauses' });
+  }
+});
+
+router.post('/form3cd', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { reportId, clauseNumber, clauseTitle, response, isApplicable, remarks } = req.body;
+    if (!reportId || !(await requireReportAccess(req, res, reportId))) return;
+
+    const existing = await prisma.form3CDClause.findFirst({
+      where: { reportId, clauseNumber },
+    });
+
+    let clause;
+    if (existing) {
+      clause = await prisma.form3CDClause.update({
+        where: { id: existing.id },
+        data: { response, isApplicable, remarks },
+      });
+    } else {
+      clause = await prisma.form3CDClause.create({
+        data: {
+          reportId,
+          clauseNumber,
+          clauseTitle: clauseTitle || `Clause ${clauseNumber}`,
+          response: response || '',
+          isApplicable: isApplicable ?? true,
+          remarks,
+        },
+      });
+    }
+    res.status(201).json(clause);
+  } catch (err) {
+    logger.error('Create/update Form3CD clause error:', err);
+    res.status(500).json({ error: 'Failed to save clause' });
+  }
+});
+
+router.get('/observations', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { engagementId, severity } = req.query;
+    const engFilter = await engagementIdsFilter(
+      req.user!.id,
+      req.user!.role,
+      req.user!.firmId
+    );
+    const where: Record<string, unknown> = { ...engFilter };
+    if (engagementId) {
+      if (!(await requireEngagementAccess(req, res, String(engagementId)))) return;
+      where.engagementId = String(engagementId);
+    }
+    if (severity) where.severity = String(severity);
+
+    const observations = await prisma.observation.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(observations);
+  } catch (err) {
+    logger.error('List observations error:', err);
+    res.status(500).json({ error: 'Failed to fetch observations' });
+  }
+});
+
+router.post('/observations', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { engagementId, title, criteria, condition, cause, effect, recommendation, severity, status } = req.body;
+    if (!engagementId || !(await requireEngagementAccess(req, res, engagementId))) return;
+    const observation = await prisma.observation.create({
+      data: {
+        engagementId,
+        title,
+        criteria: criteria || '',
+        condition: condition || '',
+        cause: cause || '',
+        effect: effect || '',
+        recommendation: recommendation || '',
+        severity: severity || 'Moderate',
+        status: status || 'Open',
+      },
+    });
+    res.status(201).json(observation);
+  } catch (err) {
+    logger.error('Create observation error:', err);
+    res.status(500).json({ error: 'Failed to create observation' });
+  }
+});
+
 // GET /api/reports/:id
 router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -155,112 +286,6 @@ router.put('/:id', authorize('Partner', 'Manager'), async (req: AuthRequest, res
   } catch (err) {
     logger.error('Update report error:', err);
     res.status(500).json({ error: 'Failed to update report' });
-  }
-});
-
-// ─── Form 3CD Clauses (Tax Audit) ───
-
-// GET /api/reports/form3cd/:reportId
-router.get('/form3cd/:reportId', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    if (!(await requireReportAccess(req, res, String(req.params.reportId)))) return;
-    const clauses = await prisma.form3CDClause.findMany({
-      where: { reportId: req.params.reportId },
-      orderBy: { clauseNumber: 'asc' },
-    });
-    res.json(clauses);
-  } catch (err) {
-    logger.error('List Form3CD clauses error:', err);
-    res.status(500).json({ error: 'Failed to fetch clauses' });
-  }
-});
-
-// POST /api/reports/form3cd — create/update a clause
-router.post('/form3cd', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { reportId, clauseNumber, clauseTitle, response, isApplicable, remarks } = req.body;
-    if (!reportId || !(await requireReportAccess(req, res, reportId))) return;
-
-    const existing = await prisma.form3CDClause.findFirst({
-      where: { reportId, clauseNumber },
-    });
-
-    let clause;
-    if (existing) {
-      clause = await prisma.form3CDClause.update({
-        where: { id: existing.id },
-        data: { response, isApplicable, remarks },
-      });
-    } else {
-      clause = await prisma.form3CDClause.create({
-        data: {
-          reportId,
-          clauseNumber,
-          clauseTitle: clauseTitle || `Clause ${clauseNumber}`,
-          response: response || '',
-          isApplicable: isApplicable ?? true,
-          remarks,
-        },
-      });
-    }
-    res.status(201).json(clause);
-  } catch (err) {
-    logger.error('Create/update Form3CD clause error:', err);
-    res.status(500).json({ error: 'Failed to save clause' });
-  }
-});
-
-// ─── Observations (ICAI Format) ───
-
-// GET /api/reports/observations?engagementId=xxx
-router.get('/observations', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { engagementId, severity } = req.query;
-    const engFilter = await engagementIdsFilter(
-      req.user!.id,
-      req.user!.role,
-      req.user!.firmId
-    );
-    const where: Record<string, unknown> = { ...engFilter };
-    if (engagementId) {
-      if (!(await requireEngagementAccess(req, res, String(engagementId)))) return;
-      where.engagementId = String(engagementId);
-    }
-    if (severity) where.severity = String(severity);
-
-    const observations = await prisma.observation.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(observations);
-  } catch (err) {
-    logger.error('List observations error:', err);
-    res.status(500).json({ error: 'Failed to fetch observations' });
-  }
-});
-
-// POST /api/reports/observations
-router.post('/observations', async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { engagementId, title, criteria, condition, cause, effect, recommendation, severity, status } = req.body;
-    if (!engagementId || !(await requireEngagementAccess(req, res, engagementId))) return;
-    const observation = await prisma.observation.create({
-      data: {
-        engagementId,
-        title,
-        criteria: criteria || '',
-        condition: condition || '',
-        cause: cause || '',
-        effect: effect || '',
-        recommendation: recommendation || '',
-        severity: severity || 'Moderate',
-        status: status || 'Open',
-      },
-    });
-    res.status(201).json(observation);
-  } catch (err) {
-    logger.error('Create observation error:', err);
-    res.status(500).json({ error: 'Failed to create observation' });
   }
 });
 

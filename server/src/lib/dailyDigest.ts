@@ -7,7 +7,8 @@ const MANAGER_ROLES = new Set(['Partner', 'Admin', 'Manager', 'Accounts']);
 
 export async function runDailyDigest(now = new Date()): Promise<{ sent: number }> {
   const hour = parseInt(process.env.DIGEST_HOUR || '9', 10);
-  if (now.getHours() !== hour) return { sent: 0 };
+  const digestWindowHours = parseInt(process.env.DIGEST_CATCHUP_HOURS || '3', 10);
+  if (now.getHours() < hour || now.getHours() >= hour + digestWindowHours) return { sent: 0 };
 
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
@@ -63,7 +64,7 @@ async function buildDigestSections(userId: string, role: string, firmId: string,
     where: { assigneeId: userId, status: { notIn: ['completed', 'Done', 'Cancelled'] } },
     include: { engagement: { select: { title: true } } },
   });
-  const enriched = tasks.map(enrichTask);
+  const enriched = tasks.map((t) => enrichTask(t));
 
   const pendingToday = enriched.filter(
     (t) => t.dueDate && new Date(t.dueDate).toDateString() === now.toDateString()

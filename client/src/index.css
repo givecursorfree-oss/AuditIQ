@@ -248,6 +248,7 @@ mark.doc-search-hit {
 
 
 
+  /* Auth shells only (Login / Register / Forgot / Reset). App chrome uses Button. */
   .btn-primary {
 
     @apply px-4 py-2 rounded-md font-medium transition-colors duration-200 active:scale-[0.99];
@@ -489,25 +490,7 @@ mark.doc-search-hit {
 
   .kpi-label {
 
-    @apply text-xs font-medium text-foreground-secondary;
-
-  }
-
-  .empty-state {
-
-    @apply flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface-muted px-6 py-12 text-center;
-
-  }
-
-  .empty-state-title {
-
-    @apply text-sm font-medium text-foreground;
-
-  }
-
-  .empty-state-desc {
-
-    @apply mt-1 max-w-sm text-sm text-foreground-muted;
+    @apply text-xs font-medium text-muted-foreground;
 
   }
 
@@ -579,38 +562,6 @@ mark.doc-search-hit {
     @apply inline-flex items-center justify-center h-6 min-h-6 px-2 rounded-full text-xs font-medium leading-none whitespace-nowrap;
 
   }
-
-  .badge-success {
-
-    @apply badge bg-success/15 text-success;
-
-  }
-
-  .badge-warning {
-
-    @apply badge bg-warning/15 text-warning;
-
-  }
-
-  .badge-danger {
-
-    @apply badge bg-danger/15 text-danger;
-
-  }
-
-  .badge-primary {
-
-    @apply badge bg-primary-light text-primary;
-
-  }
-
-  .badge-neutral {
-
-    @apply badge text-foreground-muted bg-hover-bg;
-
-  }
-
-
 
   .icon-btn {
 
@@ -701,38 +652,59 @@ mark.doc-search-hit {
 
   /* Engagement timer widget */
   .timer-widget {
-    @apply rounded-xl border border-border bg-card p-6 max-w-sm mx-auto;
+    @apply relative overflow-hidden rounded-2xl border border-border bg-card p-6 max-w-sm mx-auto;
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.04) inset,
+      0 12px 40px -24px rgb(0 0 0 / 0.35);
   }
 
   .timer-widget-compact {
-    @apply p-4 max-w-none mx-0;
+    @apply p-4 max-w-none mx-0 rounded-xl;
+  }
+
+  .timer-widget-glow {
+    @apply pointer-events-none absolute inset-0;
+    background:
+      radial-gradient(ellipse 80% 55% at 50% -10%, rgb(52 211 153 / 0.12), transparent 55%),
+      radial-gradient(ellipse 60% 40% at 50% 110%, rgb(52 211 153 / 0.06), transparent 50%);
   }
 
   .timer-display {
     font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-    @apply text-4xl sm:text-5xl font-medium tracking-wider text-foreground text-center my-4;
+    @apply flex items-baseline justify-center gap-0.5 sm:gap-1 font-medium text-foreground tabular-nums my-3;
+    font-size: clamp(2.25rem, 8vw, 3.25rem);
+    letter-spacing: 0.04em;
   }
 
-  .timer-status-dot {
-    @apply inline-block size-2 rounded-full shrink-0;
+  .timer-display-compact {
+    font-size: clamp(1.75rem, 6vw, 2.25rem);
+    @apply my-2;
   }
 
-  .timer-dot-active {
-    @apply bg-emerald-500;
-    animation: timer-pulse-green 2s infinite;
+  .timer-digit-segment {
+    @apply inline-block min-w-[1.15em] text-center;
   }
 
-  .timer-dot-paused {
-    @apply bg-amber-500;
+  .timer-digit-segment-compact {
+    @apply min-w-[1.1em];
   }
 
-  .timer-dot-stopped {
-    @apply bg-border;
+  .timer-digit-sep {
+    @apply text-muted-foreground font-normal select-none;
+    opacity: 0.45;
+    font-size: 0.82em;
   }
 
-  @keyframes timer-pulse-green {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-    50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  .timer-digit-sep-compact {
+    font-size: 0.78em;
+  }
+
+  .timer-digit-seconds-active {
+    @apply text-emerald-500;
+  }
+
+  .timer-btn-start {
+    @apply bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm;
   }
 
 }

@@ -16,7 +16,7 @@ export default function PageLoading({ className = 'py-24', label = 'Loading…' 
         className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent list-none"
         aria-hidden="true"
       />
-      <p className="text-sm text-foreground-muted">{label}</p>
+      <p className="text-sm text-muted-foreground">{label}</p>
     </div>
   );
 }

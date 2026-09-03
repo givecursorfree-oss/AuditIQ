@@ -39,7 +39,12 @@ bash scripts/vps-api-only.sh
 | `CLIENT_URL` | `http://YOUR_VPS_IP` or `https://your-domain.com` |
 | `VAULT_ENCRYPTION_KEY` | 32+ byte secret (Drive tokens, password vault) |
 | `ALLOW_STAFF_REGISTRATION` | `false` (first Partner via bootstrap only) |
-| `SKIP_EMAIL_VERIFICATION` | `true` until SMTP is configured |
+| `SKIP_EMAIL_VERIFICATION` | `false` after SMTP is configured |
+| `SMTP_HOST` | Authenticated SMTP relay hostname |
+| `SMTP_PORT` | `587` for STARTTLS or `465` for implicit TLS |
+| `SMTP_USER` | Dedicated notification mailbox or SMTP username |
+| `SMTP_PASSWORD` | SMTP password or provider app password |
+| `SMTP_FROM` | Verified sender address on the firm domain |
 
 ### Full stack (16 GB+) — copy `.env.example` → `.env`
 
@@ -132,6 +137,8 @@ CI runs authz unit tests on every push.
 - [ ] Typesense and Tika **not** exposed on public ports (if using full compose)
 - [ ] HTTPS via `./scripts/enable-https.sh`
 - [ ] `ALLOW_STAFF_REGISTRATION=false`
+- [ ] SMTP credentials configured with a verified sender domain
+- [ ] SPF, DKIM, and DMARC configured for the sender domain
 - [ ] Backup cron: `./scripts/backup.sh`
 
 ## Document search

@@ -136,7 +136,15 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
             </Button>
             <Button
               type="button"
-              variant={state?.options.destructive ? 'destructive' : 'default'}
+              variant={
+                state?.options.destructive
+                  ? 'destructive'
+                  : /\b(accept|approve|sanction|mark paid|credit leave|sign & accept|approve anyway)\b/i.test(
+                      state?.options.confirmLabel ?? ''
+                    )
+                    ? 'success'
+                    : 'default'
+              }
               onClick={() => state?.resolve(true)}
             >
               {state?.options.confirmLabel ?? 'Continue'}

@@ -52,12 +52,12 @@ export default function SettingsCommsLogTab() {
         <CardHeader>
           <CardTitle className="text-base">Communications log</CardTitle>
           <CardDescription>
-            All outbound emails (verification links, client notifications, reminders). When SMTP is not configured, status shows as &quot;queued&quot; — open a row to copy the verification link from the body.
+            All outbound emails (verification links, client notifications, and reminders). Emails are delivered directly through SMTP or recorded as failed.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            {(['', 'queued', 'sent', 'failed'] as const).map((s) => (
+            {(['', 'sent', 'failed'] as const).map((s) => (
               <Button
                 key={s || 'all'}
                 size="sm"
@@ -122,9 +122,6 @@ export default function SettingsCommsLogTab() {
           {selected && (
             <div className="rounded-lg border border-border bg-surface-muted p-4 space-y-2">
               <p className="text-sm font-medium text-foreground">Message body</p>
-              <p className="text-xs text-foreground-muted">
-                For queued verification emails, copy the verify link from the HTML below.
-              </p>
               <pre className="text-xs text-foreground-secondary whitespace-pre-wrap break-all max-h-48 overflow-y-auto bg-card border border-border rounded-md p-3">
                 {selected.body?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '(empty)'}
               </pre>

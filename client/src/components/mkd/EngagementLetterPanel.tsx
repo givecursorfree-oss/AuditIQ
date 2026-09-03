@@ -11,14 +11,10 @@ import { PanelCard } from '@/components/layout/PanelCard';
 import { LetterStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { useEngagementLetter } from '@/hooks/useEngagementLetter';
 
-const SIBLING_HINT_KEY = 'mkd-letter-sibling-hint-seen';
-
 export function EngagementLetterPanel({
   engagementId,
-  showSiblingNote = true,
 }: {
   engagementId: string;
-  showSiblingNote?: boolean;
 }) {
   const { user } = useAuth();
   const { showToast } = useAppToast();
@@ -44,16 +40,9 @@ export function EngagementLetterPanel({
     body: null,
     subject: null,
   });
+  const [sendAt, setSendAt] = useState('');
   const letterBody = letterDraft.body ?? letter?.generatedContent ?? '';
   const subjectLine = letterDraft.subject ?? letter?.subjectLine ?? '';
-  const [showSiblingHint, setShowSiblingHint] = useState(() => {
-    if (!showSiblingNote) return false;
-    try {
-      return !sessionStorage.getItem(SIBLING_HINT_KEY);
-    } catch {
-      return true;
-    }
-  });
 
   useEffect(() => {
     setLetterDraft({ body: null, subject: null });
@@ -103,13 +92,16 @@ export function EngagementLetterPanel({
         return;
       }
     }
-    const result = await sendLetter();
+    const result = await sendLetter(sendAt ? new Date(sendAt).toISOString() : undefined);
     if (result.ok) {
       showToast({
-        title: 'Letter sent to client',
-        message: 'The client can review the Word document and sign from their dashboard.',
+        title: sendAt ? 'Letter scheduled' : 'Letter sent to client',
+        message: sendAt
+          ? `The letter is scheduled for ${new Date(sendAt).toLocaleString('en-IN')}.`
+          : 'The client can review the Word document and sign from their dashboard.',
         variant: 'success',
       });
+      setSendAt('');
     } else {
       showToast({ title: 'Send failed', message: result.error, variant: 'error' });
     }
@@ -141,28 +133,6 @@ export function EngagementLetterPanel({
 
   return (
     <div className="space-y-4 max-w-4xl">
-      {showSiblingHint && siblingCount > 1 && (
-        <div className="text-sm rounded-lg border border-border bg-muted/30 p-3 flex justify-between gap-3">
-          <span>
-            This request created <strong>{siblingCount}</strong> engagements. The engagement letter on this
-            engagement applies to all linked pipelines once the client signs.
-          </span>
-          <button
-            type="button"
-            className="text-xs text-primary shrink-0 hover:underline"
-            onClick={() => {
-              setShowSiblingHint(false);
-              try {
-                sessionStorage.setItem(SIBLING_HINT_KEY, '1');
-              } catch {
-                /* ignore */
-              }
-            }}
-          >
-            Got it
-          </button>
-        </div>
-      )}
 
       {awaitingClient && (
         <div className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm flex items-start gap-2">
@@ -259,9 +229,19 @@ export function EngagementLetterPanel({
                 </Button>
               )}
               {letter?.status === 'draft' && (
-                <Button type="button" disabled={!!busyAction} onClick={() => void handleSend()}>
-                  {busyAction === 'send' ? 'Sending…' : 'Send letter to client'}
-                </Button>
+                <>
+                  <input
+                    className="input-field text-sm"
+                    type="datetime-local"
+                    value={sendAt}
+                    min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                    onChange={(e) => setSendAt(e.target.value)}
+                    aria-label="Schedule engagement letter"
+                  />
+                  <Button type="button" disabled={!!busyAction} onClick={() => void handleSend()}>
+                    {busyAction === 'send' ? 'Processing…' : sendAt ? 'Schedule letter' : 'Send letter to client'}
+                  </Button>
+                </>
               )}
             </div>
             {!letter && (

@@ -8,7 +8,7 @@ import {
   extractTemplateVariables,
   renderTemplate,
 } from '../lib/templateRenderer.js';
-import { sendEmail } from '../lib/emailService.js';
+import { scheduleEmail, sendEmail } from '../lib/emailService.js';
 
 const router = Router();
 
@@ -25,6 +25,7 @@ const sendSchema = z.object({
   clientId: z.string(),
   engagementId: z.string().optional(),
   variables: z.record(z.string()).optional(),
+  scheduledAt: z.coerce.date().optional(),
 });
 
 // GET /api/templates
@@ -224,14 +225,45 @@ router.post(
       const filledContent = renderTemplate(tpl.body, vars);
       const htmlBody = filledContent.split('\n').map((l) => `<p style="margin:0 0 8px">${l || '&nbsp;'}</p>`).join('');
 
-      const emailResult = await sendEmail({
+      const emailParams = {
         to: client.contactEmail,
         subject: filledSubject,
         body: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${htmlBody}</div>`,
         clientId: client.id,
         engagementId: body.engagementId,
         templateKey: tpl.category,
-      });
+      };
+
+      if (body.scheduledAt) {
+        const send = await prisma.templateSend.create({
+          data: {
+            templateId: tpl.id,
+            clientId: client.id,
+            engagementId: body.engagementId,
+            filledSubject,
+            filledContent,
+            sentById: req.user!.id,
+            deliveryStatus: 'scheduled',
+            scheduledAt: body.scheduledAt,
+          },
+        });
+        try {
+          await scheduleEmail(
+            { ...emailParams, metadata: { templateSendId: send.id } },
+            body.scheduledAt
+          );
+        } catch (err) {
+          await prisma.templateSend.update({
+            where: { id: send.id },
+            data: { deliveryStatus: 'failed' },
+          });
+          throw err;
+        }
+        res.status(201).json(send);
+        return;
+      }
+
+      await sendEmail(emailParams);
 
       const send = await prisma.templateSend.create({
         data: {
@@ -241,7 +273,7 @@ router.post(
           filledSubject,
           filledContent,
           sentById: req.user!.id,
-          deliveryStatus: emailResult.status === 'sent' ? 'sent' : 'queued',
+          deliveryStatus: 'sent',
         },
       });
 

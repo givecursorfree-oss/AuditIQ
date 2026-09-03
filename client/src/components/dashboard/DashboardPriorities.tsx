@@ -81,7 +81,17 @@ function buildCards({
     });
   }
 
-  if (isStaff && badges.approvals > 0) {
+  if (isLeadership && badges.approvals > 0) {
+    cards.push({
+      id: 'approvals',
+      label: 'Approvals',
+      detail: 'Claims and requests waiting on you',
+      count: badges.approvals,
+      href: '/approvals?view=pending',
+      icon: CheckSquare,
+      urgent: true,
+    });
+  } else if (!isLeadership && badges.approvals > 0) {
     cards.push({
       id: 'approvals',
       label: 'Approvals',

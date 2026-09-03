@@ -42,6 +42,10 @@ const signSchema = z.object({
   signedDocumentUrl: z.string().optional(),
 });
 
+const sendSchema = z.object({
+  scheduledAt: z.coerce.date().optional(),
+});
+
 function streamLetterDocx(res: Response, filePath: string, downloadName: string): void {
   res.setHeader(
     'Content-Type',
@@ -199,9 +203,19 @@ router.post(
   authorize('Partner', 'Admin'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const updated = await sendEngagementLetter(String(req.params.id), req.user!.firmId!);
+      const body = sendSchema.parse(req.body ?? {});
+      const updated = await sendEngagementLetter(
+        String(req.params.id),
+        req.user!.firmId!,
+        undefined,
+        body.scheduledAt
+      );
       res.json(updated);
     } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: 'Validation failed', details: err.errors });
+        return;
+      }
       handleUseCaseError(err, res, 'Send engagement letter error', 'Failed to send engagement letter');
     }
   }

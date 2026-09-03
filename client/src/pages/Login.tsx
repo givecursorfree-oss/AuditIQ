@@ -4,12 +4,10 @@ import { Eye, EyeSlash as EyeOff, ArrowRight, ShieldCheck, Key as KeyRound } fro
 import { LiquidGlassCard } from '@/components/ui/liquid-glass-card';
 import { useAuth } from '../context/AuthContext';
 import { useAppConfig } from '../hooks/useAppConfig';
-import { isAttendanceEligible, tryAttendanceCheckIn, requestAttendanceLocation, fetchTodayAttendanceRecord } from '../lib/attendancePopup';
+import { isAttendanceEligible, fetchTodayAttendanceRecord } from '../lib/attendancePopup';
 import { attendanceDayState } from '../lib/attendanceDayGate';
-import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { formatApiError } from '@/lib/apiErrors';
-import { appToast, gooeyToast } from '@/context/AppToastContext';
-import { appConfirm } from '@/context/AppDialogContext';
+import { appToast } from '@/context/AppToastContext';
 import AuditIQLogo from '@/components/brand/AuditIQLogo';
 
 const LOGIN_FEATURE_IMAGES = {
@@ -67,11 +65,20 @@ export default function Login() {
     if (searchParams.get('session') === 'expired') {
       setInfoMsg('Your session has expired for security. Please log in again.');
     }
+    if (searchParams.get('session') === 'idle') {
+      setInfoMsg('You were signed out after a period of inactivity. Please log in again.');
+    }
+    if (searchParams.get('session') === 'absolute') {
+      setInfoMsg('Your session reached the maximum sign-in time. Please log in again.');
+    }
   }, [searchParams]);
 
-  const finishLogin = async (
-    loggedInUser: { id?: string; role: string }
-  ) => {
+  const finishLogin = async (loggedInUser: { id?: string; role: string }) => {
+    if (loggedInUser.role === 'Client') {
+      navigate('/client/dashboard');
+      return;
+    }
+
     if (loggedInUser.id && isAttendanceEligible(loggedInUser.role)) {
       const today = await fetchTodayAttendanceRecord();
       const day = attendanceDayState(today);
@@ -81,66 +88,23 @@ export default function Login() {
         return;
       }
 
-      if (day === 'closed') {
-        // Attendance was marked earlier; do not show "Attendance not marked".
+      if (day === 'none') {
         appToast({
-          persist: true,
           variant: 'info',
-          title: 'Day already ended',
-          message: 'You checked out today. Resume day on Attendance if you still need to work.',
-          action: {
-            label: 'Open Attendance',
-            onClick: () => navigate('/attendance'),
-          },
+          title: 'Check in',
+          message: 'Mark attendance before starting work.',
+          action: { label: 'Attendance', onClick: () => navigate('/attendance') },
+          durationMs: 5000,
         });
         navigate('/attendance');
         return;
       }
 
-      let loadingId: string | number | undefined;
-      try {
-        const gps = await requestAttendanceLocation({ confirm: appConfirm });
-        loadingId = gooeyToast.info('Checking location…', {
-          description: 'Verifying your location at the office.',
-          timing: { displayDuration: 2_147_483_647 },
-          showTimestamp: false,
-        });
-        await tryAttendanceCheckIn(loggedInUser.id, 'manual-login', {
-          skipIfAlreadyDone: true,
-          forcePopup: false,
-          latitude: gps.latitude,
-          longitude: gps.longitude,
-          accuracyMeters: gps.accuracyMeters,
-          gpsAttempted: true,
-        });
-        if (loadingId != null) gooeyToast.dismiss(loadingId);
-        gooeyToast.dismiss();
-        appToast({
-          variant: 'success',
-          title: 'Attendance marked',
-          message: 'You are checked in. Select an engagement to start.',
-          durationMs: 3500,
-        });
-        navigate('/time-tracker?start=1');
-        return;
-      } catch (err: unknown) {
-        if (loadingId != null) gooeyToast.dismiss(loadingId);
-        const notice = attendanceLoginNotice(err);
-        appToast({
-          persist: true,
-          variant: notice.variant,
-          title: notice.title,
-          message: notice.message,
-          action: {
-            label: 'Open Attendance',
-            onClick: () => navigate('/attendance'),
-          },
-        });
-        navigate('/attendance');
-        return;
-      }
+      navigate('/attendance');
+      return;
     }
-    navigate(loggedInUser.role === 'Client' ? '/client/dashboard' : '/');
+
+    navigate('/');
   };
 
   const extractError = (err: unknown): string => formatApiError(err, 'login');
@@ -364,9 +328,7 @@ export default function Login() {
                 {!loading && <ArrowRight size={18} />}
               </button>
             {loading ? (
-              <p className="text-xs text-foreground-muted text-center">
-                Allow location when asked. You stay signed in even if attendance is not marked.
-              </p>
+              <p className="text-xs text-foreground-muted text-center">Signing you in…</p>
             ) : null}
           </form>
           )}

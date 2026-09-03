@@ -487,6 +487,7 @@ export default function EngagementDetail() {
         <EngagementDocumentsPanel
           submissions={submissions}
           kyc={kyc}
+          engagementId={id!}
           engagementDocuments={engagementDocuments}
           canManage={!!isManagerOrAbove}
           isPartner={!!isPartner}

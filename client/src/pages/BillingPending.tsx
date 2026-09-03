@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Envelope, CheckCircle } from '@phosphor-icons/react';
+import { Envelope, Bell, CheckCircle } from '@phosphor-icons/react';
 import api from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { AppPageContainer } from '@/components/layout/AppPageContainer';
@@ -21,12 +21,16 @@ export default function BillingPending() {
   const { user } = useAuth();
   const [rows, setRows] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const { data } = await api.get<PendingRow[]>('/billing/pending');
       setRows(data);
+    } catch {
+      setLoadError('Failed to load.');
     } finally {
       setLoading(false);
     }
@@ -35,11 +39,6 @@ export default function BillingPending() {
   useEffect(() => {
     void load();
   }, []);
-
-  async function sendReminder(engagementId: string) {
-    await api.post(`/billing/pending/${engagementId}/remind`);
-    await load();
-  }
 
   async function createFollowUpTask(row: PendingRow) {
     if (!user) return;
@@ -57,6 +56,8 @@ export default function BillingPending() {
       <PanelCard>
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : loadError ? (
+          <p className="text-sm text-destructive">{loadError}</p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No pending billing items.</p>
         ) : (
@@ -68,7 +69,7 @@ export default function BillingPending() {
                   <th className="py-2 pr-3">Engagement</th>
                   <th className="py-2 pr-3">Filed on</th>
                   <th className="py-2 pr-3">Days since</th>
-                  <th className="py-2">Action</th>
+                  <th className="py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,8 +82,11 @@ export default function BillingPending() {
                     </td>
                     <td className="py-2 pr-3">{r.daysSinceFiling}</td>
                     <td className="py-2 flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => void sendReminder(r.engagementId)}>
-                        <Envelope size={14} className="mr-1" /> Remind
+                      <Button size="sm" variant="default" onClick={() => void api.post(`/billing/pending/${r.engagementId}/remind-manager`).then(load)}>
+                        <Bell size={14} className="mr-1" /> Remind manager
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => void api.post(`/billing/pending/${r.engagementId}/remind-client`).then(load)}>
+                        <Envelope size={14} className="mr-1" /> Email client
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => navigate(`/billing?engagement=${r.engagementId}`)}>
                         <CheckCircle size={14} className="mr-1" /> Mark billed

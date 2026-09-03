@@ -62,6 +62,8 @@ import hrMastersRoutes from './routes/hrMasters.js';
 import timesheetsRoutes from './routes/timesheets.js';
 import billingPendingRoutes from './routes/billingPending.js';
 import claimsRoutes from './routes/claims.js';
+import expenseClaimsRoutes from './routes/expenseClaims.js';
+import claimBatchesRoutes from './routes/claimBatches.js';
 import noticesRoutes from './routes/notices.js';
 import portalsRoutes from './routes/portals.js';
 import { startScheduler } from './lib/scheduler.js';
@@ -373,6 +375,8 @@ app.use('/api/recurring-schedules', staffApi(recurringSchedulesRoutes));
 app.use('/api/timesheets', staffApi(timesheetsRoutes));
 app.use('/api/billing', staffApi(billingPendingRoutes));
 app.use('/api/claims', staffApi(claimsRoutes));
+app.use('/api/expense-claims', staffApi(expenseClaimsRoutes));
+app.use('/api/claim-batches', staffApi(claimBatchesRoutes));
 app.use('/api/notices', staffApi(noticesRoutes));
 app.use('/api/portals', staffApi(portalsRoutes));
 
@@ -403,6 +407,14 @@ app.get('/api/health', async (_req, res) => {
     checks.tika = r.ok || r.status === 405 ? 'ok' : 'error';
   } catch {
     checks.tika = 'unreachable';
+  }
+  try {
+    const r = await fetch(`${env.PADDLE_OCR_URL.replace(/\/$/, '')}/health`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    checks.paddleOcr = r.ok ? 'ok' : 'error';
+  } catch {
+    checks.paddleOcr = 'unreachable';
   }
   const healthy = checks.database === 'ok';
   res.status(healthy ? 200 : 503).json({

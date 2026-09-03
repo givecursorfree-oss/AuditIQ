@@ -7,10 +7,8 @@ import {
   Clock,
   FileText,
   Plus,
-  Compass,
 } from '@phosphor-icons/react';
 import { useClientPortal } from './ClientPortalContext';
-import { requestTourReplay } from '@/lib/productTour';
 
 export function ClientPortalHeader() {
   const {
@@ -47,16 +45,6 @@ export function ClientPortalHeader() {
           {profile.legalName && profile.legalName !== profile.clientName && (
             <Badge variant="outline">{profile.legalName}</Badge>
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-9 gap-1.5"
-            onClick={() => requestTourReplay()}
-          >
-            <Compass size={16} aria-hidden />
-            Take tour
-          </Button>
           <Button onClick={openRequestForm} variant="default" size="sm" data-onboard="client-request-engagement">
             <Plus size={16} className="mr-1.5" />
             Request New Engagement

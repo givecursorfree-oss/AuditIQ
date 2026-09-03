@@ -4,7 +4,7 @@ import {
   formatFeeTable,
   renderTemplate,
 } from '../lib/templateRenderer.js';
-import { sendEmail } from '../lib/emailService.js';
+import { scheduleEmail, sendEmail } from '../lib/emailService.js';
 import { serviceLabels } from '../lib/clientRequestHelpers.js';
 import {
   renderMkdEngagementLetterDocx,
@@ -224,7 +224,8 @@ export async function updateEngagementLetterDraft(
 export async function sendEngagementLetter(
   letterId: string,
   firmId: string,
-  deps: MkdWorkflowDeps = mkdWorkflowDeps
+  deps: MkdWorkflowDeps = mkdWorkflowDeps,
+  scheduledAt?: Date
 ): Promise<EngagementLetter> {
   const letter = await deps.engagementLetters.findByIdForFirm(letterId, firmId);
   if (!letter) throw new UseCaseError('Engagement letter not found', 404);
@@ -254,14 +255,27 @@ export async function sendEngagementLetter(
     '<p style="margin:16px 0 0"><strong>Next step:</strong> Log in to your client dashboard to review the engagement letter and sign by entering your authorised signatory name.</p>';
 
   if (letter.client.contactEmail) {
-    await sendEmail({
+    const emailParams = {
       to: letter.client.contactEmail,
       subject,
       body: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5"><p>Dear Sir/Madam,</p><p>Your engagement letter for <strong>${letter.engagement.title}</strong> is ready for review on your client portal.</p>${portalNote}</div>`,
       clientId: letter.clientId,
       engagementId: letter.engagementId,
       templateKey: 'engagement_letter',
-    });
+      metadata: { engagementLetterId: letter.id },
+      attachments: docxPath
+        ? [{
+            filename: `${letter.engagement.title.replace(/[^\w.-]+/g, '_')}-engagement-letter.docx`,
+            path: docxPath,
+            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          }]
+        : undefined,
+    };
+    if (scheduledAt) {
+      await scheduleEmail(emailParams, scheduledAt);
+    } else {
+      await sendEmail(emailParams);
+    }
   }
 
   const now = new Date();

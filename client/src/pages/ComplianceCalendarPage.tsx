@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Button } from '../components/ui/button';
 import ComplianceMonthCalendar from '../components/compliance/ComplianceMonthCalendar';
 import {
@@ -47,15 +48,23 @@ function exportIcs(item: CalItem) {
 
 export default function ComplianceCalendarPage() {
   const [domain, setDomain] = useState<'all' | 'DT' | 'IDT'>('all');
+  const [view, setView] = useState<'calendar' | 'list'>('calendar');
   const [items, setItems] = useState<CalItem[]>([]);
   const [month, setMonth] = useState(() => new Date());
   const [drawerDate, setDrawerDate] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void api
       .get<DashboardCompliancePayload>('/dashboard/compliance-calendar')
-      .then((r) => setItems(mapComplianceDashboardToItems(r.data)))
-      .catch(() => setItems([]));
+      .then((r) => {
+        setItems(mapComplianceDashboardToItems(r.data));
+        setLoadError(null);
+      })
+      .catch(() => {
+        setItems([]);
+        setLoadError('Failed to load.');
+      });
   }, []);
 
   const filtered = items.filter((i) => domain === 'all' || i.domain === domain);
@@ -66,7 +75,8 @@ export default function ComplianceCalendarPage() {
   return (
     <AppPageContainer>
       <PageHeader title="Compliance calendar" description="Statutory and engagement deadlines" />
-      <div className="flex gap-3 mb-4 items-center">
+      {loadError && <p className="text-sm text-destructive mb-4">{loadError}</p>}
+      <div className="flex flex-wrap gap-3 mb-4 items-center">
         <Select value={domain} onValueChange={(v) => setDomain(v as typeof domain)}>
           <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -75,14 +85,42 @@ export default function ComplianceCalendarPage() {
             <SelectItem value="IDT">Indirect tax</SelectItem>
           </SelectContent>
         </Select>
+        <Tabs value={view} onValueChange={(v) => setView(v as typeof view)}>
+          <TabsList>
+            <TabsTrigger value="calendar">Calendar</TabsTrigger>
+            <TabsTrigger value="list">List</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
       <PanelCard>
+        {view === 'calendar' ? (
         <ComplianceMonthCalendar
           month={month}
           onMonthChange={setMonth}
           items={filtered}
           onDateClick={setDrawerDate}
         />
+        ) : (
+          <ul className="divide-y text-sm">
+            {filtered
+              .slice()
+              .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+              .map((item) => (
+                <li key={item.id} className="py-2 flex justify-between gap-2">
+                  <span>
+                    <span className="text-muted-foreground">{item.dueDate}</span>
+                    {' · '}
+                    {item.title}
+                    {item.clientName ? ` · ${item.clientName}` : ''}
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => exportIcs(item)}>.ics</Button>
+                </li>
+              ))}
+            {filtered.length === 0 && (
+              <li className="py-4 text-muted-foreground">No deadlines in range.</li>
+            )}
+          </ul>
+        )}
       </PanelCard>
       <Dialog open={!!drawerDate} onOpenChange={(o) => !o && setDrawerDate(null)}>
         <DialogContent>

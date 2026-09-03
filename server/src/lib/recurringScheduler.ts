@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import logger from './logger.js';
 import { SERVICE_CATALOG } from './workflowCatalog.js';
-import { sendEmail } from './emailService.js';
+import { scheduleEmail } from './emailService.js';
 import {
   buildDefaultTemplateVars,
   renderTemplate,
@@ -116,24 +116,33 @@ function ruleForServiceCode(code: string): RecurringScheduleRule | undefined {
   return RECURRING_SCHEDULE.find((r) => r.serviceCode === code);
 }
 
+function triggerTimeReached(triggerTime: string | null | undefined, now: Date): boolean {
+  if (!triggerTime) return true;
+  const [hours, minutes] = triggerTime.split(':').map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return true;
+  return now.getHours() * 60 + now.getMinutes() >= hours * 60 + minutes;
+}
+
 /**
  * Spawns recurring engagement periods for enrolled clients using per-client DB schedules.
  * Idempotent per engagement + periodKey.
  */
 export async function runRecurringScheduler(now = new Date()): Promise<{
   created: number;
-  emailsSent: number;
+  emailsScheduled: number;
 }> {
   let created = 0;
-  let emailsSent = 0;
+  let emailsScheduled = 0;
 
   const dueSchedules = await prisma.recurringSchedule.findMany({
     where: { isActive: true },
     include: { client: true },
   });
 
-  const matching = dueSchedules.filter((s) => scheduleMatchesDate(s, now));
-  if (!matching.length) return { created, emailsSent };
+  const matching = dueSchedules.filter(
+    (s) => scheduleMatchesDate(s, now) && triggerTimeReached(s.triggerTime, now)
+  );
+  if (!matching.length) return { created, emailsScheduled };
 
   const firms = await prisma.firm.findMany({ select: { id: true, name: true } });
   const firmMap = new Map(firms.map((f) => [f.id, f]));
@@ -282,15 +291,15 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
       const subject = renderTemplate(template.subject, vars);
       const body = renderTemplate(template.body, vars).replace(/\n/g, '<br/>');
 
-      await sendEmail({
+      await scheduleEmail({
         to: parent.client.contactEmail,
         subject,
         body: `<div style="font-family:Arial,sans-serif;line-height:1.5">${body}</div>`,
         clientId: parent.clientId,
         engagementId: child.id,
         templateKey: template.category,
-      });
-      emailsSent++;
+      }, new Date(), { allowImmediate: true });
+      emailsScheduled++;
     }
 
     logger.info('Recurring engagement period created', {
@@ -302,7 +311,7 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
     });
   }
 
-  return { created, emailsSent };
+  return { created, emailsScheduled };
 }
 
 /** Seed per-client schedules from catalog for clients with recurring parent engagements. */
@@ -325,6 +334,7 @@ export async function seedRecurringSchedulesForFirm(firmId: string, createdById:
         isActive: true,
         frequency: fields.frequency,
         triggerDay: fields.triggerDay,
+      triggerTime: fields.triggerTime,
         triggerDates: fields.triggerDates,
         triggerMonth: fields.triggerMonth,
         autoCreateStartDate: start,

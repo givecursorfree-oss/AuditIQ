@@ -3,6 +3,7 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 import { modalBackdropProps } from '@/lib/interactiveProps';
+import { isEditableKeyboardTarget } from '@/lib/keyboard';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -92,7 +93,9 @@ export function SidebarProvider({
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === SIDEBAR_KEYBOARD_SHORTCUT && (e.metaKey || e.ctrlKey)) {
+      if (e.defaultPrevented) return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      if (e.key.toLowerCase() === SIDEBAR_KEYBOARD_SHORTCUT && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         toggleSidebar();
       }
@@ -259,7 +262,6 @@ export function SidebarTrigger({ className, onClick, ...props }: React.Component
       variant="ghost"
       size="icon"
       className={cn('h-9 w-9 shrink-0', className)}
-      title={state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar'}
       aria-label={state === 'expanded' ? 'Collapse sidebar' : 'Expand sidebar'}
       onClick={(e) => {
         e.stopPropagation();
@@ -402,11 +404,9 @@ export const SidebarMenuButton = React.forwardRef<
     isActive?: boolean;
     tooltip?: string | React.ComponentProps<typeof TooltipContent>;
   } & VariantProps<typeof sidebarMenuButtonVariants>
->(({ asChild = false, isActive = false, variant = 'default', size = 'default', tooltip, className, ...props }, ref) => {
+>(({ asChild = false, isActive = false, variant = 'default', size = 'default', tooltip: _tooltip, className, ...props }, ref) => {
   const Comp = asChild ? Slot : 'button';
-  const { isMobile, state } = useSidebar();
-
-  const button = (
+  return (
     <Comp
       ref={ref}
       data-sidebar="menu-button"
@@ -415,19 +415,6 @@ export const SidebarMenuButton = React.forwardRef<
       className={cn(sidebarMenuButtonVariants({ variant, size }), className)}
       {...props}
     />
-  );
-
-  if (!tooltip) return button;
-
-  const tooltipProps = typeof tooltip === 'string' ? { children: tooltip } : tooltip;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      {state === 'collapsed' && !isMobile && (
-        <TooltipContent side="right" align="center" {...tooltipProps} />
-      )}
-    </Tooltip>
   );
 });
 SidebarMenuButton.displayName = 'SidebarMenuButton';

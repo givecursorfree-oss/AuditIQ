@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '@/services/api';
 import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import { PanelCard } from '@/components/layout/PanelCard';
@@ -14,6 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { appAlert } from '@/context/AppDialogContext';
+import { formatApiError } from '@/lib/apiErrors';
 
 export function DeptVisitClaimForm() {
   const [form, setForm] = useState({
@@ -37,11 +40,15 @@ export function DeptVisitClaimForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await api.post('/claims/dept-visit', {
-      ...form,
-      travelExpense: form.travelExpense ? Number(form.travelExpense) : undefined,
-    });
-    setSubmitted(true);
+    try {
+      await api.post('/claims/dept-visit', {
+        ...form,
+        travelExpense: form.travelExpense ? Number(form.travelExpense) : undefined,
+      });
+      setSubmitted(true);
+    } catch (err) {
+      void appAlert({ title: 'Submit failed', message: formatApiError(err) });
+    }
   }
 
   if (submitted) {
@@ -49,6 +56,9 @@ export function DeptVisitClaimForm() {
       <AppPageContainer>
         <PageHeader title="Department visit claim" />
         <p className="text-sm">Claim submitted.</p>
+        <Link to="/claims" className="text-primary text-sm underline">
+          Back to claims
+        </Link>
       </AppPageContainer>
     );
   }

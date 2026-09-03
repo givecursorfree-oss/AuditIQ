@@ -156,6 +156,8 @@ router.post(
             body,
             clientId: result.id,
             templateKey: 'welcome',
+          }).catch((err) => {
+            logger.warn('Welcome email delivery failed', { error: (err as Error).message, clientId: result.id });
           });
         }
       }

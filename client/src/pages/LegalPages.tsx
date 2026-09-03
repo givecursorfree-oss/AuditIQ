@@ -32,6 +32,12 @@ export function PrivacyPolicy() {
             obligations. We do not sell personal data to third parties.
           </p>
         </LegalSection>
+        <LegalSection heading="Cookies">
+          <p>
+            We use necessary cookies for sign-in and security. Optional analytics and preference cookies run only
+            after you accept them in the cookie banner. You can change choices anytime via the cookie button.
+          </p>
+        </LegalSection>
         <LegalSection heading="Your rights">
           <p>
             Users may request access, correction, or deletion subject to firm policy and legal retention

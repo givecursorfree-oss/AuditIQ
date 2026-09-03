@@ -2,11 +2,40 @@ import { Router, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
-import { sendEmail } from '../lib/emailService.js';
+import { scheduleEmail, sendEmail } from '../lib/emailService.js';
 import logger from '../lib/logger.js';
 
 const router = Router();
 router.use(authenticate);
+
+/** GET /api/comms/outbox — scheduled and recently processed emails */
+router.get('/outbox', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(403).json({ error: 'Firm context required' });
+      return;
+    }
+    const outbox = await prisma.emailOutbox.findMany({
+      where: {
+        OR: [
+          { client: { firmId } },
+          { engagement: { firmId } },
+        ],
+      },
+      include: {
+        client: { select: { id: true, name: true } },
+        engagement: { select: { id: true, title: true } },
+      },
+      orderBy: { scheduledAt: 'desc' },
+      take: 200,
+    });
+    res.json(outbox);
+  } catch (err) {
+    logger.error('List email outbox error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to load scheduled emails' });
+  }
+});
 
 /** GET /api/comms — list logs (paginated) */
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -58,6 +87,7 @@ const sendSchema = z.object({
   clientId: z.string().optional(),
   engagementId: z.string().optional(),
   templateKey: z.string().optional(),
+  scheduledAt: z.coerce.date().optional(),
 });
 
 /** POST /api/comms/send — ad-hoc send (Partner/Manager) */
@@ -94,7 +124,10 @@ router.post(
           return;
         }
       }
-      const result = await sendEmail({ ...body });
+      const { scheduledAt, ...email } = body;
+      const result = scheduledAt
+        ? await scheduleEmail(email, scheduledAt)
+        : await sendEmail(email);
       res.json(result);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -103,6 +136,35 @@ router.post(
       }
       logger.error('Send email error', { error: (err as Error).message });
       res.status(500).json({ error: 'Failed to send email' });
+    }
+  }
+);
+
+/** POST /api/comms/outbox/:id/cancel — cancel a not-yet-sent email */
+router.post(
+  '/outbox/:id/cancel',
+  authorize('Partner', 'Admin', 'Manager'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const updated = await prisma.emailOutbox.updateMany({
+        where: {
+          id: String(req.params.id),
+          status: 'scheduled',
+          OR: [
+            { client: { firmId: req.user!.firmId! } },
+            { engagement: { firmId: req.user!.firmId! } },
+          ],
+        },
+        data: { status: 'cancelled' },
+      });
+      if (updated.count !== 1) {
+        res.status(404).json({ error: 'Scheduled email not found or already processed' });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('Cancel scheduled email error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to cancel scheduled email' });
     }
   }
 );

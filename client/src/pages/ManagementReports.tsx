@@ -5,6 +5,11 @@ import api from '../services/api';
 import { apiAbsoluteUrl } from '@/lib/apiBase';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
+import PageLoading from '../components/layout/PageLoading';
+import { ErrorBanner } from '@/components/layout/ErrorBanner';
+import { EmptyState } from '@/components/layout/EmptyState';
+import { AccessibleTabList, AccessibleTabPanel } from '@/components/ui/accessible-tabs';
+import { Button } from '@/components/ui/button';
 
 type Tab = 'profitability' | 'deadlines' | 'udin' | 'billing' | 'productivity';
 
@@ -18,32 +23,27 @@ export default function ManagementReports() {
         description="Partner-only insights into profitability, deadlines, and team output."
       />
 
-      <div className="flex gap-2 border-b border-border overflow-x-auto">
-        {([
-          { k: 'profitability' as const, l: 'Profitability', icon: ChartBar },
-          { k: 'deadlines' as const, l: 'Deadline tracker', icon: Calendar },
-          { k: 'udin' as const, l: 'UDIN log', icon: FileText },
-          { k: 'billing' as const, l: 'Billing & collection', icon: CurrencyInr },
-          { k: 'productivity' as const, l: 'Staff productivity', icon: UsersThree },
-        ]).map(t => (
-          <button
-            key={t.k}
-            type="button"
-            onClick={() => setTab(t.k)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
-              tab === t.k ? 'tab-active' : 'border-transparent text-foreground-muted hover:text-foreground'
-            }`}
-          >
-            <t.icon size={16} /> {t.l}
-          </button>
-        ))}
-      </div>
+      <AccessibleTabList
+        idPrefix="mgmt-reports"
+        ariaLabel="Management report views"
+        tabs={[
+          { key: 'profitability' as const, label: 'Profitability', icon: ChartBar },
+          { key: 'deadlines' as const, label: 'Deadline tracker', icon: Calendar },
+          { key: 'udin' as const, label: 'UDIN log', icon: FileText },
+          { key: 'billing' as const, label: 'Billing & collection', icon: CurrencyInr },
+          { key: 'productivity' as const, label: 'Staff productivity', icon: UsersThree },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
-      {tab === 'profitability' && <Profitability />}
-      {tab === 'deadlines' && <Deadlines />}
-      {tab === 'udin' && <UdinLog />}
-      {tab === 'billing' && <BillingReport />}
-      {tab === 'productivity' && <StaffProductivity />}
+      <AccessibleTabPanel id={`mgmt-reports-panel-${tab}`} labelledBy={`mgmt-reports-tab-${tab}`}>
+        {tab === 'profitability' && <Profitability />}
+        {tab === 'deadlines' && <Deadlines />}
+        {tab === 'udin' && <UdinLog />}
+        {tab === 'billing' && <BillingReport />}
+        {tab === 'productivity' && <StaffProductivity />}
+      </AccessibleTabPanel>
     </AppPageContainer>
   );
 }
@@ -58,15 +58,15 @@ function Profitability() {
       .catch(() => setError('Failed to load profitability data. Please try again.'))
       .finally(() => setLoading(false));
   }, []);
-  if (loading) return <Loading />;
-  if (error) return <LoadFailed message={error} />;
+  if (loading) return <PageLoading />;
+  if (error) return <ErrorBanner message={error} />;
   const chart = rows.slice(0, 10).map(r => ({ name: r.title.slice(0, 18), Billed: r.feeBilled, Rate: r.effectiveHourlyRate }));
   return (
     <div className="space-y-4">
       <div className="card p-4">
         <h3 className="font-semibold mb-3">Top 10 by fees billed</h3>
         {chart.length === 0 ? (
-          <p className="py-10 text-center text-sm text-foreground-muted">No billing data yet — billed engagements will appear here.</p>
+          <EmptyState title="No billing data yet" />
         ) : (
           <div className="h-64">
             <ResponsiveContainer><BarChart data={chart}>
@@ -96,7 +96,7 @@ function Profitability() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={8} className="py-8 text-center text-foreground-muted">No engagements with billing data yet</td></tr>
+              <tr><td colSpan={8}><EmptyState title="No engagements with billing data yet" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>
@@ -119,10 +119,10 @@ function Deadlines() {
       .then(r => setData(r.data))
       .catch(() => setError('Failed to load the deadline tracker. Please try again.'));
   }, []);
-  if (error) return <LoadFailed message={error} />;
-  if (!data) return <Loading />;
+  if (error) return <ErrorBanner message={error} />;
+  if (!data) return <PageLoading />;
   if (!data.items?.length) {
-    return <p className="py-12 text-center text-sm text-foreground-muted">No upcoming statutory deadlines.</p>;
+    return <EmptyState title="No upcoming statutory deadlines" />;
   }
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -155,7 +155,7 @@ function UdinLog() {
     <div className="space-y-4">
       <div className="flex gap-2">
         <input className="input-field flex-1" placeholder="Search UDIN / CA / document type" aria-label="Search UDIN, CA, or document type" value={q} onChange={e => setQ(e.target.value)} />
-        <button type="button" className="btn-secondary flex items-center gap-2" onClick={download}><Download size={16} /> CSV</button>
+        <Button type="button" variant="outline" size="sm" className="gap-2" onClick={download}><Download size={16} /> CSV</Button>
       </div>
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
@@ -172,7 +172,7 @@ function UdinLog() {
                 <td>{l.status === 'Active' ? <span className="text-success">Active</span> : <span className="text-danger">Revoked</span>}</td>
               </tr>
             ))}
-            {logs.length === 0 && <tr><td colSpan={5} className="py-8 text-center text-foreground-muted">No UDIN entries</td></tr>}
+            {logs.length === 0 && <tr><td colSpan={5}><EmptyState title="No UDIN entries" className="py-8" /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -192,7 +192,7 @@ function BillingReport() {
       .then(r => setOutstanding(r.data))
       .catch(() => {});
   }, []);
-  if (error) return <LoadFailed message={error} />;
+  if (error) return <ErrorBanner message={error} />;
   return (
     <div className="space-y-4">
       {outstanding && (
@@ -228,7 +228,7 @@ function BillingReport() {
               </tr>
             ))}
             {invoices.length === 0 && (
-              <tr><td colSpan={7} className="py-8 text-center text-foreground-muted">No invoices yet</td></tr>
+              <tr><td colSpan={7}><EmptyState title="No invoices yet" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>
@@ -247,8 +247,8 @@ function StaffProductivity() {
       .then(r => setData(r.data))
       .catch(() => setError('Failed to load staff productivity. Please try again.'));
   }, [month]);
-  if (error) return <LoadFailed message={error} />;
-  if (!data) return <Loading />;
+  if (error) return <ErrorBanner message={error} />;
+  if (!data) return <PageLoading />;
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -277,19 +277,11 @@ function StaffProductivity() {
               </tr>
             ))}
             {data.rows.length === 0 && (
-              <tr><td colSpan={8} className="py-8 text-center text-foreground-muted">No time entries for this month</td></tr>
+              <tr><td colSpan={8}><EmptyState title="No time entries for this month" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>
       </div>
     </div>
   );
-}
-
-function Loading() {
-  return <div className="flex justify-center py-20"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
-}
-
-function LoadFailed({ message }: { message: string }) {
-  return <p className="py-12 text-center text-sm text-foreground-muted">{message}</p>;
 }

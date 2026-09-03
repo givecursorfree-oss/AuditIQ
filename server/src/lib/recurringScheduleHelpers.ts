@@ -68,6 +68,7 @@ export function ruleToScheduleFields(rule: RecurringScheduleRule) {
   return {
     frequency: rule.frequency,
     triggerDay: rule.triggerDay ?? null,
+    triggerTime: '09:00',
     triggerDates: rule.triggerMonths
       ? JSON.stringify(rule.triggerMonths.map((m) => `${String(m).padStart(2, '0')}-01`))
       : null,

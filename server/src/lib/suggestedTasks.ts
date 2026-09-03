@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { getChecklistForService, getTasksForService } from './serviceRequirements.js';
+import { resolveTaskPipelineStage } from './taskPipeline.js';
 
 interface TaskTemplate {
   title: string;
@@ -198,6 +199,17 @@ export async function generateSuggestedTasks(
   const templates = serviceTasks.length > 0 ? serviceTasks : TASK_TEMPLATES[engagementType];
   if (!templates || templates.length === 0) return 0;
 
+  const engagement = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    select: { currentStage: true, serviceCode: true, workflowDomain: true, type: true },
+  });
+  const pipelineEng = {
+    currentStage: engagement?.currentStage,
+    serviceCode: engagement?.serviceCode ?? serviceCode,
+    workflowDomain: engagement?.workflowDomain,
+    type: engagement?.type ?? engagementType,
+  };
+
   const now = new Date();
   const baseDeadline = deadline || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
@@ -214,6 +226,7 @@ export async function generateSuggestedTasks(
       assigneeId,
       createdById,
       engagementId,
+      pipelineStage: resolveTaskPipelineStage({ title: t.title, engagement: pipelineEng }),
     };
   });
 

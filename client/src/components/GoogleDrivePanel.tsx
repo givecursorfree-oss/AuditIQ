@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import type { GoogleDriveStatus, SyncFolder } from '../types';
+import { Button } from '@/components/ui/button';
 
 function timeAgo(date: string) {
   const diff = Date.now() - new Date(date).getTime();
@@ -337,34 +338,35 @@ export default function GoogleDrivePanel({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={saveSettings} disabled={saving} className="btn-secondary text-sm">
+                <Button type="button" variant="outline" size="sm" onClick={saveSettings} disabled={saving}>
                   {saving ? 'Saving…' : 'Save settings'}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  size="sm"
+                  className="gap-1"
                   onClick={runSync}
                   disabled={syncing || selectedFolders.length === 0 || !engagementId}
-                  className="btn-primary text-sm flex items-center gap-1 disabled:opacity-50"
                 >
                   <ArrowsClockwise size={14} className={syncing ? 'animate-spin' : ''} />
                   {syncing ? 'Syncing…' : 'Sync now'}
-                </button>
-                <button type="button" onClick={disconnect} className="btn-secondary text-sm text-danger">
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="text-danger" onClick={disconnect}>
                   Disconnect
-                </button>
+                </Button>
               </div>
             </>
           )}
         </div>
       ) : canManage ? (
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={connect}
           disabled={!status?.configured}
-          className="btn-primary text-sm disabled:opacity-50"
         >
           Connect Google Drive
-        </button>
+        </Button>
       ) : null}
 
       {message && (

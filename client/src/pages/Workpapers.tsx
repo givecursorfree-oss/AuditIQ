@@ -12,6 +12,9 @@ import { useAuth } from '../context/AuthContext';
 import { appAlert } from '../context/AppDialogContext';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
+import PageLoading from '../components/layout/PageLoading';
+import { ErrorBanner } from '../components/layout/ErrorBanner';
+import { EmptyState } from '../components/layout/EmptyState';
 import { Button } from '@/components/ui/button';
 import { clickableDivProps, modalBackdropProps } from '@/lib/interactiveProps';
 
@@ -28,6 +31,7 @@ export default function Workpapers() {
   const { user } = useAuth();
   const [workpapers, setWorkpapers] = useState<Workpaper[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -36,9 +40,10 @@ export default function Workpapers() {
   const fetchWorkpapers = useCallback(() => {
     const params = new URLSearchParams();
     if (filterStatus) params.set('status', filterStatus);
+    setLoadError(null);
     api.get(`/workpapers?${params.toString()}`)
       .then(({ data }) => setWorkpapers(data))
-      .catch(console.error)
+      .catch(() => setLoadError('Failed to load.'))
       .finally(() => setLoading(false));
   }, [filterStatus]);
 
@@ -125,9 +130,11 @@ export default function Workpapers() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-40">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
+        <PageLoading className="h-40" />
+      ) : loadError ? (
+        <ErrorBanner message={loadError} onRetry={fetchWorkpapers} />
+      ) : filtered.length === 0 ? (
+        <EmptyState title="No workpapers" />
       ) : (
         <div className="space-y-2">
           {filtered.map((wp) => (
@@ -201,22 +208,22 @@ export default function Workpapers() {
                   {/* Actions */}
                   <div className="flex items-center gap-2 pt-2">
                     {wp.status === 'Draft' && (
-                      <button type="button" onClick={() => handleStatusChange(wp.id, 'Prepared')} className="btn-primary text-xs py-1.5 px-3">Mark Prepared</button>
+                      <Button type="button" size="sm" onClick={() => handleStatusChange(wp.id, 'Prepared')}>Mark Prepared</Button>
                     )}
                     {wp.status === 'Prepared' && (
-                      <button type="button" onClick={() => handleStatusChange(wp.id, 'Under Review')} className="btn-primary text-xs py-1.5 px-3">Submit for Review</button>
+                      <Button type="button" size="sm" onClick={() => handleStatusChange(wp.id, 'Under Review')}>Submit for Review</Button>
                     )}
                     {wp.status === 'Under Review' && user?.role === 'Manager' && (
                       <>
-                        <button type="button" onClick={() => handleStatusChange(wp.id, 'Reviewed')} className="btn-primary text-xs py-1.5 px-3">Approve</button>
-                        <button type="button" onClick={() => handleStatusChange(wp.id, 'Needs Revision')} className="btn-danger text-xs py-1.5 px-3">Request Revision</button>
+                        <Button type="button" size="sm" variant="success" onClick={() => handleStatusChange(wp.id, 'Reviewed')}>Approve</Button>
+                        <Button type="button" size="sm" variant="destructive" onClick={() => handleStatusChange(wp.id, 'Needs Revision')}>Request Revision</Button>
                       </>
                     )}
                     {wp.status === 'Reviewed' && user?.role === 'Partner' && (
-                      <button type="button" onClick={() => handleStatusChange(wp.id, 'Approved')} className="btn-primary text-xs py-1.5 px-3">Final Approve</button>
+                      <Button type="button" size="sm" variant="success" onClick={() => handleStatusChange(wp.id, 'Approved')}>Final Approve</Button>
                     )}
                     {wp.status === 'Needs Revision' && (
-                      <button type="button" onClick={() => handleStatusChange(wp.id, 'Prepared')} className="btn-secondary text-xs py-1.5 px-3">Resume Work</button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleStatusChange(wp.id, 'Prepared')}>Resume Work</Button>
                     )}
                   </div>
                 </div>
@@ -312,10 +319,10 @@ function CreateWorkpaperModal({ onClose, onCreated }: { onClose: () => void; onC
             <input id="wp-create-reference" aria-label="Reference" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} required className="input-field" placeholder="WP-001" />
           </div>
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
+            <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" className="flex-1" disabled={saving}>
               {saving ? 'Creating...' : 'Create Workpaper'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

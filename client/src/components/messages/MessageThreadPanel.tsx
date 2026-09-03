@@ -31,6 +31,7 @@ import {
 } from '@/lib/chatHelpers';
 import { formatChatDateLabel, formatSystemMessageContent } from '@/lib/chatMessageUtils';
 import { normalizePresenceStatus, PRESENCE_LABELS } from '@/lib/presence';
+import { Button } from '@/components/ui/button';
 
 function isSameDay(d1: string, d2: string) {
   return new Date(d1).toDateString() === new Date(d2).toDateString();
@@ -340,13 +341,13 @@ export default function MessageThreadPanel({
                   className="input-field w-full text-sm"
                 />
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     type="button"
-                    className="text-xs btn-primary px-3 py-1 rounded-lg"
+                    size="sm"
                     onClick={() => activeRoom && onFetchMessages(activeRoom.id, inChatSearch)}
                   >
                     Search
-                  </button>
+                  </Button>
                   <input
                     value={globalSearch}
                     onChange={(e) => onGlobalSearchChange(e.target.value)}

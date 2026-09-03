@@ -241,7 +241,7 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response): Promise<voi
       },
       orderBy: { dueDate: 'asc' },
     });
-    const activeTasks = activeTasksRaw.map(enrichTask);
+    const activeTasks = activeTasksRaw.map((t) => enrichTask(t));
 
     const upcomingDeadlines = activeTasks
       .filter((t) => t.dueDate)
@@ -265,10 +265,32 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response): Promise<voi
     const estimatedRemaining = activeTasks.reduce((s, t) => s + (t.estimatedHours ?? 0), 0);
     const workloadHoursThisWeek = Math.round((loggedHours + estimatedRemaining * 0.3) * 10) / 10;
 
-    const availability: { date: string; hoursAllocated: number; isBusy: boolean }[] = [];
     const today = scheduleStartOfDay(new Date());
+    const rangeEnd = scheduleEndOfDay(new Date(today.getTime() + (days - 1) * 86400000));
+    const leaveRows = await prisma.leaveRequest.findMany({
+      where: {
+        userId: staffId,
+        status: { in: ['Approved', 'Manager Approved', 'Pending'] },
+        fromDate: { lte: rangeEnd },
+        toDate: { gte: today },
+      },
+      select: { fromDate: true, toDate: true },
+    });
+    const leaveDays = new Set<string>();
+    for (const leave of leaveRows) {
+      const cur = scheduleStartOfDay(new Date(leave.fromDate));
+      const end = scheduleStartOfDay(new Date(leave.toDate));
+      while (cur <= end) {
+        leaveDays.add(cur.toISOString().slice(0, 10));
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+
+    const availability: { date: string; hoursAllocated: number; isBusy: boolean; onLeave: boolean }[] = [];
     for (let i = 0; i < days; i++) {
       const day = new Date(today.getTime() + i * 86400000);
+      const dateKey = day.toISOString().slice(0, 10);
+      const onLeave = leaveDays.has(dateKey);
       const tasksDue = activeTasks.filter((t) => {
         if (!t.dueDate) return false;
         const due = scheduleStartOfDay(new Date(t.dueDate));
@@ -276,9 +298,10 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response): Promise<voi
       });
       const hoursAllocated = tasksDue.reduce((s, t) => s + (t.estimatedHours ?? 2), 0);
       availability.push({
-        date: day.toISOString().slice(0, 10),
+        date: dateKey,
         hoursAllocated,
-        isBusy: hoursAllocated > 6,
+        isBusy: !onLeave && hoursAllocated > 6,
+        onLeave,
       });
     }
 
@@ -290,6 +313,7 @@ router.get('/:id/schedule', async (req: AuthRequest, res: Response): Promise<voi
       workloadHoursThisWeek,
       activeTaskCount: activeTasks.length,
       availability,
+      leaveDays: Array.from(leaveDays),
     });
   } catch (err) {
     logger.error('Staff schedule error', { error: (err as Error).message });

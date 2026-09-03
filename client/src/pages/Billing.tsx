@@ -55,6 +55,7 @@ export default function Billing() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [summary, setSummary] = useState<OutstandingSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [payInvoiceId, setPayInvoiceId] = useState<string | null>(null);
@@ -73,6 +74,7 @@ export default function Billing() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const [invRes, sumRes] = await Promise.all([
         api.get<InvoiceRow[]>('/invoices'),
@@ -82,6 +84,7 @@ export default function Billing() {
       setSummary(sumRes.data);
     } catch {
       setInvoices([]);
+      setLoadError('Failed to load.');
     } finally {
       setLoading(false);
     }
@@ -165,6 +168,7 @@ export default function Billing() {
 
   return (
     <AppPageContainer className="space-y-6">
+      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       <PageHeader
         title="Billing & Invoices"
         description="WIP to bill to collect — GST on professional fees, payments, and aging."

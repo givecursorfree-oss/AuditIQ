@@ -42,7 +42,6 @@ import {
   EngagementTaskActionCard,
   EngagementTaskCard,
 } from './EngagementTasksTaskCards';
-import { filterUsersForSlot } from '@/lib/assigneeFilters';
 import {
   assignerTaskStatus,
   isTaskActive,
@@ -64,8 +63,15 @@ interface TaskRow {
   notes?: string | null;
   completedAt?: string | null;
   createdAt?: string | null;
+  pipelineStage?: string | null;
+  pipelineStageLabel?: string | null;
   assignee: { id: string; firstName: string; lastName: string };
   createdBy?: { id: string; firstName: string; lastName: string };
+}
+
+interface PipelineStep {
+  code: string;
+  label: string;
 }
 
 interface TeamUser {
@@ -125,9 +131,9 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
   const [searchParams, setSearchParams] = useSearchParams();
   const isManager = user && ['Partner', 'Admin', 'Manager'].includes(user.role);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStep[]>([]);
   const highlightRowRef = useRef<HTMLDivElement | null>(null);
   const [teamStaff, setTeamStaff] = useState<TeamUser[]>([]);
-  const [allAssignees, setAllAssignees] = useState<TeamUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [listFilter, setListFilter] = useState<ListFilter>('active');
   const [compactView, setCompactView] = useState(false);
@@ -148,21 +154,30 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
     proposedTimeline: '',
     estimatedHours: '',
     notes: '',
+    pipelineStage: '',
   });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tasksRes, teamRes, empRes] = await Promise.all([
-        api.get<TaskRow[]>(`/tasks?engagementId=${engagementId}`),
+      const [tasksRes, teamRes] = await Promise.all([
+        api.get<TaskRow[] | { tasks: TaskRow[]; pipelineSteps: PipelineStep[] }>(
+          `/tasks?engagementId=${engagementId}`
+        ),
         api.get<{
           managers: TeamUser[];
           staff: TeamUser[];
           primary: { partner: TeamUser | null; article: TeamUser | null };
         }>(`/engagements/${engagementId}/team`),
-        api.get<TeamUser[]>('/employees').catch(() => ({ data: [] as TeamUser[] })),
       ]);
-      setTasks(tasksRes.data);
+      const taskPayload = tasksRes.data;
+      if (Array.isArray(taskPayload)) {
+        setTasks(taskPayload);
+        setPipelineSteps([]);
+      } else {
+        setTasks(taskPayload.tasks);
+        setPipelineSteps(taskPayload.pipelineSteps ?? []);
+      }
       const fromTeam = [
         ...(teamRes.data.managers ?? []),
         ...(teamRes.data.staff ?? []),
@@ -171,11 +186,6 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
       ];
       const uniqueTeam = [...new Map(fromTeam.map((u) => [u.id, u])).values()];
       setTeamStaff(uniqueTeam);
-      const eligible = filterUsersForSlot(empRes.data, 'article').concat(
-        filterUsersForSlot(empRes.data, 'manager')
-      );
-      const merged = [...new Map([...uniqueTeam, ...eligible].map((u) => [u.id, u])).values()];
-      setAllAssignees(merged);
     } finally {
       setLoading(false);
     }
@@ -201,10 +211,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
     }
   });
 
-  const assigneeOptions = useMemo(() => {
-    if (teamStaff.length > 0) return teamStaff;
-    return allAssignees;
-  }, [teamStaff, allAssignees]);
+  const assigneeOptions = teamStaff;
 
   const needsAction = useCallback(
     (t: TaskRow) => needsAssigneeAction(t, user?.id),
@@ -376,6 +383,32 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
     }
   }
 
+  async function applyPipelineStageChange(taskId: string, pipelineStage: string) {
+    if (!isManager) return;
+    setUpdatingTaskId(taskId);
+    const snapshot = tasks;
+    const step = pipelineSteps.find((s) => s.code === pipelineStage);
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? { ...t, pipelineStage, pipelineStageLabel: step?.label ?? pipelineStage }
+          : t
+      )
+    );
+    try {
+      await api.patch(`/tasks/${taskId}`, { pipelineStage });
+    } catch {
+      setTasks(snapshot);
+      showToast({
+        title: 'Could not update pipeline stage',
+        message: 'Please try again.',
+        variant: 'error',
+      });
+    } finally {
+      setUpdatingTaskId(null);
+    }
+  }
+
   async function createTask() {
     const title = form.title;
     await api.post('/tasks', {
@@ -386,6 +419,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
       proposedTimeline: form.proposedTimeline || undefined,
       estimatedHours: form.estimatedHours ? Number(form.estimatedHours) : undefined,
       notes: form.notes || undefined,
+      pipelineStage: form.pipelineStage || undefined,
     });
     setModalOpen(false);
     setForm({
@@ -395,6 +429,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
       proposedTimeline: '',
       estimatedHours: '',
       notes: '',
+      pipelineStage: '',
     });
     showToast({ title: 'Task assigned', message: title, variant: 'success' });
     await load();
@@ -536,6 +571,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-2 pr-3">Task</th>
                     <th className="py-2 pr-3">Assigned to</th>
+                    <th className="py-2 pr-3">Pipeline</th>
                     <th className="py-2 pr-3">Deadline</th>
                     <th className="py-2 pr-3">Timeline</th>
                     <th className="py-2">Status</th>
@@ -590,6 +626,30 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                           {t.assignee.firstName} {t.assignee.lastName}
                         </td>
                         <td className="py-2 pr-3">
+                          {isManager && pipelineSteps.length > 0 ? (
+                            <Select
+                              value={t.pipelineStage ?? pipelineSteps[0]?.code ?? ''}
+                              disabled={updatingTaskId === t.id}
+                              onValueChange={(v) => void applyPipelineStageChange(t.id, v)}
+                            >
+                              <SelectTrigger className="h-8 w-[160px]">
+                                <SelectValue>
+                                  {t.pipelineStageLabel ?? t.pipelineStage ?? 'Stage'}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {pipelineSteps.map((s) => (
+                                  <SelectItem key={s.code} value={s.code}>
+                                    {s.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            t.pipelineStageLabel ?? t.pipelineStage ?? '—'
+                          )}
+                        </td>
+                        <td className="py-2 pr-3">
                           {t.dueDate ? formatShortDate(t.dueDate) : '—'}
                         </td>
                         <td className="py-2 pr-3">{t.proposedTimeline || '—'}</td>
@@ -633,6 +693,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                     task={t}
                     userId={user?.id}
                     isManager={Boolean(isManager)}
+                    pipelineSteps={pipelineSteps}
                     actionTaskIds={actionTasks.map((a) => a.id)}
                     scrollTargetId={scrollTargetId}
                     highlightRowRef={highlightRowRef}
@@ -640,6 +701,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                     recentlyCompletedId={recentlyCompletedId}
                     completingTaskId={completingTaskId}
                     onStatusChange={applyStatusChange}
+                    onPipelineStageChange={isManager ? applyPipelineStageChange : undefined}
                   />
                 ))}
             </div>
@@ -698,8 +760,7 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
           <DialogHeader>
             <DialogTitle>Add task</DialogTitle>
             <DialogDescription>
-              Assign a task to a team member. Save the team on Scope &amp; team first, or pick from
-              all eligible staff.
+              Assign a task to a member of the engagement team. Save the team on Scope &amp; team first.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -727,9 +788,9 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                   )}
                 </SelectContent>
               </Select>
-              {teamStaff.length === 0 && assigneeOptions.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Team not saved yet — showing all eligible firm staff.
+              {teamStaff.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Add managers and staff to the engagement team before creating tasks.
                 </p>
               )}
               {form.assigneeId && isManager && (
@@ -770,6 +831,26 @@ export default function EngagementTasksTab({ engagementId, highlightTaskId }: Pr
                 onChange={(e) => setForm({ ...form, proposedTimeline: e.target.value })}
               />
             </div>
+            {pipelineSteps.length > 0 ? (
+              <div>
+                <Label>Pipeline stage</Label>
+                <Select
+                  value={form.pipelineStage || pipelineSteps[0]?.code}
+                  onValueChange={(v) => setForm({ ...form, pipelineStage: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Auto from title" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pipelineSteps.map((s) => (
+                      <SelectItem key={s.code} value={s.code}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div>
               <Label>Notes</Label>
               <Textarea

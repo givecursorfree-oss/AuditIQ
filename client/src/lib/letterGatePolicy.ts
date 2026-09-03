@@ -21,12 +21,10 @@ export function engagementHasTeam(eng: {
   return !!(eng.partnerInChargeId || eng.managerId || eng.articleAssistantId);
 }
 
-/** Blocks only the first team assignment until the letter is signed; updates are always allowed. */
+/** Client mirror — team may be assigned anytime (letter gate relaxed). */
 export function isTeamAssignmentBlocked(
-  letterStatus?: string | null,
-  hasExistingTeam = false
+  _letterStatus?: string | null,
+  _hasExistingTeam = false
 ): boolean {
-  if (hasExistingTeam) return false;
-  if (!letterStatus) return false;
-  return needsSignedLetterForTeamAssignment(letterStatus);
+  return false;
 }

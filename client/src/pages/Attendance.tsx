@@ -1,28 +1,31 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Clock, MapPin, Calendar, CheckCircle as CheckCircle2, XCircle, SignIn as LogIn, SignOut as LogOut,
-  CaretLeft as ChevronLeft, CaretRight as ChevronRight, DownloadSimple, Plus, X
+  Clock, Calendar, SignIn as LogIn, SignOut as LogOut,
+  CaretLeft as ChevronLeft, CaretRight as ChevronRight, DownloadSimple,
 } from '@phosphor-icons/react';
 import api from '../services/api';
-import type { Attendance, LeaveRequest } from '../types';
+import type { Attendance } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { tryAttendanceCheckIn, tryAttendanceResume, requestAttendanceLocation, type PlaceOfWork } from '../lib/attendancePopup';
 import { hoursBetween } from '../lib/attendanceDates';
 import { attendanceDayState } from '../lib/attendanceDayGate';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
+import PageLoading from '@/components/layout/PageLoading';
+import { EmptyState } from '../components/layout/EmptyState';
 import { PanelCard, MetricCard } from '../components/layout/PanelCard';
-import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
 import { appToast, gooeyToast } from '@/context/AppToastContext';
 import { downloadCsv } from '@/lib/downloadCsv';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-/** Must match server leaveCreateSchema */
-const LEAVE_TYPES = ['Casual', 'Sick', 'Earned', 'Holiday', 'Exam', 'Study'] as const;
 const PLACES: PlaceOfWork[] = ['Office', 'Client Place', 'Work from Home'];
 const FIRM_ATTENDANCE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
 
@@ -30,9 +33,7 @@ export default function AttendancePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const canViewFirmAttendance = Boolean(user && FIRM_ATTENDANCE_ROLES.includes(user.role));
-  const [tab, setTab] = useState<'attendance' | 'leaves'>('attendance');
   const [records, setRecords] = useState<Attendance[]>([]);
-  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [todayRecord, setTodayRecord] = useState<Attendance | null>(null);
   const [isArticle, setIsArticle] = useState(false);
@@ -64,9 +65,6 @@ export default function AttendancePage() {
       totalDebitDays: number;
     } | null;
   } | null>(null);
-  const [showLeaveForm, setShowLeaveForm] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', type: 'Casual', reason: '' });
-  const [submittingLeave, setSubmittingLeave] = useState(false);
   const [todayLabel, setTodayLabel] = useState('');
 
   useEffect(() => {
@@ -92,16 +90,14 @@ export default function AttendancePage() {
       const attendanceQuery = selectedDate
         ? `?date=${encodeURIComponent(selectedDate)}`
         : `?month=${curYear}-${String(curMonth).padStart(2, '0')}`;
-      const [attRes, leavesRes, summaryRes, balanceRes] = await Promise.all([
+      const [attRes, summaryRes, balanceRes] = await Promise.all([
         api.get<Attendance[]>(`/attendance${attendanceQuery}`),
-        api.get<LeaveRequest[]>('/attendance/leaves'),
         api.get(`/attendance/summary?month=${curYear}-${String(curMonth).padStart(2, '0')}`),
         api
           .get<{ isArticle?: boolean }>('/attendance/leaves/balance')
           .catch(() => ({ data: { isArticle: false } as { isArticle?: boolean } })),
       ]);
       setRecords(attRes.data);
-      setLeaves(leavesRes.data);
       setSummary(summaryRes.data);
       if (balanceRes.data?.isArticle) setIsArticle(true);
       await loadTodayRecord();
@@ -173,8 +169,8 @@ export default function AttendancePage() {
       if (loadingId != null) gooeyToast.dismiss(loadingId);
       gooeyToast.dismiss();
       appToast({
-        variant: 'success',
-        title: 'Attendance marked',
+        variant: 'info',
+        title: 'Checked in',
         message:
           placeOfWork === 'Office'
             ? 'You are checked in. Select an engagement to start.'
@@ -214,7 +210,7 @@ export default function AttendancePage() {
         return;
       }
       appToast({
-        variant: 'success',
+        variant: 'info',
         title: 'Day resumed',
         message: 'Select an engagement and start your timer.',
       });
@@ -249,46 +245,6 @@ export default function AttendancePage() {
       await appAlert(msg);
     } finally {
       setCheckingIn(false);
-    }
-  };
-
-  const handleSubmitLeave = async () => {
-    if (!leaveForm.startDate || !leaveForm.endDate) return;
-    setSubmittingLeave(true);
-    try {
-      await api.post('/attendance/leaves', leaveForm);
-      setShowLeaveForm(false);
-      setLeaveForm({ startDate: '', endDate: '', type: 'Casual', reason: '' });
-      await appAlert({ title: 'Leave submitted', message: 'Your leave request was sent for approval.' });
-      await fetchAll();
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        'Could not submit leave request.';
-      await appAlert(msg);
-    } finally {
-      setSubmittingLeave(false);
-    }
-  };
-
-  const handleApproveLeave = async (id: string, action: 'approve' | 'reject') => {
-    const role = user?.role || '';
-    let status: string;
-    if (action === 'reject') {
-      status = 'Rejected';
-    } else if (['Partner', 'Admin', 'HR'].includes(role)) {
-      status = 'Approved';
-    } else {
-      status = 'Manager Approved';
-    }
-    try {
-      await api.patch(`/attendance/leaves/${id}`, { status });
-      await fetchAll();
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        'Could not update leave request.';
-      await appAlert(msg);
     }
   };
 
@@ -354,6 +310,9 @@ export default function AttendancePage() {
                 {exporting ? 'Exporting…' : 'Export month'}
               </Button>
             )}
+            <Button type="button" size="sm" variant="outline" asChild>
+              <Link to="/leave-stipend?tab=apply">Leave</Link>
+            </Button>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Calendar size={15} />
               <span className="hidden sm:inline">View date</span>
@@ -390,79 +349,90 @@ export default function AttendancePage() {
       <PanelCard
         title="Today"
         action={
-          <Button type="button" variant="outline" size="sm" asChild>
-            <Link to="/leave-stipend">
-              <Plus size={16} className="mr-1" /> Apply leave
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            {dayState === 'open' && (
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link to="/time-tracker?start=1">Time tracker</Link>
+              </Button>
+            )}
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link to="/leave-stipend?tab=apply">Leave</Link>
+            </Button>
+          </div>
         }
       >
-        <p className="mb-2 text-sm text-muted-foreground">
-          {todayLabel || '\u00a0'}
-        </p>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">{todayLabel || '\u00a0'}</p>
+            {dayState === 'none' && <Badge variant="outline">Not checked in</Badge>}
+            {dayState === 'open' && <Badge variant="default">Working</Badge>}
+            {dayState === 'closed' && <Badge variant="secondary">Day ended</Badge>}
+          </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {todayRecord && (
+            <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border text-sm sm:grid-cols-4">
+              <div className="bg-card px-3 py-2">
+                <dt className="text-[11px] text-muted-foreground">In</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">
+                  {todayRecord.checkIn
+                    ? new Date(todayRecord.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                    : '—'}
+                </dd>
+              </div>
+              <div className="bg-card px-3 py-2">
+                <dt className="text-[11px] text-muted-foreground">Out</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">
+                  {todayRecord.checkOut
+                    ? new Date(todayRecord.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                    : '—'}
+                </dd>
+              </div>
+              <div className="bg-card px-3 py-2">
+                <dt className="text-[11px] text-muted-foreground">Location</dt>
+                <dd className="mt-0.5 truncate font-medium">
+                  {todayRecord.location || '—'}
+                  {todayRecord.clientName ? ` · ${todayRecord.clientName}` : ''}
+                </dd>
+              </div>
+              <div className="bg-card px-3 py-2">
+                <dt className="text-[11px] text-muted-foreground">Hours</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">
+                  {todayRecord.hoursWorked != null || dayState === 'closed'
+                    ? Number(todayRecord.hoursWorked ?? hoursBetween(todayRecord.checkIn, todayRecord.checkOut) ?? 0).toFixed(1)
+                    : '—'}
+                </dd>
+              </div>
+            </dl>
+          )}
+
           {dayState === 'none' && (
-            <Button type="button" size="default" disabled={checkingIn} onClick={() => void handleCheckIn()}>
-              <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Check in'}
-            </Button>
-          )}
-          {dayState === 'open' && (
-            <Button
-              type="button"
-              size="default"
-              variant="destructive"
-              disabled={checkingIn}
-              onClick={() => void handleCheckOut()}
-            >
-              <LogOut size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'End day (check out)'}
-            </Button>
-          )}
-          {dayState === 'closed' && (
-            <>
-              <ApprovalStatusBadge status="Approved" />
-              <Button type="button" size="default" disabled={checkingIn} onClick={() => void handleResumeDay()}>
-                <LogIn size={16} className="mr-1" /> {checkingIn ? 'Processing…' : 'Resume day'}
-              </Button>
-            </>
-          )}
-        </div>
-        {dayState === 'open' && (
-          <p className="mb-3 text-xs text-muted-foreground">
-            Day is open. Use <strong>End day (check out)</strong> when you finish work. Logging out of the app does not
-            check you out.
-          </p>
-        )}
-        {dayState === 'closed' && (
-          <p className="mb-3 text-xs text-muted-foreground">
-            Day ended. Use <strong>Resume day</strong> if you checked out by mistake and still need to work.
-          </p>
-        )}
-
-        {!todayRecord && (
-          <div className="mb-3 flex flex-col gap-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-              <label className="text-sm w-full sm:w-auto">
-                <span className="mb-1 block text-muted-foreground">Place of work</span>
-                <select
-                  className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:min-h-0 sm:w-auto sm:py-1.5 sm:text-sm"
-                  value={placeOfWork}
-                  onChange={(e) => setPlaceOfWork(e.target.value as PlaceOfWork)}
-                >
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label className="text-xs">Place of work</Label>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Place of work">
                   {PLACES.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <Button
+                      key={p}
+                      type="button"
+                      size="sm"
+                      variant={placeOfWork === p ? 'default' : 'outline'}
+                      className={cn('h-10 min-w-[7rem] flex-1 sm:flex-none', placeOfWork === p && 'ring-1 ring-primary/30')}
+                      onClick={() => setPlaceOfWork(p)}
+                    >
+                      {p}
+                    </Button>
                   ))}
-                </select>
-              </label>
+                </div>
+              </div>
               {placeOfWork === 'Client Place' && (
-                <label className="text-sm w-full sm:min-w-[220px]">
-                  <span className="mb-1 block text-muted-foreground">Client name</span>
-                  <input
-                    className="min-h-11 w-full rounded-md border border-border bg-background px-3 py-2 text-base sm:min-h-0 sm:py-1.5 sm:text-sm"
+                <div className="space-y-1.5">
+                  <Label htmlFor="attendance-client">Client</Label>
+                  <Input
+                    id="attendance-client"
                     list="attendance-client-names"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
-                    placeholder="Select or type client name"
+                    className="h-10"
                     autoComplete="organization"
                   />
                   <datalist id="attendance-client-names">
@@ -470,64 +440,40 @@ export default function AttendancePage() {
                       <option key={c} value={c} />
                     ))}
                   </datalist>
-                </label>
+                </div>
               )}
+              <Button
+                type="button"
+                className="h-11 w-full sm:w-auto sm:min-w-[10rem]"
+                disabled={checkingIn}
+                onClick={() => void handleCheckIn()}
+              >
+                <LogIn size={16} className="mr-1.5" />
+                {checkingIn ? 'Processing…' : 'Check in'}
+              </Button>
             </div>
-            {placeOfWork === 'Work from Home' && (
-              <p className="text-xs text-muted-foreground">
-                {isArticle
-                  ? 'Manager must approve WFH for today before you can check in.'
-                  : 'Marking attendance as Work from Home.'}
-              </p>
-            )}
-            {placeOfWork === 'Client Place' && (
-              <p className="text-xs text-muted-foreground">
-                Select or type the client name where you are working today.
-              </p>
-            )}
-          </div>
-        )}
-        {todayRecord ? (
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="flex items-center gap-1 text-sm text-foreground">
-              <LogIn size={14} className="text-success" />
-              {todayRecord.checkIn ? new Date(todayRecord.checkIn).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
-            </span>
-            {todayRecord.location && (
-              <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                <MapPin size={14} />
-                {todayRecord.location}
-                {todayRecord.clientName ? ` · ${todayRecord.clientName}` : ''}
-              </span>
-            )}
-            {todayRecord.lateBand && todayRecord.lateBand !== 'on_time' && (
-              <span className="text-sm text-warning">
-                {todayRecord.lateBand === 'soft_late' ? 'Late (10:06–10:35)' : 'Late (after 10:35)'}
-              </span>
-            )}
-            {dayState === 'closed' && todayRecord?.checkOut && (
-              <span className="flex items-center gap-1 text-sm text-foreground">
-                <LogOut size={14} className="text-danger" />
-                {new Date(todayRecord.checkOut).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
-            {(todayRecord.hoursWorked != null || dayState === 'closed') && (
-              <span className="text-sm text-muted-foreground">
-                {Number(todayRecord.hoursWorked ?? hoursBetween(todayRecord.checkIn, todayRecord.checkOut) ?? 0).toFixed(1)} hrs
-              </span>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {placeOfWork === 'Office'
-              ? 'Not checked in.'
-              : placeOfWork === 'Work from Home'
-                ? isArticle
-                  ? 'Not checked in. WFH needs manager approval for today.'
-                  : 'Not checked in. Select Work from Home, then check in.'
-                : 'Not checked in. Select or enter client name, then check in.'}
-          </p>
-        )}
+          )}
+
+          {dayState === 'open' && (
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-11 w-full sm:w-auto"
+              disabled={checkingIn}
+              onClick={() => void handleCheckOut()}
+            >
+              <LogOut size={16} className="mr-1.5" />
+              {checkingIn ? 'Processing…' : 'End day'}
+            </Button>
+          )}
+
+          {dayState === 'closed' && (
+            <Button type="button" className="h-11" disabled={checkingIn} onClick={() => void handleResumeDay()}>
+              <LogIn size={16} className="mr-1.5" />
+              {checkingIn ? 'Processing…' : 'Resume day'}
+            </Button>
+          )}
+        </div>
       </PanelCard>
 
       {summary && (
@@ -546,125 +492,63 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1 bg-surface rounded-lg p-1 w-fit">
-          <button type="button" onClick={() => setTab('attendance')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'attendance' ? 'bg-card-hover text-foreground' : 'text-muted-foreground hover:text-foreground-secondary'}`}>Records</button>
-          <button type="button" onClick={() => setTab('leaves')} className={`text-sm px-4 py-1.5 rounded-md transition-colors ${tab === 'leaves' ? 'bg-card-hover text-foreground' : 'text-muted-foreground hover:text-foreground-secondary'}`}>Leave Requests</button>
+      <PanelCard title="Filter attendance records">
+        <div className="flex flex-wrap items-end gap-3 px-4 pb-4">
+          <label className="text-sm">
+            <span className="mb-1 block text-xs text-muted-foreground">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-10 min-w-36 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              aria-label="Filter attendance by status"
+            >
+              <option value="all">All statuses</option>
+              <option value="present">Present</option>
+              <option value="late">Late</option>
+              <option value="half-day">Half-day</option>
+              <option value="absent">Absent</option>
+              <option value="leave">Leave</option>
+              <option value="wfh-pending">WFH pending</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-xs text-muted-foreground">Location</span>
+            <select
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+              className="h-10 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              aria-label="Filter attendance by location"
+            >
+              <option value="all">All locations</option>
+              <option value="Office">Office</option>
+              <option value="Client Place">Client Place</option>
+              <option value="Work from Home">Work from Home</option>
+            </select>
+          </label>
+          {(statusFilter !== 'all' || locationFilter !== 'all') && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStatusFilter('all');
+                setLocationFilter('all');
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground">
+            Showing {filteredRecords.length} of {records.length} record{records.length === 1 ? '' : 's'}
+          </span>
         </div>
-        {tab === 'leaves' && (
-          <button type="button" onClick={() => setShowLeaveForm(true)} className="btn-primary flex items-center gap-2 text-sm">
-            <Plus size={14} /> Apply Leave
-          </button>
-        )}
-      </div>
-
-      {tab === 'attendance' && (
-        <PanelCard title="Filter attendance records">
-          <div className="flex flex-wrap items-end gap-3 px-4 pb-4">
-            <label className="text-sm">
-              <span className="mb-1 block text-xs text-muted-foreground">Status</span>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="h-10 min-w-36 rounded-md border border-border bg-background px-3 text-sm text-foreground"
-                aria-label="Filter attendance by status"
-              >
-                <option value="all">All statuses</option>
-                <option value="present">Present</option>
-                <option value="late">Late</option>
-                <option value="half-day">Half-day</option>
-                <option value="absent">Absent</option>
-                <option value="leave">Leave</option>
-                <option value="wfh-pending">WFH pending</option>
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="mb-1 block text-xs text-muted-foreground">Location</span>
-              <select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
-                className="h-10 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground"
-                aria-label="Filter attendance by location"
-              >
-                <option value="all">All locations</option>
-                <option value="Office">Office</option>
-                <option value="Client Place">Client Place</option>
-                <option value="Work from Home">Work from Home</option>
-              </select>
-            </label>
-            {(statusFilter !== 'all' || locationFilter !== 'all') && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setStatusFilter('all');
-                  setLocationFilter('all');
-                }}
-              >
-                Clear filters
-              </Button>
-            )}
-            <span className="ml-auto text-xs text-muted-foreground">
-              Showing {filteredRecords.length} of {records.length} record{records.length === 1 ? '' : 's'}
-            </span>
-          </div>
-        </PanelCard>
-      )}
-
-      {/* Leave Request Form Modal */}
-      {showLeaveForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="card w-full max-w-md mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground">Apply for Leave</h3>
-              <button type="button" onClick={() => setShowLeaveForm(false)} className="p-1 rounded hover:bg-hover-bg"><X size={16} /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="leave-type" className="block text-sm text-muted-foreground mb-1">Leave Type</label>
-                <select id="leave-type" aria-label="Leave Type" value={leaveForm.type} onChange={(e) => setLeaveForm({ ...leaveForm, type: e.target.value })} className="input w-full">
-                  {LEAVE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div className="stat-grid-2">
-                <div>
-                  <label htmlFor="leave-from-date" className="block text-sm text-muted-foreground mb-1">From</label>
-                  <input id="leave-from-date" type="date" aria-label="From" value={leaveForm.startDate} onChange={(e) => setLeaveForm({ ...leaveForm, startDate: e.target.value })} className="input w-full" />
-                </div>
-                <div>
-                  <label htmlFor="leave-to-date" className="block text-sm text-muted-foreground mb-1">To</label>
-                  <input id="leave-to-date" type="date" aria-label="To" value={leaveForm.endDate} onChange={(e) => setLeaveForm({ ...leaveForm, endDate: e.target.value })} className="input w-full" />
-                </div>
-              </div>
-              <div>
-                <label htmlFor="leave-reason" className="block text-sm text-muted-foreground mb-1">Reason</label>
-                <textarea id="leave-reason" aria-label="Reason" value={leaveForm.reason} onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} className="input w-full" rows={3} placeholder="Optional reason..." />
-              </div>
-              {leaveForm.startDate && leaveForm.endDate && (
-                <p className="text-xs text-muted-foreground">
-                  Duration: {Math.max(1, Math.ceil((new Date(leaveForm.endDate).getTime() - new Date(leaveForm.startDate).getTime()) / (1000*60*60*24)) + 1)} day(s)
-                </p>
-              )}
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowLeaveForm(false)} className="btn-secondary text-sm">Cancel</button>
-                <button type="button" onClick={handleSubmitLeave} disabled={submittingLeave || !leaveForm.startDate || !leaveForm.endDate} className="btn-primary text-sm disabled:opacity-50">
-                  {submittingLeave ? 'Submitting...' : 'Submit Request'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </PanelCard>
 
       {loading ? (
-        <div className="flex items-center justify-center h-32">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : tab === 'attendance' ? (
+        <PageLoading className="h-32 py-0" />
+      ) : (
         <div className="space-y-1">
-          {filteredRecords.map(r => (
+          {filteredRecords.map((r) => (
             <div key={r.id} className="card flex items-center justify-between py-3">
               <div className="flex items-center gap-3">
                 <div className="icon-well-sm">
@@ -702,59 +586,8 @@ export default function AttendancePage() {
             </div>
           ))}
           {filteredRecords.length === 0 && (
-            <p className="text-center text-muted-foreground py-8">
-              {records.length === 0 ? 'No attendance records for this selection' : 'No records match the selected filters'}
-            </p>
+            <EmptyState title={records.length === 0 ? 'No attendance records' : 'No matching records'} />
           )}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {leaves.map(l => (
-            <div key={l.id} className="card flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-foreground font-medium">{l.type} Leave</p>
-                  {(l as any).user && (
-                    <span className="text-xs text-muted-foreground">— {(l as any).user.firstName} {(l as any).user.lastName}</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">{new Date(l.fromDate).toLocaleDateString('en-IN')} — {new Date(l.toDate).toLocaleDateString('en-IN')}</p>
-                {l.reason && <p className="text-xs text-muted-foreground mt-1">{l.reason}</p>}
-              </div>
-              <div className="flex items-center gap-2">
-                <ApprovalStatusBadge status={l.status} />
-                {((l.status === 'Pending' &&
-                  ['Partner', 'Manager', 'Admin', 'HR'].includes(user?.role || '')) ||
-                  (l.status === 'Manager Approved' &&
-                    ['Partner', 'Admin', 'HR'].includes(user?.role || ''))) && (
-                  <div className="flex gap-1 ml-2">
-                    <button
-                      type="button"
-                      onClick={() => void handleApproveLeave(l.id, 'approve')}
-                      className="p-1.5 rounded-lg hover:bg-green-500/10 text-green-500"
-                      title={
-                        l.status === 'Manager Approved' ||
-                        ['Partner', 'Admin', 'HR'].includes(user?.role || '')
-                          ? 'Final approve'
-                          : 'Approve'
-                      }
-                    >
-                      <CheckCircle2 size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleApproveLeave(l.id, 'reject')}
-                      className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-500"
-                      title="Reject"
-                    >
-                      <XCircle size={16} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-          {leaves.length === 0 && <p className="text-center text-muted-foreground py-8">No leave requests</p>}
         </div>
       )}
     </AppPageContainer>

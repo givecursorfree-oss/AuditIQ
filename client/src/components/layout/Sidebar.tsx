@@ -57,37 +57,41 @@ import {
   useSidebar,
 } from '../ui/sidebar';
 
+const MUTED = 'text-muted-foreground';
+
 const iconByPath: Record<string, { icon: LucideIcon; iconColor: string }> = {
-  '/': { icon: LayoutDashboard, iconColor: 'text-foreground' },
-  '/engagements/workflow': { icon: Kanban, iconColor: 'text-teal-500' },
-  '/workflow': { icon: Kanban, iconColor: 'text-emerald-500' },
-  '/services': { icon: ClipboardList, iconColor: 'text-teal-500' },
-  '/requests': { icon: ClipboardList, iconColor: 'text-blue-500' },
-  '/document-library': { icon: FileStack, iconColor: 'text-violet-500' },
-  '/admin/scheduler': { icon: CalendarClock, iconColor: 'text-amber-500' },
-  '/engagements': { icon: Briefcase, iconColor: 'text-emerald-500' },
-  '/clients': { icon: Building2, iconColor: 'text-blue-500' },
-  '/workpapers': { icon: FileText, iconColor: 'text-violet-500' },
-  '/documents': { icon: FolderOpen, iconColor: 'text-cyan-500' },
-  '/approvals': { icon: CheckSquare, iconColor: 'text-amber-500' },
-  '/time-tracker': { icon: Timer, iconColor: 'text-orange-500' },
-  '/attendance': { icon: Clock, iconColor: 'text-orange-500' },
-  '/leave-stipend': { icon: Calendar, iconColor: 'text-pink-500' },
-  '/employees': { icon: Users, iconColor: 'text-rose-500' },
-  '/reports': { icon: BarChart3, iconColor: 'text-rose-500' },
-  '/billing': { icon: Receipt, iconColor: 'text-amber-500' },
-  '/management-reports': { icon: PieChart, iconColor: 'text-violet-500' },
-  '/vault': { icon: Lock, iconColor: 'text-muted-foreground' },
-  '/settings': { icon: Settings, iconColor: 'text-muted-foreground' },
-  '/messages': { icon: MessageSquare, iconColor: 'text-cyan-500' },
-  '/client/dashboard': { icon: Building2, iconColor: 'text-blue-500' },
-  '/client/messages': { icon: MessageSquare, iconColor: 'text-cyan-500' },
+  '/': { icon: LayoutDashboard, iconColor: MUTED },
+  '/engagements/workflow': { icon: Kanban, iconColor: MUTED },
+  '/workflow': { icon: Kanban, iconColor: MUTED },
+  '/services': { icon: ClipboardList, iconColor: MUTED },
+  '/requests': { icon: ClipboardList, iconColor: MUTED },
+  '/document-library': { icon: FileStack, iconColor: MUTED },
+  '/admin/scheduler': { icon: CalendarClock, iconColor: MUTED },
+  '/engagements': { icon: Briefcase, iconColor: MUTED },
+  '/clients': { icon: Building2, iconColor: MUTED },
+  '/workpapers': { icon: FileText, iconColor: MUTED },
+  '/documents': { icon: FolderOpen, iconColor: MUTED },
+  '/approvals': { icon: CheckSquare, iconColor: MUTED },
+  '/time-tracker': { icon: Timer, iconColor: MUTED },
+  '/attendance': { icon: Clock, iconColor: MUTED },
+  '/leave-stipend': { icon: Calendar, iconColor: MUTED },
+  '/employees': { icon: Users, iconColor: MUTED },
+  '/reports': { icon: BarChart3, iconColor: MUTED },
+  '/billing': { icon: Receipt, iconColor: MUTED },
+  '/management-reports': { icon: PieChart, iconColor: MUTED },
+  '/vault': { icon: Lock, iconColor: MUTED },
+  '/settings': { icon: Settings, iconColor: MUTED },
+  '/messages': { icon: MessageSquare, iconColor: MUTED },
+  '/client/dashboard': { icon: Building2, iconColor: MUTED },
+  '/client/messages': { icon: MessageSquare, iconColor: MUTED },
+  '/claims': { icon: Receipt, iconColor: MUTED },
+  '/notices': { icon: Bell, iconColor: MUTED },
 };
 
 const iconByNavId: Record<string, { icon: LucideIcon; iconColor: string }> = {
-  stipend: { icon: GraduationCap, iconColor: 'text-pink-500' },
-  'leave-manage': { icon: Calendar, iconColor: 'text-pink-500' },
-  'leave-apply': { icon: Calendar, iconColor: 'text-pink-500' },
+  stipend: { icon: GraduationCap, iconColor: MUTED },
+  'leave-manage': { icon: Calendar, iconColor: MUTED },
+  'leave-apply': { icon: Calendar, iconColor: MUTED },
 };
 
 interface ChromeItem {
@@ -99,8 +103,8 @@ interface ChromeItem {
 }
 
 const chromeItems: ChromeItem[] = [
-  { to: '#search', icon: Search, label: 'Search', iconColor: 'text-muted-foreground', action: 'search' },
-  { to: '#notifications', icon: Bell, label: 'Notification', iconColor: 'text-amber-500', action: 'notifications' },
+  { to: '#search', icon: Search, label: 'Search', iconColor: MUTED, action: 'search' },
+  { to: '#notifications', icon: Bell, label: 'Notification', iconColor: MUTED, action: 'notifications' },
 ];
 
 function navIcon(item: NavCatalogItem) {
@@ -133,6 +137,7 @@ export default function AppSidebar() {
         'Sign out of AuditIQ only. Your attendance for today stays open until you tap Check out on the Attendance page.',
       confirmLabel: 'Sign out',
       cancelLabel: 'Cancel',
+      destructive: true,
     });
     if (!ok) return;
     await logout();
@@ -205,7 +210,7 @@ export default function AppSidebar() {
           </span>
         </span>
         <span className="text-sm">{item.label}</span>
-        <span className="group-data-[collapsible=icon]:hidden">
+        <span className="ml-auto flex items-center gap-1.5 group-data-[collapsible=icon]:hidden">
           <NavCountBadge count={notifCount} />
         </span>
       </SidebarMenuButton>
@@ -229,7 +234,6 @@ export default function AppSidebar() {
             size="icon"
             className="hidden h-8 w-8 shrink-0 lg:flex"
             onClick={toggleSidebar}
-            title={open ? 'Collapse sidebar' : 'Expand sidebar'}
             aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
           >
             {open ? <ChevronsLeft className="size-4" /> : <ChevronsRight className="size-4" />}

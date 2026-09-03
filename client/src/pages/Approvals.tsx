@@ -21,11 +21,12 @@ import PageHeader from '../components/layout/PageHeader';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import { SplitPaneLayout } from '../components/layout/SplitPaneLayout';
 import { PanelCard } from '../components/layout/PanelCard';
-import { EmptyState, LoadingCenter } from '../components/layout/StatePanels';
+import { EmptyState, ErrorBanner, LoadingCenter } from '../components/layout/StatePanels';
 import { WorkflowApprovalStatusBadge, PriorityBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
 import { NavCountBadge } from '@/components/ui/nav-count-badge';
 import { AccessibleTabList, AccessibleTabPanel } from '@/components/ui/accessible-tabs';
+import { ClaimsApprovalInbox } from '@/components/claims/ClaimsApprovalInbox';
 import {
   Dialog,
   DialogContent,
@@ -127,6 +128,7 @@ export default function Approvals() {
   const [selectedReq, setSelectedReq] = useState<ApprovalRequest | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreateReq, setShowCreateReq] = useState(false);
   const [showCreateWf, setShowCreateWf] = useState(false);
 
@@ -146,12 +148,13 @@ export default function Approvals() {
       const { data } = await api.get<Workflow[]>('/approvals/workflows');
       setWorkflows(data);
     } catch {
-      /* empty */
+      setLoadError('Failed to load.');
     }
   }
 
   async function fetchData() {
     setLoading(true);
+    setLoadError(null);
     try {
       if (view === 'workflows') {
         await fetchWorkflows();
@@ -163,7 +166,7 @@ export default function Approvals() {
       const { data: count } = await api.get<{ count: number }>('/approvals/pending-count');
       setPendingCount(count.count);
     } catch {
-      /* empty */
+      setLoadError('Failed to load.');
     } finally {
       setLoading(false);
     }
@@ -230,15 +233,9 @@ export default function Approvals() {
         description="Manage approval workflows and requests"
         actions={
           <>
-            {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => navigate('/claims/pending')}
-              >
-                Claim approvals
+            {['Partner', 'Admin', 'Manager', 'Accounts'].includes(user?.role || '') && (
+              <Button type="button" variant="outline" size="sm" onClick={() => navigate('/claims/batches')}>
+                Claim batches
               </Button>
             )}
             {isAdmin && view === 'workflows' && (
@@ -279,6 +276,7 @@ export default function Approvals() {
         labelledBy={`approvals-tab-${view}`}
         className="flex min-h-0 flex-1 flex-col"
       >
+        {loadError && <ErrorBanner message={loadError} onRetry={() => void fetchData()} className="mb-2" />}
         {loading ? (
           <LoadingCenter label="Loading approvals…" />
         ) : view === 'workflows' ? (
@@ -297,6 +295,47 @@ export default function Approvals() {
               }
             }}
           />
+        ) : view === 'pending' && ['Partner', 'Admin', 'Manager'].includes(user?.role ?? '') ? (
+          <div className="space-y-4">
+            <PanelCard title="Staff claims">
+              <ClaimsApprovalInbox />
+            </PanelCard>
+            <SplitPaneLayout
+            hasSelection={Boolean(selectedReq)}
+            onClearSelection={() => setSelectedReq(null)}
+            backLabel="Back to requests"
+            list={
+              <RequestList
+                requests={filteredRequests}
+                onSelect={async (req) => {
+                  try {
+                    const { data } = await api.get<ApprovalRequest>(`/approvals/requests/${req.id}`);
+                    setSelectedReq(data);
+                  } catch {
+                    void appAlert({ title: 'Load failed', message: 'Failed to load request details' });
+                  }
+                }}
+                emptyText={emptyText}
+              />
+            }
+            detail={
+              selectedReq ? (
+                <RequestDetail
+                  req={selectedReq}
+                  onAction={handleAction}
+                  currentUserId={user?.id}
+                  currentUserRole={user?.role}
+                  isPrivileged={isAdmin}
+                />
+              ) : (
+                <div className="hidden flex-col items-center justify-center p-8 text-muted-foreground lg:flex lg:min-h-[320px]">
+                  <ListChecks size={48} className="mb-4 opacity-30" />
+                  <p className="text-sm">Select a request to view details</p>
+                </div>
+              )
+            }
+          />
+          </div>
         ) : (
           <SplitPaneLayout
             hasSelection={Boolean(selectedReq)}
@@ -445,18 +484,18 @@ function RequestDetail({
               <div
                 className={cn(
                   'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-                  s.status === 'Approved' && 'bg-emerald-500 text-white',
-                  s.status === 'Rejected' && 'bg-red-500 text-white',
+                  s.status === 'Approved' && 'bg-success text-white',
+                  s.status === 'Rejected' && 'bg-destructive text-white',
                   s.status === 'Pending' &&
                     s.stepOrder === req.currentStep &&
-                    'animate-pulse bg-amber-500 text-white',
+                    'animate-pulse bg-warning text-white',
                   s.status === 'Pending' &&
                     s.stepOrder !== req.currentStep &&
-                    'bg-slate-200 text-slate-500',
+                    'bg-muted text-muted-foreground',
                   s.status !== 'Pending' &&
                     s.status !== 'Approved' &&
                     s.status !== 'Rejected' &&
-                    'bg-slate-200 text-slate-500'
+                    'bg-muted text-muted-foreground'
                 )}
               >
                 {s.status === 'Approved' ? <Check size={14} /> : s.status === 'Rejected' ? (
@@ -501,6 +540,7 @@ function RequestDetail({
               <Button
                 type="button"
                 size="sm"
+                variant="success"
                 className="gap-1.5"
                 onClick={() => {
                   onAction(req.id, 'APPROVE', comment);

@@ -1,9 +1,11 @@
 import { getEnv } from './env.js';
 import { getEmbeddingModelName, isSemanticSearchEnabled } from './typesense.js';
+import { isPaddleOcrReachable } from './paddleOcr.js';
 
 export type SearchServicesStatus = {
   typesense: 'ok' | 'unreachable';
   tika: 'ok' | 'unreachable';
+  paddleOcr: 'ok' | 'unreachable' | 'disabled';
   semantic: 'enabled' | 'disabled' | 'unavailable';
   embeddingModel: string | null;
   mode: 'hybrid' | 'keyword' | 'mysql';
@@ -20,6 +22,7 @@ export async function getSearchServicesStatus(): Promise<SearchServicesStatus> {
   const env = getEnv();
   let typesense: SearchServicesStatus['typesense'] = 'unreachable';
   let tika: SearchServicesStatus['tika'] = 'unreachable';
+  let paddleOcr: SearchServicesStatus['paddleOcr'] = env.PADDLE_OCR_URL ? 'unreachable' : 'disabled';
 
   try {
     const r = await fetch(`${env.TYPESENSE_HOST.replace(/\/$/, '')}/health`, {
@@ -41,6 +44,10 @@ export async function getSearchServicesStatus(): Promise<SearchServicesStatus> {
     tika = 'unreachable';
   }
 
+  if (env.PADDLE_OCR_URL) {
+    paddleOcr = (await isPaddleOcrReachable()) ? 'ok' : 'unreachable';
+  }
+
   const embeddingModel = isSemanticSearchEnabled() ? getEmbeddingModelName() : null;
   let semantic: SearchServicesStatus['semantic'] = 'disabled';
   if (embeddingModel) {
@@ -55,6 +62,7 @@ export async function getSearchServicesStatus(): Promise<SearchServicesStatus> {
   const status: SearchServicesStatus = {
     typesense,
     tika,
+    paddleOcr,
     semantic,
     embeddingModel,
     mode,

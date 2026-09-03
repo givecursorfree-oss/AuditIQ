@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { isStaffPresenceRole } from '@/lib/presence';
 import { isAttendanceEligible } from '@/lib/attendancePopup';
 import { useActivityMonitor, type ActivityStatus } from '@/hooks/useActivityMonitor';
+import { notifyStopwatchChanged } from '@/lib/stopwatchEvents';
 
 interface ActivityTrackingContextValue {
   activityStatus: ActivityStatus;
@@ -46,10 +47,16 @@ export function ActivityTrackingProvider({ children }: { children: ReactNode }) 
       void pushStatus(status);
     },
     onAway: () => {
-      void api.post('/stopwatch/pause').catch(() => {});
+      void api
+        .post('/stopwatch/pause')
+        .then(() => notifyStopwatchChanged())
+        .catch(() => {});
     },
     onReturn: () => {
-      void api.post('/stopwatch/resume').catch(() => {});
+      void api
+        .post('/stopwatch/resume')
+        .then(() => notifyStopwatchChanged())
+        .catch(() => {});
     },
   });
 

@@ -10,6 +10,7 @@ import {
   getExt,
 } from '@/components/documents/documentHelpers';
 import { modalBackdropProps } from '@/lib/interactiveProps';
+import { Button } from '@/components/ui/button';
 
 type DocumentUploadSectionProps = {
   onClose: () => void;
@@ -149,12 +150,7 @@ export default function DocumentUploadSection({ onClose, onUploaded, versionOf }
                 {files.length} file{files.length > 1 ? 's' : ''} selected ({formatSize(totalSize)})
               </p>
             ) : (
-              <>
-                <p className="text-sm text-muted-foreground">Drag & drop or click to browse</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Select multiple files · PDF, XLSX, DOCX, CSV, images (max 50MB each)
-                </p>
-              </>
+              <p className="text-sm text-foreground">Upload</p>
             )}
             <input
               id="file-input"
@@ -254,12 +250,12 @@ export default function DocumentUploadSection({ onClose, onUploaded, versionOf }
           </label>
 
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary flex-1">
+            <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onClose}>
               Cancel
-            </button>
-            <button type="submit" disabled={files.length === 0 || uploading} className="btn-primary flex-1 disabled:opacity-50">
+            </Button>
+            <Button type="submit" size="sm" className="flex-1" disabled={files.length === 0 || uploading}>
               {uploading ? `Uploading ${progress}%...` : files.length > 1 ? `Upload ${files.length} Files` : 'Upload'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

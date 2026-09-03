@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
+    user: {
+      findUnique: vi.fn(),
+    },
     engagement: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -30,6 +33,29 @@ import {
 describe('canAccessEngagement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+  });
+
+  it('allows Senior Audit Manager firm-wide via hierarchy', async () => {
+    mockPrisma.engagement.findUnique.mockResolvedValue({ firmId: 'firm-a' });
+    const ok = await canAccessEngagement('u1', 'Manager', 'firm-a', 'eng-1', 'SENIOR_AUDIT_MANAGER');
+    expect(ok).toBe(true);
+  });
+
+  it('denies Audit Manager without assignment', async () => {
+    mockPrisma.engagement.findUnique.mockResolvedValue({
+      firmId: 'firm-a',
+      partnerInChargeId: null,
+      managerId: 'other',
+      articleAssistantId: null,
+      currentStage: 'Filing',
+      filedAt: null,
+      archivedAt: null,
+    });
+    mockPrisma.engagementMember.findFirst.mockResolvedValue(null);
+    mockPrisma.task.findFirst.mockResolvedValue(null);
+    const ok = await canAccessEngagement('u-am', 'Manager', 'firm-a', 'eng-1', 'AUDIT_MANAGER');
+    expect(ok).toBe(false);
   });
 
   it('denies when engagement does not exist', async () => {
@@ -94,6 +120,7 @@ describe('canAccessEngagement', () => {
 describe('engagementIdsFilter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.user.findUnique.mockResolvedValue(null);
   });
 
   it('returns empty filter when user has no firm', async () => {
@@ -108,11 +135,8 @@ describe('engagementIdsFilter', () => {
   });
 
   it('returns member and task-assigned engagements for Staff', async () => {
-    mockPrisma.engagementMember.findMany.mockResolvedValue([
-      { engagementId: 'e3' },
-    ]);
-    mockPrisma.task.findMany.mockResolvedValue([{ engagementId: 'e4' }]);
-    const filter = await engagementIdsFilter('u1', 'Staff', 'firm-a');
+    mockPrisma.engagement.findMany.mockResolvedValue([{ id: 'e3' }, { id: 'e4' }]);
+    const filter = await engagementIdsFilter('u1', 'Staff', 'firm-a', 'AUDIT_EXECUTIVE');
     expect(filter).toEqual({ engagementId: { in: ['e3', 'e4'] } });
   });
 });

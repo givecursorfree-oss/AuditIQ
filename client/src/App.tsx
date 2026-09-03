@@ -4,11 +4,14 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AuditIQLogo from './components/brand/AuditIQLogo';
 import PageLoading from './components/layout/PageLoading';
+import { Button } from './components/ui/button';
 import { AppDialogProvider } from './context/AppDialogContext';
 import { AppToastProvider } from './context/AppToastContext';
 import { AttendanceConfirmationProvider } from './context/AttendanceConfirmationContext';
 import Layout from './components/layout/Layout';
 import RouteGuard from './components/layout/RouteGuard';
+import { SessionTimeoutGuard } from './components/auth/SessionTimeoutGuard';
+import CookieConsentBanner from './components/cookie-consent/CookieConsentBanner';
 // Retry lazy imports once on chunk-load failure (handles Vercel redeploy cache invalidation)
 function lazyRetry(factory: () => Promise<{ default: React.ComponentType }>) {
   return lazy(() =>
@@ -72,6 +75,9 @@ const StaffSchedulePage = lazyRetry(() => import('./pages/StaffSchedulePage'));
 const ClaimsPending = lazyRetry(() => import('./pages/claims/ClaimsPending'));
 const LateHoursClaimForm = lazyRetry(() => import('./pages/claims/LateHoursClaimForm').then((m) => ({ default: m.LateHoursClaimForm })));
 const DeptVisitClaimForm = lazyRetry(() => import('./pages/claims/DeptVisitClaimForm').then((m) => ({ default: m.DeptVisitClaimForm })));
+const ClaimBatchesPage = lazyRetry(() => import('./pages/claims/ClaimBatchesPage'));
+const ClaimsHub = lazyRetry(() => import('./pages/claims/ClaimsHub'));
+const NewStaffClaimForm = lazyRetry(() => import('./pages/claims/NewStaffClaimForm').then((m) => ({ default: m.NewStaffClaimForm })));
 
 // Error boundary to catch render errors and prevent blank screen
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -98,13 +104,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
                 {this.state.message}
               </p>
             ) : null}
-            <button
+            <Button
               type="button"
               onClick={() => window.location.reload()}
-              className="btn-primary"
+              size="sm"
             >
               Refresh Page
-            </button>
+            </Button>
           </div>
         </div>
       );
@@ -135,7 +141,14 @@ function ProtectedRoute() {
     return <AuthLoadingScreen label="Checking your session…" />;
   }
 
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+
+  return (
+    <>
+      <SessionTimeoutGuard />
+      <Outlet />
+    </>
+  );
 }
 
 function ClientRedirect() {
@@ -163,6 +176,7 @@ export default function App() {
         <AppToastProvider>
         <AppDialogProvider>
         <ErrorBoundary>
+        <CookieConsentBanner />
         <Suspense fallback={<PageFallback />}>
           <Routes>
             {/* Public routes */}
@@ -218,6 +232,11 @@ export default function App() {
                   <Route path="/claims/pending" element={<ClaimsPending />} />
                   <Route path="/claims/new/late-hours" element={<LateHoursClaimForm />} />
                   <Route path="/claims/new/dept-visit" element={<DeptVisitClaimForm />} />
+                  <Route path="/claims" element={<ClaimsHub />} />
+                  <Route path="/claims/new/:claimType" element={<NewStaffClaimForm />} />
+                  <Route path="/claims/batches" element={<ClaimBatchesPage />} />
+                  <Route path="/expenses" element={<Navigate to="/claims" replace />} />
+                  <Route path="/expenses/*" element={<Navigate to="/claims" replace />} />
                   <Route path="/client-master" element={<Navigate to="/clients" replace />} />
                   <Route path="/onboarding" element={<Navigate to="/clients?tab=incoming" replace />} />
                   <Route path="/approvals" element={<Approvals />} />

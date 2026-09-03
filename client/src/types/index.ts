@@ -56,6 +56,7 @@ export interface Firm {
   phone?: string;
   email?: string;
   website?: string;
+  expenseSubmissionWindowDays?: number;
 }
 
 

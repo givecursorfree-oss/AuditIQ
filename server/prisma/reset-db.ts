@@ -32,7 +32,7 @@ async function main() {
   console.log('🧹 Clearing database...\n');
   await clearDatabase(prisma);
 
-  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals'];
+  const modules = ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals', 'expenses'];
   const actions = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
   const permissionData: { module: string; action: string; description: string }[] = [];
   for (const mod of modules) {
@@ -79,7 +79,7 @@ async function main() {
       isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'clients', 'invoices', 'vault', 'approvals'],
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'employees', 'messages', 'clients', 'invoices', 'vault', 'approvals', 'expenses'],
           ['view', 'create', 'edit', 'approve', 'export', 'apply', 'manage']
         ).map((pid) => ({ permissionId: pid })),
       },
@@ -93,7 +93,7 @@ async function main() {
       isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages'],
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'expenses'],
           ['view', 'create', 'edit', 'apply']
         ).map((pid) => ({ permissionId: pid })),
       },
@@ -107,8 +107,8 @@ async function main() {
       isSystem: false,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'],
-          ['view', 'apply']
+          ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages', 'expenses'],
+          ['view', 'apply', 'create']
         ).map((pid) => ({ permissionId: pid })),
       },
     },
@@ -148,8 +148,8 @@ async function main() {
       isSystem: true,
       permissions: {
         create: getPermIds(
-          ['dashboard', 'invoices', 'attendance', 'messages'],
-          ['view', 'create', 'edit', 'export']
+          ['dashboard', 'invoices', 'attendance', 'messages', 'expenses'],
+          ['view', 'create', 'edit', 'export', 'manage']
         ).map((pid) => ({ permissionId: pid })),
       },
     },

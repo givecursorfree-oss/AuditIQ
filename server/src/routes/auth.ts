@@ -22,6 +22,7 @@ import {
 } from '../lib/authSecurity.js';
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp.js';
 import { encryptSecret, decryptSecret } from '../lib/vaultCrypto.js';
+import { isSessionAbsolutelyExpired } from '../lib/sessionPolicy.js';
 
 const router = Router();
 
@@ -419,7 +420,11 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     const refreshToken = generateToken();
     await prisma.user.update({
       where: { id: user.id },
-      data: { refreshTokenHash: hashToken(refreshToken), refreshToken: null },
+      data: {
+        refreshTokenHash: hashToken(refreshToken),
+        refreshToken: null,
+        sessionStartedAt: new Date(),
+      },
     });
 
     setTokensCookie(res, token, refreshToken);
@@ -542,6 +547,7 @@ router.post('/reset-password', async (req: Request, res: Response): Promise<void
           lockedUntil: null,
           refreshTokenHash: null,
           refreshToken: null,
+          sessionStartedAt: null,
         },
       }),
       // Keep the client portal credential in sync when one exists
@@ -599,11 +605,13 @@ async function issueSession(
   );
   const refreshToken = generateToken();
   const staffRoles = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'];
+  const sessionStartedAt = new Date();
   await prisma.user.update({
     where: { id: user.id },
     data: {
       refreshTokenHash: hashToken(refreshToken),
       refreshToken: null, // clear any legacy plaintext token
+      sessionStartedAt,
       failedLoginCount: 0,
       lockedUntil: null,
       ...(staffRoles.includes(user.role)
@@ -959,6 +967,7 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response): Pr
       data: {
         refreshToken: null,
         refreshTokenHash: null,
+        sessionStartedAt: null,
         ...(staffRoles.includes(req.user.role)
           ? { presenceStatus: 'offline', presenceUpdatedAt: new Date() }
           : {}),
@@ -1109,6 +1118,15 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (isSessionAbsolutelyExpired(user.sessionStartedAt)) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { refreshTokenHash: null, refreshToken: null, sessionStartedAt: null },
+      });
+      res.status(401).json({ error: 'Session expired', code: 'SESSION_ABSOLUTE' });
+      return;
+    }
+
     // Generate new tokens (rotation: old token is invalidated)
     const newToken = jwt.sign(
       { id: user.id, email: user.email, role: user.role, firmId: user.firmId },
@@ -1118,7 +1136,12 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
     const newRefreshToken = generateToken();
     await prisma.user.update({
       where: { id: user.id },
-      data: { refreshTokenHash: hashToken(newRefreshToken), refreshToken: null },
+      data: {
+        refreshTokenHash: hashToken(newRefreshToken),
+        refreshToken: null,
+        // Keep original sessionStartedAt; only login resets the absolute clock.
+        sessionStartedAt: user.sessionStartedAt ?? new Date(),
+      },
     });
 
     setTokensCookie(res, newToken, newRefreshToken);

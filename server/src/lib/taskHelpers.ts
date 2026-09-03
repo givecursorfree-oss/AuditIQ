@@ -1,4 +1,5 @@
 import type { Task } from '@prisma/client';
+import { pipelineStageLabel, type EngagementPipelineContext } from './taskPipeline.js';
 
 export const TASK_STATUSES = ['not_started', 'in_progress', 'completed', 'blocked'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -34,11 +35,20 @@ export function displayTaskStatus(task: Pick<Task, 'dueDate' | 'status'>): strin
   return normalizeTaskStatus(task.status);
 }
 
-export function enrichTask<T extends Task>(task: T): T & { isOverdue: boolean; displayStatus: string } {
+export function enrichTask<T extends Task>(
+  task: T,
+  pipelineContext?: EngagementPipelineContext | null
+): T & { isOverdue: boolean; displayStatus: string; pipelineStageLabel?: string | null } {
+  const pipelineStage = (task as T & { pipelineStage?: string | null }).pipelineStage;
   return {
     ...task,
     status: normalizeTaskStatus(task.status),
     isOverdue: isTaskOverdue(task),
     displayStatus: displayTaskStatus(task),
+    pipelineStageLabel: pipelineContext
+      ? pipelineStageLabel(pipelineStage, pipelineContext)
+      : pipelineStage
+        ? pipelineStage
+        : null,
   };
 }

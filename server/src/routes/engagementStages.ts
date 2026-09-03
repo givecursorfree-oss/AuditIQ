@@ -1,10 +1,10 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
-import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
 import { sendEmail, emailTemplates } from '../lib/emailService.js';
 import { io } from '../index.js';
-import { engagementAccessWhere } from '../lib/engagementAccess.js';
+import { engagementAccessWhereForUser } from '../lib/engagementAccess.js';
 import logger from '../lib/logger.js';
 import { clientStageLabel, notifyClientPortalUsers } from '../lib/clientScope.js';
 import { postEngagementChatMessage } from '../lib/engagementChat.js';
@@ -86,9 +86,11 @@ router.get('/workflow-list', async (req: AuthRequest, res: Response): Promise<vo
     const statusFilter = String(req.query.status || '');
     const assignedTo = String(req.query.assignedTo || '');
 
+    const accessWhere = await engagementAccessWhereForUser(user.id);
+
     const engagements = await prisma.engagement.findMany({
       where: {
-        ...engagementAccessWhere(user.id, user.role, user.firmId),
+        ...accessWhere,
         currentStage: { notIn: ['Archived'] },
       },
         include: {
@@ -220,9 +222,11 @@ router.get('/board', async (req: AuthRequest, res: Response): Promise<void> => {
     const user = req.user!;
     const domainFilter = String(req.query.domain || 'AUDIT').toUpperCase() as WorkflowDomain;
 
+    const accessWhere = await engagementAccessWhereForUser(user.id);
+
     const engagements = await prisma.engagement.findMany({
       where: {
-        ...engagementAccessWhere(user.id, user.role, user.firmId),
+        ...accessWhere,
         currentStage: { notIn: ['Archived', 'Billing'] },
       },
       include: {
@@ -356,7 +360,10 @@ const moveSchema = z.object({
 });
 
 /** POST /api/engagement-stages/:id/move — advance engagement to a workflow step */
-router.post('/:id/move', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post(
+  '/:id/move',
+  authorize('Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = moveSchema.parse(req.body);
     const eng = await prisma.engagement.findFirst({
@@ -515,6 +522,11 @@ router.post('/:id/move', async (req: AuthRequest, res: Response): Promise<void> 
         clientId: eng.clientId,
         engagementId: eng.id,
         templateKey: 'filing-confirmation',
+      }).catch((err) => {
+        logger.warn('Filing confirmation email delivery failed', {
+          error: (err as Error).message,
+          engagementId: eng.id,
+        });
       });
     }
 
@@ -527,7 +539,8 @@ router.post('/:id/move', async (req: AuthRequest, res: Response): Promise<void> 
     logger.error('Move stage error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to move engagement' });
   }
-});
+  }
+);
 
 // Stage-gating logic
 async function checkStageGating(

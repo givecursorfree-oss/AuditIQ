@@ -2,7 +2,13 @@ import type { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
 import logger from './logger.js';
 import { getEnv } from './env.js';
-import { loginGovernmentPortal } from './portalAutomation.js';
+import { loginGovernmentPortal, runWithPortalSession } from './portalAutomation.js';
+import {
+  scrapeGstPortal,
+  scrapeIncomeTaxPortal,
+  scrapeTracesPortal,
+  mockPortalNotices,
+} from './portalScrapers.js';
 import { loadPortalCredentials } from './portalCredentials.js';
 
 export type PortalKind = 'GST' | 'Income_Tax' | 'TRACES';
@@ -105,26 +111,74 @@ class PlaywrightPortalProvider implements PortalProvider {
   readonly name = 'playwright';
   readonly configured = true;
 
-  private async loginAndReport(credentials: PortalCredentials): Promise<PortalFetchResult> {
-    const result = await loginGovernmentPortal(credentials);
-    if (result.status !== 'logged_in') {
-      return { configured: true, notices: [], message: result.message ?? `Login ${result.status}` };
+  private useMock(): boolean {
+    return process.env.PORTAL_SYNC_MOCK === 'true';
+  }
+
+  private async fetchWithScrape(
+    credentials: PortalCredentials,
+    portal: PortalKind,
+    scrape: (page: import('playwright').Page) => Promise<Partial<NoticeInput>[]>
+  ): Promise<PortalFetchResult> {
+    if (this.useMock()) {
+      return { configured: true, notices: mockPortalNotices(credentials.clientId, portal) };
     }
-    return { configured: true, notices: [] };
+    const result = await runWithPortalSession(credentials, scrape);
+    if (result.status !== 'logged_in') {
+      return {
+        configured: true,
+        notices: [],
+        message: result.message ?? `Login ${result.status}`,
+      };
+    }
+    return { configured: true, notices: result.data ?? [] };
   }
 
   fetchGSTNotices(credentials: PortalCredentials): Promise<PortalFetchResult> {
-    return this.loginAndReport(credentials);
+    if (this.useMock()) {
+      return Promise.resolve({
+        configured: true,
+        notices: mockPortalNotices(credentials.clientId, 'GST'),
+      });
+    }
+    return runWithPortalSession(credentials, (page) =>
+      scrapeGstPortal(page, credentials).then((r) => r.notices)
+    ).then((result) => {
+      if (result.status !== 'logged_in') {
+        return { configured: true, notices: [], message: result.message };
+      }
+      return { configured: true, notices: result.data ?? [] };
+    });
   }
+
   fetchITNotices(credentials: PortalCredentials): Promise<PortalFetchResult> {
-    return this.loginAndReport(credentials);
+    return this.fetchWithScrape(credentials, 'Income_Tax', (page) =>
+      scrapeIncomeTaxPortal(page, credentials)
+    );
   }
+
   fetchTRACES(credentials: PortalCredentials): Promise<PortalFetchResult> {
-    return this.loginAndReport(credentials);
+    return this.fetchWithScrape(credentials, 'TRACES', (page) =>
+      scrapeTracesPortal(page, credentials)
+    );
   }
-  async fetchGSTRFilingStatus(): Promise<{ GSTR_1: FilingStatus; GSTR_3B: FilingStatus }> {
+
+  async fetchGSTRFilingStatus(
+    credentials: PortalCredentials,
+    _period: string
+  ): Promise<{ GSTR_1: FilingStatus; GSTR_3B: FilingStatus }> {
+    if (this.useMock()) {
+      return { GSTR_1: 'filed', GSTR_3B: 'pending' };
+    }
+    const result = await runWithPortalSession(credentials, (page) =>
+      scrapeGstPortal(page, credentials)
+    );
+    if (result.status === 'logged_in' && result.data) {
+      return result.data.filingStatus;
+    }
     return { GSTR_1: 'unknown', GSTR_3B: 'unknown' };
   }
+
   async autoLogin(portal: PortalKind, credentials: PortalCredentials) {
     const result = await loginGovernmentPortal(credentials);
     return {
@@ -177,6 +231,46 @@ export const portalSyncService = {
 
 export type SyncResult = { synced: number; configured: boolean; message?: string };
 
+async function upsertGovernmentNotice(
+  clientId: string,
+  portal: string,
+  n: Partial<NoticeInput>
+): Promise<boolean> {
+  if (!n.subject || !n.noticeType) return false;
+
+  const ref = n.referenceNumber?.trim();
+  const existing = ref
+    ? await prisma.governmentNotice.findFirst({
+        where: { clientId, portal, referenceNumber: ref },
+      })
+    : await prisma.governmentNotice.findFirst({
+        where: { clientId, portal, subject: n.subject, noticeType: n.noticeType },
+      });
+
+  const payload = {
+    noticeType: n.noticeType,
+    adjudicationLevel: n.adjudicationLevel ?? null,
+    referenceNumber: n.referenceNumber ?? null,
+    dateOfNotice: n.dateOfNotice ?? null,
+    dueDate: n.dueDate ?? null,
+    subject: n.subject,
+    status: n.status ?? 'pending',
+    engagementId: n.engagementId ?? null,
+    fetchedAt: new Date(),
+    rawData: n.rawData ?? undefined,
+  };
+
+  if (existing) {
+    await prisma.governmentNotice.update({ where: { id: existing.id }, data: payload });
+    return true;
+  }
+
+  await prisma.governmentNotice.create({
+    data: { clientId, portal, ...payload },
+  });
+  return true;
+}
+
 export async function syncClientNotices(clientId: string, firmId?: string): Promise<SyncResult> {
   const provider = getPortalProvider();
   const status = getPortalIntegrationStatus();
@@ -228,24 +322,8 @@ export async function syncClientNotices(clientId: string, firmId?: string): Prom
           : await provider.fetchITNotices(creds);
 
     for (const n of result.notices) {
-      if (!n.subject || !n.noticeType) continue;
-      await prisma.governmentNotice.create({
-        data: {
-          clientId,
-          portal: portalKind,
-          noticeType: n.noticeType,
-          adjudicationLevel: n.adjudicationLevel ?? null,
-          referenceNumber: n.referenceNumber ?? null,
-          dateOfNotice: n.dateOfNotice ?? null,
-          dueDate: n.dueDate ?? null,
-          subject: n.subject,
-          status: n.status ?? 'pending',
-          engagementId: n.engagementId ?? null,
-          fetchedAt: new Date(),
-          rawData: n.rawData ?? undefined,
-        },
-      });
-      upserted++;
+      const saved = await upsertGovernmentNotice(clientId, portalKind, n);
+      if (saved) upserted++;
     }
 
     await prisma.passwordVaultEntry.update({

@@ -249,7 +249,7 @@ export function useEngagementLetter(engagementId: string) {
 
 
 
-  async function sendLetter() {
+  async function sendLetter(scheduledAt?: string) {
 
     if (!letter) return { ok: false as const, error: 'No letter to send' };
 
@@ -267,7 +267,7 @@ export function useEngagementLetter(engagementId: string) {
 
     try {
 
-      await api.post(`/engagement-letters/${letter.id}/send`);
+      await api.post(`/engagement-letters/${letter.id}/send`, scheduledAt ? { scheduledAt } : {});
 
       void load({ silent: true });
 

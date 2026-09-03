@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import { getEnv } from './env.js';
 import logger from './logger.js';
-import { sendEmail, emailTemplates } from './emailService.js';
+import { sendEmail, emailTemplates, processEmailOutbox } from './emailService.js';
 import { syncAllActiveDriveConnections } from './driveSync.js';
 
 const HOUR_MS = 3600 * 1000;
@@ -19,6 +19,10 @@ const MAX_FOLLOWUPS_BEFORE_ESCALATION = 3;
  */
 export async function runScheduler(): Promise<void> {
   try {
+    const outbox = await processEmailOutbox();
+    if (outbox.processed > 0) {
+      logger.info('Scheduler: processed email outbox', outbox);
+    }
     await flagMissingChecklistItems();
     await sendDocumentFollowups();
     await sendDeadlineReminders();
@@ -32,6 +36,15 @@ export async function runScheduler(): Promise<void> {
     const digest = await runDailyDigest();
     if (digest.sent > 0) {
       logger.info(`Scheduler: sent ${digest.sent} daily digest email(s)`);
+    }
+    const { runBillingManagerReminders } = await import('./billingManagerReminders.js');
+    const billingReminders = await runBillingManagerReminders();
+    if (billingReminders.notified > 0) {
+      logger.info(`Scheduler: sent ${billingReminders.notified} billing manager reminder(s)`);
+    }
+    const outboxAfter = await processEmailOutbox();
+    if (outboxAfter.processed > 0) {
+      logger.info('Scheduler: processed newly scheduled emails', outboxAfter);
     }
   } catch (err) {
     logger.error('Scheduler tick failed', { error: (err as Error).message });

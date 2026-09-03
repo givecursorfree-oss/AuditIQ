@@ -14,7 +14,8 @@ interface ScheduleData {
   workloadHoursThisWeek: number;
   activeTasks: { title: string; displayStatus?: string; engagement?: { title: string } }[];
   upcomingDeadlines: { taskName: string; engagementName: string; deadline: string }[];
-  availability: { date: string; hoursAllocated: number; isBusy: boolean }[];
+  availability: { date: string; hoursAllocated: number; isBusy: boolean; onLeave?: boolean }[];
+  leaveDays?: string[];
 }
 
 interface Props {
@@ -73,15 +74,31 @@ function StaffScheduleBody({ staffId }: { staffId: string }) {
           </ul>
         </div>
       )}
+      {data.upcomingDeadlines.length > 0 && (
+        <div>
+          <div className="font-medium mb-1">Upcoming deadlines</div>
+          <ul className="list-disc pl-4 space-y-1 text-xs">
+            {data.upcomingDeadlines.slice(0, 8).map((d) => (
+              <li key={`${d.taskName}-${d.deadline}`}>
+                {d.taskName} · {new Date(d.deadline).toLocaleDateString('en-IN')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div>
         <div className="font-medium mb-1">Next 14 days</div>
         <div className="grid grid-cols-7 gap-1">
           {data.availability.slice(0, 14).map((d) => (
             <div
               key={d.date}
-              title={`${d.date}: ${d.hoursAllocated}h`}
+              title={`${d.date}: ${d.hoursAllocated}h${d.onLeave ? ' (leave)' : ''}`}
               className={`rounded p-1 text-center text-[10px] border ${
-                d.isBusy ? 'bg-destructive/15 border-destructive/40' : 'bg-muted/40'
+                d.onLeave
+                  ? 'bg-blue-500/20 border-blue-500/40'
+                  : d.isBusy
+                    ? 'bg-destructive/15 border-destructive/40'
+                    : 'bg-muted/40'
               }`}
             >
               {d.date.slice(8)}

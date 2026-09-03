@@ -21,6 +21,7 @@ const LEGACY_REDIRECT_PATHS = new Set([
   '/onboarding',
   '/audit-log',
   '/portal',
+  '/expenses',
 ]);
 
 /** Permission check for nav/routes — uses DB permissions for every role (no Admin/Partner bypass). */
@@ -68,6 +69,17 @@ export function canAccessRoute(
 
   if (LEGACY_REDIRECT_PATHS.has(path)) {
     return true;
+  }
+
+  if (path === '/expenses' || path.startsWith('/expenses/')) {
+    return true;
+  }
+
+  if (/^\/staff\/[^/]+\/schedule$/.test(path)) {
+    return (
+      hasNavPermission(user, 'attendance', 'view') &&
+      ['Partner', 'Admin', 'Manager', 'Staff', 'HR'].includes(user.role)
+    );
   }
 
   /** Error page — any signed-in user may land here from RouteGuard. */

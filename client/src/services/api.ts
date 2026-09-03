@@ -62,11 +62,14 @@ async function refreshSession(): Promise<void> {
     })
     .catch((refreshError) => {
       processQueue(refreshError, null);
-      const status = (refreshError as { response?: { status?: number } })?.response?.status;
+      const status = (refreshError as { response?: { status?: number; data?: { code?: string } } })?.response
+        ?.status;
+      const code = (refreshError as { response?: { data?: { code?: string } } })?.response?.data?.code;
       // ponytail: 429 = rate limited, not logged out — avoid redirect loops to /login
       if (status !== 429) {
         clearStoredUser();
-        window.location.href = '/login';
+        const reason = code === 'SESSION_ABSOLUTE' ? 'absolute' : 'expired';
+        window.location.href = `/login?session=${reason}`;
       }
       throw refreshError;
     })

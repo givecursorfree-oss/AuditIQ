@@ -338,6 +338,30 @@ export async function computeNavBadgesForUser(user: {
 
       }),
 
+    (async () => {
+      if (['Partner', 'Admin'].includes(user.role)) {
+        const claimCount = await prisma.expenseClaim.count({
+          where: {
+            firmId,
+            claimStatus: { in: ['pending_approval', 'partially_approved'] },
+          },
+        });
+        badges.approvals += claimCount;
+      } else if (user.role === 'Manager') {
+        const claimCount = await prisma.expenseClaimManagerApproval.count({
+          where: {
+            managerId: user.id,
+            status: 'pending',
+            claim: {
+              firmId,
+              claimStatus: { in: ['pending_approval', 'partially_approved'] },
+            },
+          },
+        });
+        badges.approvals += claimCount;
+      }
+    })(),
+
   ];
 
 

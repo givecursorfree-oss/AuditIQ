@@ -7,6 +7,7 @@ import PageHeader from '../components/layout/PageHeader';
 import PageLoading from '../components/layout/PageLoading';
 import { EmptyState } from '../components/layout/StatePanels';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { SERVICE_CATALOG } from '@/lib/workflowCatalog';
 
 type PortfolioTeamMember = { id: string; name: string; initials: string | null; teamRole: string | null };
@@ -46,13 +47,18 @@ export default function EngagementPortfolio() {
   const service = searchParams.get('service') || 'GST_MONTHLY_RETURNS';
   const [data, setData] = useState<PortfolioResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchPortfolio = useCallback(() => {
     setLoading(true);
+    setLoadError(null);
     api
       .get<PortfolioResponse>(`/engagements/portfolio?service=${encodeURIComponent(service)}`)
       .then(({ data }) => setData(data))
-      .catch(() => setData(null))
+      .catch(() => {
+        setData(null);
+        setLoadError('Failed to load.');
+      })
       .finally(() => setLoading(false));
   }, [service]);
 
@@ -66,9 +72,11 @@ export default function EngagementPortfolio() {
         title="Engagement Portfolio"
         description="Multi-client single-window view — track one service across every client"
         actions={
-          <Link to="/engagements" className="btn-secondary inline-flex items-center gap-2">
-            <ArrowLeft size={16} /> All engagements
-          </Link>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/engagements" className="gap-2">
+              <ArrowLeft size={16} /> All engagements
+            </Link>
+          </Button>
         }
       />
 
@@ -91,6 +99,8 @@ export default function EngagementPortfolio() {
 
       {loading ? (
         <PageLoading />
+      ) : loadError ? (
+        <p className="text-sm text-destructive">{loadError}</p>
       ) : !data || data.rows.length === 0 ? (
         <EmptyState
           title="No clients for this service"

@@ -8,6 +8,7 @@ import {
   attendanceDayStart,
 } from '../lib/attendanceDates.js';
 import { ensureTimerClockIn, syncAttendanceActivity } from '../lib/staffWorkStatus.js';
+import { taskDerivedHoursForDay } from '../lib/taskAttendanceSync.js';
 import { GeofenceError, GpsAccuracyError, resolveOfficeCheckIn } from '../lib/geofence.js';
 import {
   classifyLateBand,
@@ -116,6 +117,7 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
         clientName: true,
         bioPresent: true,
         forgiven: true,
+        totalActiveSeconds: true,
       },
     });
     if (!record) {
@@ -126,8 +128,21 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
       record.checkIn && record.checkOut
         ? +((record.checkOut.getTime() - record.checkIn.getTime()) / 3_600_000).toFixed(2)
         : null;
+    const dateKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const taskDerivedHours = await taskDerivedHoursForDay(req.user!.id, dateKey);
     const isArticle = await userIsArticleAssistant(req.user!.id);
-    res.json({ ...record, hoursWorked, isArticle });
+    res.json({
+      ...record,
+      hoursWorked,
+      taskDerivedHours,
+      totalActiveHours: +(record.totalActiveSeconds / 3600).toFixed(2),
+      isArticle,
+    });
   } catch (err) {
     logger.error('Today attendance error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to fetch today attendance' });

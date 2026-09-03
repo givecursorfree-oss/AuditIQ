@@ -9,9 +9,11 @@ import { AppPageContainer } from '../components/layout/AppPageContainer';
 import PageHeader from '../components/layout/PageHeader';
 import { PanelCard } from '../components/layout/PanelCard';
 import { EmptyState } from '../components/layout/StatePanels';
+import { ErrorBanner } from '../components/layout/ErrorBanner';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
 import { apiAbsoluteUrl } from '@/lib/apiBase';
+import { formatApiError } from '@/lib/apiErrors';
 
 interface LeaveRequest {
   id: string;
@@ -94,6 +96,7 @@ export default function LeaveStipend() {
   });
   const [holidays, setHolidays] = useState<string[]>([]);
   const [holidayDate, setHolidayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [applyForm, setApplyForm] = useState({
     startDate: new Date().toISOString().slice(0, 10),
@@ -118,6 +121,7 @@ export default function LeaveStipend() {
   }, [canApply, canManage, canCompOffRequest, canCompOffManage, canManageHolidays, isIntern]);
 
   async function load() {
+    setLoadError(null);
     const tasks: Promise<void>[] = [
       api.get<LeaveRequest[]>('/attendance/leaves').then((r) => setLeaves(r.data)),
       api.get<LeaveBalance>('/attendance/leaves/balance').then((r) => setBalance(r.data)),
@@ -141,8 +145,12 @@ export default function LeaveStipend() {
         api.get<LeaveRequest[]>('/attendance/leaves/inbox?status=Pending').then((r) => setInbox(r.data))
       );
     }
-    // Each panel degrades independently; a single failed call shouldn't blank the page
-    await Promise.allSettled(tasks);
+    // Each panel degrades independently; surface only if every call fails
+    const results = await Promise.allSettled(tasks);
+    if (results.every((r) => r.status === 'rejected')) {
+      const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      setLoadError(formatApiError(first?.reason ?? new Error('Failed to load leave data')));
+    }
   }
 
   useEffect(() => { void load(); }, [month, canManage, canManageHolidays]);
@@ -281,6 +289,8 @@ export default function LeaveStipend() {
         }
       />
 
+      {loadError && <ErrorBanner message={loadError} onRetry={() => void load()} className="mb-4" />}
+
       {balance && balance.isArticle && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <BalanceCard label="Exam Leave" used={balance.used.exam} limit={balance.limits.exam} icon={GraduationCap} />
@@ -389,15 +399,15 @@ export default function LeaveStipend() {
                   <td className="space-x-1 whitespace-nowrap">
                     {l.status === 'Pending' &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
-                      <button type="button" className="text-xs btn-secondary py-1 px-2" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</button>
+                      <Button type="button" variant="success" size="sm" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</Button>
                     )}
                     {(l.status === 'Manager Approved' || l.status === 'Pending') &&
                       ['Partner', 'Admin', 'HR'].includes(user?.role || '') && (
-                      <button type="button" className="text-xs btn-primary py-1 px-2" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</button>
+                      <Button type="button" size="sm" variant="success" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</Button>
                     )}
                     {!['Approved', 'Rejected'].includes(l.status) &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
-                      <button type="button" className="text-xs text-danger" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</button>
+                      <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
                     )}
                   </td>
                 </tr>
@@ -508,32 +518,35 @@ export default function LeaveStipend() {
                       <td className="space-x-1 whitespace-nowrap">
                         {c.status === 'Pending' &&
                           ['Manager', 'Partner', 'Admin'].includes(user?.role || '') && (
-                            <button
+                            <Button
                               type="button"
-                              className="text-xs btn-secondary py-1 px-2"
+                              variant="success"
+                              size="sm"
                               onClick={() => void patchCompOff(c.id, 'ManagerApproved')}
                             >
                               Approve (Mgr)
-                            </button>
+                            </Button>
                           )}
                         {c.status === 'ManagerApproved' &&
                           ['HR', 'Partner', 'Admin'].includes(user?.role || '') && (
-                            <button
+                            <Button
                               type="button"
-                              className="text-xs btn-primary py-1 px-2"
+                              size="sm"
+                              variant="success"
                               onClick={() => void patchCompOff(c.id, 'HrCredited')}
                             >
                               Credit leave (HR)
-                            </button>
+                            </Button>
                           )}
                         {!['HrCredited', 'Rejected'].includes(c.status) && canCompOffManage && (
-                          <button
+                          <Button
                             type="button"
-                            className="text-xs text-danger"
+                            variant="destructive"
+                            size="sm"
                             onClick={() => void patchCompOff(c.id, 'Rejected')}
                           >
                             Reject
-                          </button>
+                          </Button>
                         )}
                       </td>
                     </tr>

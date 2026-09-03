@@ -30,6 +30,7 @@ import DocumentUploadSection from '@/components/documents/DocumentUploadSection'
 import DocumentPreviewModal from '@/components/documents/DocumentPreviewModal';
 import DocumentLibraryTable from '@/components/documents/DocumentLibraryTable';
 import { modalBackdropProps } from '@/lib/interactiveProps';
+import { Button } from '@/components/ui/button';
 import {
   CATEGORIES,
   FOLDERS,
@@ -315,12 +316,12 @@ export default function Documents() {
         description={`${documents.length} files · ${formatSize(totalSize)} used`}
         actions={
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setShowDrive(true)} className="btn-secondary flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => setShowDrive(true)}>
               <CloudArrowUp size={16} /> Google Drive
-            </button>
-            <button type="button" onClick={() => setShowUpload(true)} className="btn-primary flex items-center gap-2">
+            </Button>
+            <Button type="button" size="sm" className="gap-2" onClick={() => setShowUpload(true)}>
               <Plus size={16} /> New Upload
-            </button>
+            </Button>
           </div>
         }
       />
@@ -393,15 +394,17 @@ export default function Documents() {
 
       {canReindex && (
         <div className="flex justify-end">
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleReindex}
             disabled={reindexing}
-            className="btn-secondary text-xs flex items-center gap-1.5"
+            className="gap-1.5"
           >
             <ArrowsClockwise size={14} className={reindexing ? 'animate-spin' : ''} />
             {reindexing ? 'Queuing…' : 'Reindex search'}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -480,9 +483,9 @@ export default function Documents() {
           description={search ? 'Try a different search term' : 'Upload your first document to get started'}
           action={
             !search ? (
-              <button type="button" onClick={() => setShowUpload(true)} className="btn-primary inline-flex items-center gap-2">
+              <Button type="button" size="sm" className="gap-2" onClick={() => setShowUpload(true)}>
                 <Upload size={16} /> Upload Files
-              </button>
+              </Button>
             ) : undefined
           }
           className="py-20"
@@ -542,17 +545,19 @@ export default function Documents() {
               </button>
             </div>
             <p className="text-sm text-muted-foreground mb-3 truncate">{versionDoc.originalName}</p>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
+              className="w-full mb-4 gap-2"
               onClick={() => {
                 const target = versionDoc;
                 setVersionDoc(null);
                 setVersionUpload(target);
               }}
-              className="btn-secondary w-full mb-4 inline-flex items-center justify-center gap-2"
             >
               <Upload size={14} /> Upload new version
-            </button>
+            </Button>
             <div className="space-y-2">
               {versions.map((v, idx) => {
                 const cfg = getFileConfig(v.originalName);

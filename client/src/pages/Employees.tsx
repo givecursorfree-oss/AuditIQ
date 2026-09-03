@@ -12,12 +12,14 @@ import { SplitPaneLayout } from '@/components/layout/SplitPaneLayout';
 import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import { AccessibleTabList, AccessibleTabPanel } from '@/components/ui/accessible-tabs';
 import PageHeader from '@/components/layout/PageHeader';
+import { EmptyState, ErrorBanner, LoadingCenter } from '@/components/layout/StatePanels';
 import { Status, StatusIndicator, StatusLabel } from '@/components/ui/status';
 import {
   normalizePresenceStatus,
   PRESENCE_LABELS,
   type PresenceStatus,
 } from '@/lib/presence';
+import { Button } from '@/components/ui/button';
 
 interface EmployeeProfile {
   id: string;
@@ -129,6 +131,7 @@ export default function Employees() {
   const [tab, setTab] = useState<Tab>('personal');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [salaryData, setSalaryData] = useState<Record<string, number>>({});
@@ -142,10 +145,13 @@ export default function Employees() {
 
   const fetchEmployees = useCallback(async () => {
     const q = searchRef.current;
+    setLoadError(null);
     try {
       const { data } = await api.get('/employees', { params: q ? { search: q } : {} });
       setEmployees(data);
-    } catch { /* empty */ } finally { setLoading(false); }
+    } catch {
+      setLoadError('Failed to load.');
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { void fetchEmployees(); }, [fetchEmployees]);
@@ -265,11 +271,11 @@ export default function Employees() {
           </div>
           <div className="flex-1 overflow-y-auto">
             {loading ? (
-              <div className="flex justify-center py-10">
-                <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              </div>
+              <LoadingCenter className="py-10" />
+            ) : loadError ? (
+              <ErrorBanner message={loadError} onRetry={() => void fetchEmployees()} className="m-3" />
             ) : filtered.length === 0 ? (
-              <p className="text-sm text-foreground-muted text-center py-10">No employees found</p>
+              <EmptyState title="No employees found" />
             ) : (
               filtered.map(emp => (
                 <button
@@ -342,21 +348,21 @@ export default function Employees() {
                   )}
                 </div>
                 {canEdit && !editing && tab !== 'documents' && (
-                  <button type="button" onClick={startEdit} className="btn-secondary text-sm flex items-center gap-1.5 sm:ml-auto">
+                  <Button type="button" variant="outline" size="sm" className="gap-1.5 sm:ml-auto" onClick={startEdit}>
                     <Edit size={14} /> Edit
-                  </button>
+                  </Button>
                 )}
                 {editing && (
                   <div className="flex items-center gap-2 sm:ml-auto">
-                    <button type="button" onClick={() => setEditing(false)} className="btn-secondary text-sm">Cancel</button>
-                    <button
+                    <Button type="button" variant="outline" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+                    <Button
                       type="button"
+                      size="sm"
                       onClick={tab === 'salary' ? saveSalary : saveProfile}
                       disabled={saving}
-                      className="btn-primary text-sm"
                     >
                       {saving ? 'Saving...' : 'Save'}
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -664,14 +670,16 @@ function DocUpload({ onUpload }: { onUpload: (file: File, docType: string) => vo
       <select value={docType} onChange={e => setDocType(e.target.value)} className="input text-sm w-48">
         {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
       </select>
-      <label className="btn-secondary text-sm flex items-center gap-1.5 cursor-pointer">
-        <Upload size={14} /> Upload
-        <input type="file" className="hidden" onChange={e => {
-          const f = e.target.files?.[0];
-          if (f) onUpload(f, docType);
-          e.target.value = '';
-        }} />
-      </label>
+      <Button asChild size="sm" variant="outline" className="cursor-pointer gap-1.5">
+        <label>
+          <Upload size={14} /> Upload
+          <input type="file" className="hidden" onChange={e => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f, docType);
+            e.target.value = '';
+          }} />
+        </label>
+      </Button>
     </div>
   );
 }

@@ -14,6 +14,7 @@ const createSchema = z.object({
   isActive: z.boolean().default(true),
   frequency: z.enum(['monthly', 'quarterly', 'yearly']),
   triggerDay: z.number().int().min(1).max(31).optional(),
+  triggerTime: z.string().regex(/^\d{2}:\d{2}$/).default('09:00'),
   triggerDates: z.array(z.string()).optional(),
   triggerMonth: z.string().optional(),
   autoCreateStartDate: z.string(),
@@ -62,6 +63,7 @@ router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthReque
       isActive: body.isActive,
       frequency: body.frequency,
       triggerDay: body.triggerDay,
+      triggerTime: body.triggerTime,
       triggerDates: body.triggerDates ? JSON.stringify(body.triggerDates) : null,
       triggerMonth: body.triggerMonth,
       autoCreateStartDate: new Date(body.autoCreateStartDate),
@@ -115,6 +117,7 @@ router.patch('/:id', authorize('Partner', 'Admin', 'Manager'), async (req: AuthR
     const merged = {
       ...existing,
       ...body,
+      triggerTime: body.triggerTime ?? existing.triggerTime,
       triggerDates: body.triggerDates ? JSON.stringify(body.triggerDates) : existing.triggerDates,
       autoCreateStartDate: body.autoCreateStartDate ? new Date(body.autoCreateStartDate) : existing.autoCreateStartDate,
       autoCreateEndDate:
@@ -132,6 +135,7 @@ router.patch('/:id', authorize('Partner', 'Admin', 'Manager'), async (req: AuthR
         isActive: body.isActive,
         frequency: body.frequency,
         triggerDay: body.triggerDay,
+        triggerTime: body.triggerTime,
         triggerDates: body.triggerDates ? JSON.stringify(body.triggerDates) : undefined,
         triggerMonth: body.triggerMonth,
         autoCreateStartDate: body.autoCreateStartDate ? new Date(body.autoCreateStartDate) : undefined,

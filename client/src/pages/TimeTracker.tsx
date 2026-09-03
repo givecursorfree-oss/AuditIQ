@@ -9,9 +9,11 @@ import { PanelCard } from '@/components/layout/PanelCard';
 import { Button } from '@/components/ui/button';
 import EngagementTimerWidget from '@/components/time/EngagementTimerWidget';
 import PageLoading from '@/components/layout/PageLoading';
+import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { notifyStopwatchChanged, STOPWATCH_CHANGED } from '@/lib/stopwatchEvents';
 import { attendanceDayState } from '@/lib/attendanceDayGate';
 import { tryAttendanceCheckOut } from '@/lib/attendancePopup';
+import { isEditableKeyboardTarget } from '@/lib/keyboard';
 import { useAuth } from '@/context/AuthContext';
 import type { Attendance } from '@/types';
 
@@ -73,6 +75,7 @@ export default function TimeTracker() {
 
   // Manual log form
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     engagementId: '',
@@ -100,6 +103,7 @@ export default function TimeTracker() {
 
   async function loadAll() {
     setLoading(true);
+    setLoadError(null);
     try {
       await Promise.all([
         loadStopwatch(),
@@ -132,22 +136,26 @@ export default function TimeTracker() {
       const from = new Date(); from.setDate(from.getDate() - 7);
       const r = await api.get(`/time-entries?from=${from.toISOString()}`);
       setEntries(r.data);
-    } catch { /* noop */ }
+    } catch {
+      setLoadError('Failed to load.');
+    }
   }
 
   async function loadTasks() {
     try {
       const r = await api.get('/tasks?scope=mine');
       setTasks(r.data.filter((t: Task) => t.status !== 'Done' && t.status !== 'Cancelled'));
-    } catch { /* noop */ }
+    } catch {
+      setLoadError('Failed to load.');
+    }
   }
 
   async function loadReminders() {
     // Compose smart reminders: statutory deadlines T-7, gap notifications via dashboard
     try {
       const [dl, eng] = await Promise.all([
-        api.get('/dashboard/deadlines').catch(() => ({ data: [] })),
-        api.get('/engagements?status=Closed&limit=30').catch(() => ({ data: { engagements: [] } })),
+        api.get('/dashboard/deadlines'),
+        api.get('/engagements?status=Closed&limit=30'),
       ]);
       const rems: { type: string; message: string }[] = [];
       for (const d of dl.data || []) {
@@ -158,7 +166,9 @@ export default function TimeTracker() {
         if (!e.udin) rems.push({ type: 'udin', message: `UDIN not generated for ${e.title}` });
       }
       setReminders(rems);
-    } catch { /* noop */ }
+    } catch {
+      setLoadError('Failed to load.');
+    }
   }
 
   useEffect(() => { void loadAll(); }, []);
@@ -182,10 +192,10 @@ export default function TimeTracker() {
     return () => window.removeEventListener(STOPWATCH_CHANGED, onStopwatchChanged);
   }, []);
 
-  // Tick the stopwatch every second
+  // Tick only while running — paused display uses frozen elapsedSeconds from API.
   useEffect(() => {
-    if (!stopwatch) return;
-    const i = setInterval(() => setTick(t => t + 1), 1000);
+    if (!stopwatch || stopwatch.isPaused) return;
+    const i = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(i);
   }, [stopwatch]);
 
@@ -201,7 +211,8 @@ export default function TimeTracker() {
     const logged = entries
       .filter((e) => new Date(e.date).toDateString() === today)
       .reduce((s, e) => s + e.hours * 3600, 0);
-    return Math.round(logged + (stopwatch && !stopwatch.isPaused ? elapsedSeconds : 0));
+    // Include live or paused session — paused time still counts toward today.
+    return Math.round(logged + (stopwatch ? elapsedSeconds : 0));
   }, [entries, stopwatch, elapsedSeconds]);
 
   async function startStopwatch() {
@@ -239,6 +250,45 @@ export default function TimeTracker() {
       await appAlert({ title: 'Could not resume', message: e?.response?.data?.error || 'Failed to resume' });
     }
   }
+
+  // Space toggles pause/resume when a timer is active and focus is not in a field.
+  useEffect(() => {
+    if (!stopwatch) return;
+    const paused = Boolean(stopwatch.isPaused);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== ' ' && e.code !== 'Space') return;
+      if (isEditableKeyboardTarget(e.target)) return;
+      e.preventDefault();
+      if (paused) {
+        void api
+          .post('/stopwatch/resume')
+          .then(() => loadStopwatch())
+          .then(() => notifyStopwatchChanged())
+          .catch(async (err: unknown) => {
+            const msg =
+              err && typeof err === 'object' && 'response' in err
+                ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+                : undefined;
+            await appAlert({ title: 'Could not resume', message: msg || 'Failed to resume' });
+          });
+      } else {
+        void api
+          .post('/stopwatch/pause')
+          .then(() => loadStopwatch())
+          .then(() => notifyStopwatchChanged())
+          .catch(async (err: unknown) => {
+            const msg =
+              err && typeof err === 'object' && 'response' in err
+                ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+                : undefined;
+            await appAlert({ title: 'Could not pause', message: msg || 'Failed to pause' });
+          });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stopwatch?.id, stopwatch?.isPaused]);
 
   async function stopStopwatch() {
     const ok = await appConfirm({
@@ -336,6 +386,7 @@ export default function TimeTracker() {
 
   return (
     <AppPageContainer className="space-y-6">
+      {loadError && <ErrorBanner message={loadError} onRetry={() => void loadAll()} />}
       <PageHeader
         title="Time & tasks"
         description="Live stopwatch, manual time logs, and your daily to-do"
@@ -402,10 +453,10 @@ export default function TimeTracker() {
               <input className="input-field" aria-label="Notes" placeholder="Notes (optional)" value={startForm.notes} onChange={e => setStartForm({ ...startForm, notes: e.target.value })} />
             </div>
             <div className="flex justify-center gap-2">
-              <button type="button" className="btn-secondary" onClick={() => setShowStartForm(false)}>Cancel</button>
-              <button type="button" className="btn-primary flex items-center gap-2" onClick={() => void startStopwatch()}>
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowStartForm(false)}>Cancel</Button>
+              <Button type="button" size="sm" className="gap-2" onClick={() => void startStopwatch()}>
                 <Play size={16} weight="fill" /> Start
-              </button>
+              </Button>
             </div>
           </div>
         ) : stopwatch ? (
@@ -507,7 +558,7 @@ export default function TimeTracker() {
             </label>
           </div>
           <input className="input-field" aria-label="Notes or description" placeholder="Notes / description" value={manualForm.description} onChange={e => setManualForm({ ...manualForm, description: e.target.value })} />
-          <button type="button" className="btn-primary" onClick={() => void submitManual()}>Add entry</button>
+          <Button type="button" size="sm" onClick={() => void submitManual()}>Add entry</Button>
 
           <div className="mt-6">
             <h4 className="font-semibold text-foreground mb-2">Recent entries</h4>
@@ -557,20 +608,37 @@ export default function TimeTracker() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {t.engagement && (
-                      <button
+                      <Button
                         type="button"
-                        className="btn-primary text-xs"
-                        onClick={() => void api.post('/stopwatch/start', {
-                          engagementId: t.engagement!.id,
-                          taskId: t.id,
-                        }).then(() => setTab('today'))}
+                        size="sm"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await api.post('/stopwatch/start', {
+                                engagementId: t.engagement!.id,
+                                taskId: t.id,
+                                workType: startForm.workType || 'Audit',
+                              });
+                              await loadStopwatch();
+                              notifyStopwatchChanged();
+                              window.dispatchEvent(new Event('auditiq:clock-in'));
+                              setTab('today');
+                            } catch (e: unknown) {
+                              const msg =
+                                e && typeof e === 'object' && 'response' in e
+                                  ? (e as { response?: { data?: { error?: string } } }).response?.data?.error
+                                  : undefined;
+                              await appAlert({ title: 'Could not start', message: msg || 'Failed to start' });
+                            }
+                          })();
+                        }}
                       >
                         Start
-                      </button>
+                      </Button>
                     )}
-                    <button type="button" className="btn-secondary text-xs flex items-center gap-1" onClick={() => void completeTask(t.id)}>
+                    <Button type="button" variant="outline" size="sm" className="gap-1" onClick={() => void completeTask(t.id)}>
                       <Check size={12} /> Done
-                    </button>
+                    </Button>
                   </div>
                 </div>
               );

@@ -7,7 +7,7 @@ import type { User } from '@/types';
 
 const HIERARCHY_ALLOWED_PATHS: Record<string, string[]> = {
   HR_MANAGER: ['/', '/attendance', '/leave-stipend', '/messages', '/employees', '/timesheets', '/time-tracker', '/clients'],
-  ACCOUNTS_MANAGER: ['/', '/billing', '/time-tracker', '/messages'],
+  ACCOUNTS_MANAGER: ['/', '/billing', '/time-tracker', '/messages', '/claims'],
   SENIOR_OFFICE_ADMIN: ['/', '/documents', '/messages', '/clients'],
   OFFICE_EXECUTIVE: ['/', '/documents', '/messages'],
 };

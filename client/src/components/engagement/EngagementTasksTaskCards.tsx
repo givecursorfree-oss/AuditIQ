@@ -31,6 +31,8 @@ export interface EngagementTaskRow {
   notes?: string | null;
   completedAt?: string | null;
   createdAt?: string | null;
+  pipelineStage?: string | null;
+  pipelineStageLabel?: string | null;
   assignee: { id: string; firstName: string; lastName: string };
   createdBy?: { id: string; firstName: string; lastName: string };
 }
@@ -198,6 +200,7 @@ export function EngagementTaskCard({
   task,
   userId,
   isManager,
+  pipelineSteps = [],
   actionTaskIds,
   scrollTargetId,
   highlightRowRef,
@@ -205,10 +208,12 @@ export function EngagementTaskCard({
   recentlyCompletedId,
   completingTaskId,
   onStatusChange,
+  onPipelineStageChange,
 }: {
   task: EngagementTaskRow;
   userId?: string;
   isManager: boolean;
+  pipelineSteps?: Array<{ code: string; label: string }>;
   actionTaskIds: string[];
   scrollTargetId: string | null;
   highlightRowRef: Ref<HTMLDivElement>;
@@ -216,6 +221,7 @@ export function EngagementTaskCard({
   recentlyCompletedId: string | null;
   completingTaskId: string | null;
   onStatusChange: (taskId: string, status: string, notes?: string) => void | Promise<void>;
+  onPipelineStageChange?: (taskId: string, pipelineStage: string) => void | Promise<void>;
 }) {
   const isAction = needsAssigneeAction(task, userId);
   const completed = isTaskCompleted(task.status);
@@ -267,6 +273,11 @@ export function EngagementTaskCard({
                 {assignerChip.label}
               </span>
             ) : null}
+            {task.pipelineStageLabel ? (
+              <span className="rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {task.pipelineStageLabel}
+              </span>
+            ) : null}
             {justFinished ? (
               <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                 Just completed
@@ -282,7 +293,25 @@ export function EngagementTaskCard({
               : ''}
           </p>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {isManager && onPipelineStageChange && pipelineSteps.length > 0 ? (
+            <Select
+              value={task.pipelineStage ?? pipelineSteps[0]?.code ?? ''}
+              disabled={busy}
+              onValueChange={(v) => void onPipelineStageChange(task.id, v)}
+            >
+              <SelectTrigger className="h-8 w-[150px]">
+                <SelectValue>{task.pipelineStageLabel ?? 'Stage'}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {pipelineSteps.map((s) => (
+                  <SelectItem key={s.code} value={s.code}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           {canEditStatus && !completed ? (
             <Select
               value={task.status === 'overdue' ? 'in_progress' : task.status}

@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const FIRM_FIELD_KEYS = [
-  'name', 'registrationNo', 'pan', 'gstin', 'address', 'city', 'state', 'pincode', 'phone', 'email', 'website',
+  'name', 'registrationNo', 'pan', 'gstin', 'address', 'city', 'state', 'pincode', 'phone', 'email', 'website', 'expenseSubmissionWindowDays',
 ] as const;
 
 const FIRM_FIELDS: { key: keyof Firm; label: string }[] = [
@@ -31,6 +31,7 @@ const FIRM_FIELDS: { key: keyof Firm; label: string }[] = [
   { key: 'phone', label: 'Phone' },
   { key: 'email', label: 'Email' },
   { key: 'website', label: 'Website' },
+  { key: 'expenseSubmissionWindowDays', label: 'Expense submission window (days)' },
 ];
 
 export default function SettingsFirmTab() {
@@ -109,12 +110,22 @@ export default function SettingsFirmTab() {
             <div key={key} className="space-y-2">
               <Label>{label}</Label>
               {editing ? (
-                <Input
-                  value={(form as Record<string, any>)[key] || ''}
-                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                />
+                key === 'expenseSubmissionWindowDays' ? (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={String((form as Record<string, unknown>)[key] ?? 3)}
+                    onChange={(e) => setForm({ ...form, [key]: parseInt(e.target.value, 10) || 3 })}
+                  />
+                ) : (
+                  <Input
+                    value={(form as Record<string, any>)[key] || ''}
+                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                  />
+                )
               ) : (
-                <p className="text-sm text-foreground py-2">{(firm as Record<string, any>)?.[key] || '—'}</p>
+                <p className="text-sm text-foreground py-2">{(firm as Record<string, any>)?.[key] ?? (key === 'expenseSubmissionWindowDays' ? 3 : '—')}</p>
               )}
             </div>
           ))}

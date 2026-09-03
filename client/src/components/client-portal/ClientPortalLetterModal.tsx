@@ -86,6 +86,7 @@ export function ClientPortalLetterModal() {
             Close
           </Button>
           <Button
+            variant="success"
             disabled={letterAccepting === reviewLetterId || reviewLetterLoading}
             onClick={() => void acceptEngagementLetter(reviewLetterId)}
           >

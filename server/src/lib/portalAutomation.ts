@@ -201,3 +201,117 @@ export async function loginGovernmentPortal(
     }
   }
 }
+
+function sessionCookiePath(clientId: string, portal: string): string {
+  return path.join(screenshotDir(), `${portal}-${clientId}-cookies.json`);
+}
+
+async function loadStoredCookies(
+  context: import('playwright').BrowserContext,
+  clientId: string,
+  portal: string
+): Promise<boolean> {
+  const file = sessionCookiePath(clientId, portal);
+  if (!fs.existsSync(file)) return false;
+  try {
+    const cookies = JSON.parse(fs.readFileSync(file, 'utf8')) as import('playwright').Cookie[];
+    await context.addCookies(cookies);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function saveCookies(
+  context: import('playwright').BrowserContext,
+  clientId: string,
+  portal: string
+): Promise<void> {
+  const cookies = await context.cookies();
+  fs.writeFileSync(sessionCookiePath(clientId, portal), JSON.stringify(cookies, null, 2));
+}
+
+export type PortalSessionResult<T> = {
+  status: PortalLoginResult['status'];
+  portal: string;
+  message?: string;
+  data?: T;
+};
+
+/** Login (or reuse cookies), run scrape callback, persist session cookies. */
+export async function runWithPortalSession<T>(
+  credentials: PortalCredentials,
+  scrape: (page: import('playwright').Page) => Promise<T>
+): Promise<PortalSessionResult<T>> {
+  if (!automationEnabled()) {
+    return {
+      status: 'not_configured',
+      portal: credentials.portal,
+      message: 'Portal automation disabled.',
+    };
+  }
+
+  const pw = await loadPlaywright();
+  if (!pw) {
+    return {
+      status: 'playwright_missing',
+      portal: credentials.portal,
+      message: 'Playwright not installed.',
+    };
+  }
+
+  const cfg = PORTAL_URLS[credentials.portal];
+  const browser = await pw.chromium.launch({
+    headless: headless(),
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-IN' });
+  await loadStoredCookies(context, credentials.clientId, credentials.portal);
+  const page = await context.newPage();
+
+  try {
+    await page.goto(cfg.login, { waitUntil: 'domcontentloaded', timeout: timeoutMs() });
+    await page.waitForTimeout(1500);
+
+    let url = page.url();
+    let bodyText = await page.locator('body').innerText().catch(() => '');
+
+    if (!cfg.dashboardHint.test(url) && !/logout|sign out|dashboard/i.test(bodyText)) {
+      if (credentials.portal === 'GST') {
+        await fillFirst(page, ['#username', 'input[name="username"]'], credentials.username);
+        await fillFirst(page, ['#user_pass', 'input[type="password"]'], credentials.password);
+        await clickFirst(page, ['button[type="submit"]', '#loginbutton']);
+      } else if (credentials.portal === 'Income_Tax') {
+        await fillFirst(page, ['input#panAdhaarUserId', 'input[name="panAdhaarUserId"]'], credentials.username);
+        await fillFirst(page, ['input#password', 'input[type="password"]'], credentials.password);
+        await clickFirst(page, ['button:has-text("Continue")', 'button[type="submit"]']);
+      } else {
+        await fillFirst(page, ['#userId', 'input[name="userId"]'], credentials.username);
+        await fillFirst(page, ['#psw', 'input[type="password"]'], credentials.password);
+        await clickFirst(page, ['input[type="submit"]', 'button[type="submit"]']);
+      }
+      await page.waitForTimeout(4000);
+      url = page.url();
+      bodyText = await page.locator('body').innerText().catch(() => '');
+    }
+
+    if (detectCaptcha(bodyText)) {
+      return { status: 'captcha_required', portal: credentials.portal, message: 'Captcha required.' };
+    }
+    if (/otp|one.time|aadhaar.*otp/i.test(bodyText)) {
+      return { status: 'mfa_required', portal: credentials.portal, message: 'OTP required.' };
+    }
+    if (!cfg.dashboardHint.test(url) && !/logout|sign out|dashboard|welcome/i.test(bodyText)) {
+      return { status: 'failed', portal: credentials.portal, message: 'Login not confirmed.' };
+    }
+
+    await saveCookies(context, credentials.clientId, credentials.portal);
+    const data = await scrape(page);
+    return { status: 'logged_in', portal: credentials.portal, message: 'Scrape complete.', data };
+  } catch (err) {
+    logger.error('Portal session scrape error', { portal: credentials.portal, error: (err as Error).message });
+    return { status: 'failed', portal: credentials.portal, message: (err as Error).message };
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}

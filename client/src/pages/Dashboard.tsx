@@ -6,6 +6,7 @@ import type { DashboardData, Deadline } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNavBadges } from '../context/NavBadgesContext';
 import PageLoading from '../components/layout/PageLoading';
+import { ErrorBanner } from '../components/layout/ErrorBanner';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import AdminPresenceDashboard from '../components/time/AdminPresenceDashboard';
 import { DashboardWelcome } from '../components/dashboard/DashboardWelcome';
@@ -240,15 +241,14 @@ export default function Dashboard() {
   return (
     <AppPageContainer>
       {loadError && (
-        <div
-          role="alert"
-          className="mb-4 flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="text-sm text-destructive">{loadError}</p>
-          <button type="button" className="btn-primary shrink-0" onClick={() => { setLoading(true); loadDashboard(); }}>
-            Retry
-          </button>
-        </div>
+        <ErrorBanner
+          className="mb-4"
+          message={loadError}
+          onRetry={() => {
+            setLoading(true);
+            loadDashboard();
+          }}
+        />
       )}
       <DashboardWelcome
         userName={user?.firstName || 'there'}

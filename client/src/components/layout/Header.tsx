@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type MutableRefObject } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Sun,
@@ -46,7 +46,7 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  const { searchInputRef, registerToggleNotifications } = useLayoutChrome();
+  const { searchInputRef, registerToggleNotifications, registerFocusSearch } = useLayoutChrome();
   const { notificationCount: unreadCount, adjustNotificationCount, refresh: refreshBadges } = useNavBadges();
 
   const [lastUpdated] = useState(() =>
@@ -61,6 +61,7 @@ export default function Header() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const mobileSearchInputRef = useRef<HTMLInputElement>(null);
 
   const routeLabel = getRouteLabel(location.pathname);
 
@@ -88,7 +89,24 @@ export default function Header() {
     registerToggleNotifications(() => {
       void openNotifications();
     });
+    return () => registerToggleNotifications(null);
   }, [registerToggleNotifications, openNotifications]);
+
+  useEffect(() => {
+    registerFocusSearch(() => {
+      const desktop = searchInputRef.current;
+      const desktopVisible = Boolean(desktop && desktop.offsetParent !== null);
+      if (desktopVisible && desktop) {
+        desktop.focus();
+        desktop.select?.();
+        setShowResults(searchResults.length > 0 || searchQuery.trim().length > 0);
+        return;
+      }
+      setMobileSearchOpen(true);
+      window.setTimeout(() => mobileSearchInputRef.current?.focus(), 0);
+    });
+    return () => registerFocusSearch(null);
+  }, [registerFocusSearch, searchInputRef, searchResults.length, searchQuery]);
 
   const markAsRead = async (id: string) => {
     try {
@@ -134,6 +152,18 @@ export default function Header() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!showNotifications && !showResults && !mobileSearchOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showNotifications) setShowNotifications(false);
+      if (showResults) setShowResults(false);
+      if (mobileSearchOpen) setMobileSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showNotifications, showResults, mobileSearchOpen]);
 
   const performSearch = useCallback(async (query: string) => {
     if (query.trim().length < 1) {
@@ -185,7 +215,10 @@ export default function Header() {
           <div ref={searchRef} className="relative hidden lg:block" data-onboard="header-search">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <input
-              ref={searchInputRef}
+              ref={(el) => {
+                // RefObject from context is mutable at runtime; Vite/React types mark .current readonly.
+                (searchInputRef as MutableRefObject<HTMLInputElement | null>).current = el;
+              }}
               type="search"
               placeholder="Search engagements, clients, documents…"
               aria-label="Search engagements, clients, and documents"
@@ -285,12 +318,19 @@ export default function Header() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
+                ref={mobileSearchInputRef}
                 autoFocus
                 type="search"
                 placeholder="Search engagements, clients, documents…"
                 aria-label="Search engagements, clients, and documents"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setMobileSearchOpen(false);
+                    setShowResults(false);
+                  }
+                }}
                 className="w-full rounded-lg border border-border bg-muted/30 pl-9 pr-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               />
             </div>

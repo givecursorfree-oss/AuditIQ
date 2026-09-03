@@ -149,10 +149,12 @@ export function engagementLifecycleBadgeVariant(status: string): StatusBadgeVari
   switch (status) {
     case 'Planning':
     case 'Fieldwork':
+    case 'Active':
       return 'success';
     case 'Review':
     case 'Under Review':
     case 'Reporting':
+    case 'On Hold':
       return 'warning';
     case 'Completed':
     case 'Closed':
@@ -166,8 +168,23 @@ export function engagementLifecycleBadgeVariant(status: string): StatusBadgeVari
 
 /** Sign-off, leave, workpaper, report approval states */
 export function approvalStatusBadgeVariant(status: string): StatusBadgeVariant {
-  const s = status.toLowerCase().replace(/_/g, ' ');
-  if (s === 'approved' || s === 'final' || s === 'verified' || s === 'received' || s === 'paid') return 'success';
+  // Normalize camelCase (ManagerApproved) and snake/space forms
+  const s = status
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  if (
+    s === 'approved' ||
+    s === 'final' ||
+    s === 'verified' ||
+    s === 'received' ||
+    s === 'paid' ||
+    s === 'hr credited' ||
+    s === 'submitted'
+  ) {
+    return 'success';
+  }
   if (s === 'rejected' || s === 'critical') return 'destructive';
   if (s === 'cancelled') return 'outline';
   if (
@@ -176,7 +193,8 @@ export function approvalStatusBadgeVariant(status: string): StatusBadgeVariant {
     s === 'under review' ||
     s === 'prepared' ||
     s === 'in progress' ||
-    s === 'manager approved'
+    s === 'manager approved' ||
+    s === 'reviewed'
   ) {
     return 'warning';
   }

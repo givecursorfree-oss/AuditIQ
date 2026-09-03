@@ -38,6 +38,7 @@ interface ClientSchedule {
   isActive: boolean;
   frequency: string;
   triggerDay: number | null;
+  triggerTime: string;
   nextCreateAt: string | null;
   autoSendDataRequestLetter: boolean;
   autoCreateStartDate: string;
@@ -91,6 +92,7 @@ export default function SchedulerAdmin() {
       isActive: editing.isActive,
       frequency: editing.frequency,
       triggerDay: editing.triggerDay ?? undefined,
+      triggerTime: editing.triggerTime,
       autoSendDataRequestLetter: editing.autoSendDataRequestLetter,
       autoCreateStartDate: editing.autoCreateStartDate.slice(0, 10),
       autoCreateEndDate: editing.autoCreateEndDate ? editing.autoCreateEndDate.slice(0, 10) : null,
@@ -103,8 +105,8 @@ export default function SchedulerAdmin() {
   async function runNow() {
     setRunResult('Running…');
     try {
-      const { data } = await api.post<{ created: number; emailsSent: number }>('/scheduler/run');
-      setRunResult(`Created ${data.created} period(s), sent ${data.emailsSent} email(s).`);
+      const { data } = await api.post<{ created: number; emailsScheduled: number }>('/scheduler/run');
+      setRunResult(`Created ${data.created} period(s), scheduled ${data.emailsScheduled} email(s).`);
       await load();
     } catch {
       setRunResult('Scheduler run failed.');
@@ -129,18 +131,18 @@ export default function SchedulerAdmin() {
         description="Recurring GSTR, TDS, Advance Tax, and TP triggers for enrolled clients"
         actions={
           isAdmin ? (
-            <button type="button" className="btn-primary text-sm inline-flex items-center gap-1" onClick={() => void runNow()}>
+            <Button type="button" size="sm" className="gap-1" onClick={() => void runNow()}>
               <Play size={16} /> Run now
-            </button>
+            </Button>
           ) : undefined
         }
       />
       {loadError && (
         <div className="card p-3 text-sm text-destructive mb-4 flex justify-between gap-2">
           <span>{loadError}</span>
-          <button type="button" className="btn-secondary text-xs" onClick={() => void load()}>
+          <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
       {runResult && <div className="card p-3 text-sm mb-4">{runResult}</div>}
@@ -227,7 +229,7 @@ export default function SchedulerAdmin() {
                 <div>
                   <p className="font-medium">{s.engagementTemplateId}</p>
                   <p className="text-xs text-foreground-muted capitalize">
-                    {s.frequency} · day {s.triggerDay ?? '—'} · next {s.nextCreateAt?.slice(0, 10) ?? '—'}
+                    {s.frequency} · day {s.triggerDay ?? '—'} at {s.triggerTime} · next {s.nextCreateAt?.slice(0, 10) ?? '—'}
                   </p>
                 </div>
                 <Button type="button" size="sm" variant="outline" onClick={() => setEditing(s)}>
@@ -262,6 +264,14 @@ export default function SchedulerAdmin() {
                   max={31}
                   value={editing.triggerDay ?? ''}
                   onChange={(e) => setEditing({ ...editing, triggerDay: Number(e.target.value) })}
+                />
+              </div>
+              <div>
+                <Label>Trigger time (server local time)</Label>
+                <Input
+                  type="time"
+                  value={editing.triggerTime}
+                  onChange={(e) => setEditing({ ...editing, triggerTime: e.target.value })}
                 />
               </div>
               <label className="flex items-center gap-2 text-sm">

@@ -435,7 +435,28 @@ router.get('/pending-count', requirePermission('approvals', 'view'), async (req:
       isPendingApproverForUser(userId, role, r)
     ).length;
 
-    res.json({ count });
+    let expenseClaimCount = 0;
+    if (['Partner', 'Admin'].includes(role)) {
+      expenseClaimCount = await prisma.expenseClaim.count({
+        where: {
+          firmId,
+          claimStatus: { in: ['pending_approval', 'partially_approved'] },
+        },
+      });
+    } else if (role === 'Manager') {
+      expenseClaimCount = await prisma.expenseClaimManagerApproval.count({
+        where: {
+          managerId: userId,
+          status: 'pending',
+          claim: {
+            firmId,
+            claimStatus: { in: ['pending_approval', 'partially_approved'] },
+          },
+        },
+      });
+    }
+
+    res.json({ count: count + expenseClaimCount });
   } catch (err) {
     logger.error('Failed to get pending count', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to get count' });

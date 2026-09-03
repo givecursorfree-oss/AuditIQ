@@ -5,6 +5,7 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { canAccessEngagement } from '../lib/engagementAccess.js';
 import { getFingerprintLogoffTime } from '../lib/biometricService.js';
+import { verifyLateHoursClaim } from '../lib/lateHoursPolicy.js';
 
 const router = Router();
 router.use(authenticate);
@@ -87,7 +88,12 @@ router.post('/late-hours', async (req: AuthRequest, res: Response): Promise<void
         engagementId: body.engagementId,
       },
     });
-    res.status(201).json(claim);
+    const verification = verifyLateHoursClaim({
+      actualEndTime: body.actualEndTime,
+      computerLogoffTime,
+      fingerprintLogoffTime,
+    });
+    res.status(201).json({ ...claim, verification });
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -162,10 +168,14 @@ router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: Aut
       select: { id: true },
     });
     const staffIds = [req.user!.id, ...subordinates.map((s) => s.id)];
+    const isFirmWide = ['Partner', 'Admin'].includes(req.user!.role);
+    const staffFilter = isFirmWide
+      ? { firmId }
+      : { firmId, id: { in: staffIds } };
 
     const [lateHours, deptVisits] = await Promise.all([
       prisma.lateHoursClaim.findMany({
-        where: { status: 'pending', staff: { firmId } },
+        where: { status: 'pending', staff: staffFilter },
         include: {
           staff: { select: { id: true, firstName: true, lastName: true } },
           engagement: { select: { title: true } },
@@ -173,7 +183,7 @@ router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: Aut
         orderBy: { createdAt: 'desc' },
       }),
       prisma.deptVisitClaim.findMany({
-        where: { status: 'pending', staff: { firmId } },
+        where: { status: 'pending', staff: staffFilter },
         include: {
           staff: { select: { id: true, firstName: true, lastName: true } },
           engagement: { select: { title: true } },
@@ -183,7 +193,14 @@ router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: Aut
     ]);
 
     res.json({
-      lateHours,
+      lateHours: lateHours.map((c) => ({
+        ...c,
+        verification: verifyLateHoursClaim({
+          actualEndTime: c.actualEndTime,
+          computerLogoffTime: c.computerLogoffTime,
+          fingerprintLogoffTime: c.fingerprintLogoffTime,
+        }),
+      })),
       deptVisits,
       reviewerId: req.user!.id,
     });
@@ -211,10 +228,24 @@ router.patch(
   authorize('Partner', 'Admin', 'Manager'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const notes = z.object({ managerNotes: z.string().optional() }).parse(req.body || {});
+      const notes = z
+        .object({ managerNotes: z.string().optional(), forceApprove: z.boolean().optional() })
+        .parse(req.body || {});
       const existing = await findFirmLateHoursClaim(req, String(req.params.id));
       if (!existing) {
         res.status(404).json({ error: 'Claim not found' });
+        return;
+      }
+      const verification = verifyLateHoursClaim({
+        actualEndTime: existing.actualEndTime,
+        computerLogoffTime: existing.computerLogoffTime,
+        fingerprintLogoffTime: existing.fingerprintLogoffTime,
+      });
+      if (verification.flagged && !notes.forceApprove) {
+        res.status(409).json({
+          error: 'Claim times do not match log-off records. Approve with forceApprove and managerNotes.',
+          verification,
+        });
         return;
       }
       const claim = await prisma.lateHoursClaim.update({
@@ -223,7 +254,7 @@ router.patch(
           status: 'approved',
           reviewedById: req.user!.id,
           reviewedAt: new Date(),
-          managerNotes: notes.managerNotes,
+          managerNotes: notes.managerNotes ?? (verification.flagged ? verification.flagReason : undefined),
         },
       });
       await prisma.notification.create({

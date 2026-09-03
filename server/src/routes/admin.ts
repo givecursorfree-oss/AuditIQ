@@ -565,6 +565,7 @@ const updateFirmSchema = z.object({
   phone: optionalString,
   email: optionalEmail,
   website: optionalString,
+  expenseSubmissionWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
 router.put('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {

@@ -76,25 +76,23 @@ router.post('/start', async (req: AuthRequest, res: Response): Promise<void> => 
       }
     }
 
+    const existing = await prisma.clientStopwatch.findUnique({ where: { userId } });
+    if (existing) {
+      res.status(409).json({
+        error: 'Timer already running. Stop or pause it before starting a new one.',
+        stopwatch: existing,
+      });
+      return;
+    }
+
     const clockIn = await ensureTimerClockIn(userId);
 
     const now = new Date();
-    const sw = await prisma.clientStopwatch.upsert({
-      where: { userId },
-      create: {
+    const sw = await prisma.clientStopwatch.create({
+      data: {
         userId,
         engagementId: body.engagementId,
         taskId: body.taskId,
-        workType: body.workType,
-        notes: body.notes,
-        stage: eng.currentStage,
-        startedAt: now,
-        isPaused: false,
-        pausedAt: null,
-      },
-      update: {
-        engagementId: body.engagementId,
-        taskId: body.taskId ?? null,
         workType: body.workType,
         notes: body.notes,
         stage: eng.currentStage,

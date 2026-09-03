@@ -142,7 +142,10 @@ export function DynamicIslandChat({
   useEffect(() => {
     if (!isExpanded) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsExpanded(false);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsExpanded(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);

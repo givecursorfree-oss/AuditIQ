@@ -31,11 +31,11 @@ function nextAction(
 ): { label: string; step: LetterWorkflowStep } | null {
   if (requestStatus === 'pending' || requestStatus === 'rejected' || !hasEngagement) return null;
   if (letterStatus === 'signed') return null;
-  if (!hasLetter || letterStatus === 'draft' || letterStatus === 'not_required') {
-    return { label: 'Generate letter', step: 'draft' };
-  }
-  if (letterStatus === 'draft' && hasLetter) {
+  if (hasLetter && letterStatus === 'draft') {
     return { label: 'Send to client', step: 'sent' };
+  }
+  if (!hasLetter || letterStatus === 'not_required' || letterStatus === 'draft' || letterStatus === 'rejected') {
+    return { label: 'Generate letter', step: 'draft' };
   }
   return null;
 }
@@ -43,7 +43,7 @@ function nextAction(
 function stepCircleClass(done: boolean, active: boolean): string {
   return cn(
     'flex size-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-semibold transition-colors',
-    done && 'border-primary bg-primary text-primary-foreground',
+    done && 'border-success bg-success text-white',
     active && !done && 'border-primary bg-primary text-primary-foreground',
     !done && !active && 'border-border bg-muted text-muted-foreground'
   );
@@ -134,14 +134,6 @@ export function LetterWorkflowStepper({
           )
         )}
       </div>
-      {requestStatus === 'pending' && !hasEngagement && (
-        <p className="text-sm text-muted-foreground">
-          Approve the request to create one engagement per service, then generate and send the letter.
-        </p>
-      )}
-      {workflowDisplay.label === 'Ready to generate letter' && hasEngagement && (
-        <p className="text-sm text-muted-foreground">Generate the engagement letter on the primary engagement.</p>
-      )}
     </div>
   );
 }

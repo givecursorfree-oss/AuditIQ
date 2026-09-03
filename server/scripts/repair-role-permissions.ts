@@ -25,6 +25,7 @@ const MODULES = [
   'invoices',
   'vault',
   'approvals',
+  'expenses',
 ];
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
 
@@ -127,7 +128,7 @@ async function main() {
   );
   await setRolePermissions(
     'Staff',
-    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages'], [
+    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'expenses'], [
       'view',
       'create',
       'edit',
@@ -136,9 +137,10 @@ async function main() {
   );
   await setRolePermissions(
     'Intern',
-    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'], [
+    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages', 'expenses'], [
       'view',
       'apply',
+      'create',
     ])
   );
   await setRolePermissions(
@@ -156,7 +158,7 @@ async function main() {
   );
   await setRolePermissions(
     'Accounts',
-    pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages'], ['view', 'create', 'edit', 'export'])
+    pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages', 'expenses'], ['view', 'create', 'edit', 'export', 'manage'])
   );
 
   console.log('');

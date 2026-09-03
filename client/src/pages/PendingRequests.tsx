@@ -393,6 +393,8 @@ export default function PendingRequests() {
 
                         size="sm"
 
+                        variant="success"
+
                         disabled={busyId === r.id}
 
                         onClick={() => void approve(r)}
@@ -415,7 +417,7 @@ export default function PendingRequests() {
 
                         size="sm"
 
-                        variant="outline"
+                        variant="destructive"
 
                         disabled={busyId === r.id}
 
