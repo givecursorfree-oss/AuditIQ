@@ -43,11 +43,12 @@ services:
       LOG_LEVEL: info
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-25}
       VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:?VAULT_ENCRYPTION_KEY must be set}
-      # Search disabled — MySQL fallback only (fits 8 GB RAM)
+      # Search / OCR disabled by default on 8 GB — MySQL fallback; optional profile: ocr
       SEMANTIC_SEARCH_ENABLED: "false"
       TYPESENSE_HOST: http://127.0.0.1:8108
       TYPESENSE_API_KEY: unused-on-kvm2
       TIKA_URL: http://127.0.0.1:9998
+      PADDLE_OCR_URL: ${PADDLE_OCR_URL:-}
       ALLOW_STAFF_REGISTRATION: ${ALLOW_STAFF_REGISTRATION:-false}
       SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-true}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -84,6 +85,18 @@ services:
       resources:
         limits:
           memory: 256M
+
+  # Optional receipt OCR (~1.5 GB). Start with:
+  #   docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 --profile ocr up -d --build
+  # and set PADDLE_OCR_URL=http://paddleocr:8090 in .env.kvm2
+  paddleocr:
+    profiles: ['ocr']
+    build: ./services/paddleocr-sidecar
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
 
   certbot:
     image: certbot/certbot

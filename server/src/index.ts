@@ -409,10 +409,14 @@ app.get('/api/health', async (_req, res) => {
     checks.tika = 'unreachable';
   }
   try {
-    const r = await fetch(`${env.PADDLE_OCR_URL.replace(/\/$/, '')}/health`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    checks.paddleOcr = r.ok ? 'ok' : 'error';
+    if (!env.PADDLE_OCR_URL) {
+      checks.paddleOcr = 'disabled';
+    } else {
+      const r = await fetch(`${env.PADDLE_OCR_URL.replace(/\/$/, '')}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      checks.paddleOcr = r.ok ? 'ok' : 'error';
+    }
   } catch {
     checks.paddleOcr = 'unreachable';
   }

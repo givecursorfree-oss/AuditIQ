@@ -74,10 +74,10 @@ const envSchema = z.object({
   TYPESENSE_HOST: z.string().default('http://localhost:8108'),
   TYPESENSE_API_KEY: z.string().default('auditiq-typesense-dev-key'),
   TIKA_URL: z.string().default('http://localhost:9998'),
-  /** PaddleOCR sidecar for receipt images (claims). Set empty to disable. */
+  /** PaddleOCR sidecar for receipt images (claims). Empty = disabled (kvm2 default). */
   PADDLE_OCR_URL: z.preprocess(
-    (v) => (v === '' || v == null ? 'http://localhost:8090' : v),
-    z.string().url()
+    (v) => (v === '' || v == null ? undefined : v),
+    z.string().url().optional()
   ),
   /** Built-in Typesense ONNX model (same family as File Brain). */
   TYPESENSE_EMBEDDING_MODEL: z

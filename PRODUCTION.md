@@ -12,6 +12,14 @@ cp .env.kvm2.example .env.kvm2
 docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
 ```
 
+**Claims** (food/travel/batches) ship in the server image and need `prisma migrate deploy` only. **PaddleOCR is optional** — leave `PADDLE_OCR_URL` empty on 8 GB; managers still approve claimed amounts. To enable OCR later (~1.5 GB):
+
+```bash
+# in .env.kvm2:
+# PADDLE_OCR_URL=http://paddleocr:8090
+docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 --profile ocr up -d --build
+```
+
 Or from repo root: `npm run docker:up:kvm2`
 
 GitHub **Deploy** workflow is **manual only** (Actions → Deploy → Run workflow). Pushing to `main` does **not** update the VPS until you run that workflow.
