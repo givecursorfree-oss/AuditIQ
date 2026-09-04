@@ -7,14 +7,17 @@ describe('hierarchyAccess', () => {
     expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/employees')).toBe(true);
   });
 
-  it('blocks HR manager from engagements', () => {
-    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/engagements/abc')).toBe(false);
+  it('allows HR manager time tracker APIs', () => {
+    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/engagements')).toBe(true);
+    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/tasks')).toBe(true);
+    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/time-entries')).toBe(true);
   });
 
-  it('allows accounts manager billing APIs only', () => {
+  it('allows accounts manager billing and time tracker APIs', () => {
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/invoices')).toBe(true);
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/time-entries')).toBe(true);
-    expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/engagements')).toBe(false);
+    expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/engagements')).toBe(true);
+    expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/tasks')).toBe(true);
   });
 
   it('passes through unscoped hierarchy codes', () => {

@@ -39,7 +39,7 @@ function requireFirmId(req: AuthRequest, res: Response): string | null {
   return firmId;
 }
 
-// GET /api/time-entries?engagementId=xxx&userId=xxx
+// GET /api/time-entries?engagementId=xxx&userId=xxx|all
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firmId = requireFirmId(req, res);
@@ -47,7 +47,26 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const { engagementId, userId, from, to } = req.query;
     const where: Record<string, unknown> = { engagement: { firmId } };
     if (engagementId) where.engagementId = String(engagementId);
-    if (userId) where.userId = String(userId);
+
+    const isManagerPlus = ['Partner', 'Admin', 'Manager'].includes(req.user!.role);
+    const requestedUserId = userId != null ? String(userId) : null;
+    if (requestedUserId === 'all') {
+      if (!isManagerPlus) {
+        res.status(403).json({ error: 'Only managers can list all time entries' });
+        return;
+      }
+    } else if (requestedUserId) {
+      if (requestedUserId !== req.user!.id && !isManagerPlus) {
+        res.status(403).json({ error: 'Cannot view another users time entries' });
+        return;
+      }
+      where.userId = requestedUserId;
+    } else if (!engagementId) {
+      // Personal recent-logs view: always map to the signed-in user
+      where.userId = req.user!.id;
+    }
+    // engagementId without userId → all entries on that engagement (EngagementTimeLog)
+
     if (from || to) {
       where.date = {};
       if (from) (where.date as Record<string, unknown>).gte = new Date(String(from));
@@ -57,6 +76,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const entries = await prisma.timeEntry.findMany({
       where,
       orderBy: { date: 'desc' },
+      take: 500,
       include: {
         engagement: { select: { title: true, client: { select: { name: true } } } },
         user: { select: { firstName: true, lastName: true, initials: true } },

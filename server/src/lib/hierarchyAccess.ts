@@ -15,6 +15,7 @@ export const HIERARCHY_API_PREFIXES: Record<string, string[]> = {
     '/api/engagement-stages',
     '/api/timesheets',
     '/api/time-entries',
+    '/api/tasks',
     '/api/stopwatch',
     '/api/dashboard',
     '/api/notifications',

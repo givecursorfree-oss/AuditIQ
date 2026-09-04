@@ -35,7 +35,8 @@ interface TimeEntry {
   workType: string | null;
   description: string | null;
   isBillable: boolean;
-  engagement: { title: string; client: { name: string } };
+  engagement: { title: string; client: { name: string } } | null;
+  user?: { firstName: string; lastName: string; initials: string };
 }
 
 interface EngagementOption {
@@ -133,29 +134,46 @@ export default function TimeTracker() {
 
   async function loadEntries() {
     try {
-      const from = new Date(); from.setDate(from.getDate() - 7);
-      const r = await api.get(`/time-entries?from=${from.toISOString()}`);
-      setEntries(r.data);
+      const from = new Date();
+      from.setDate(from.getDate() - 7);
+      const r = await api.get('/time-entries', {
+        params: {
+          from: from.toISOString(),
+          ...(user?.id ? { userId: user.id } : {}),
+        },
+      });
+      setEntries(Array.isArray(r.data) ? r.data : []);
     } catch {
-      setLoadError('Failed to load.');
+      setLoadError('Failed to load time entries.');
     }
   }
 
   async function loadTasks() {
     try {
-      const r = await api.get('/tasks?scope=mine');
-      setTasks(r.data.filter((t: Task) => t.status !== 'Done' && t.status !== 'Cancelled'));
+      const r = await api.get('/tasks', { params: { scope: 'mine' } });
+      const raw = r.data;
+      const list: Task[] = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.tasks)
+          ? raw.tasks
+          : [];
+      setTasks(
+        list.filter((t) => {
+          const s = String(t.status || '');
+          return s !== 'Done' && s !== 'Cancelled' && s !== 'completed';
+        })
+      );
     } catch {
-      setLoadError('Failed to load.');
+      setTasks([]);
     }
   }
 
   async function loadReminders() {
-    // Compose smart reminders: statutory deadlines T-7, gap notifications via dashboard
+    // Optional niceties — never fail the page if deadlines/UDIN checks error
     try {
       const [dl, eng] = await Promise.all([
-        api.get('/dashboard/deadlines'),
-        api.get('/engagements?status=Closed&limit=30'),
+        api.get('/dashboard/deadlines').catch(() => ({ data: [] as { title: string; dueDate: string }[] })),
+        api.get('/engagements?status=Closed&limit=30').catch(() => ({ data: { engagements: [] as { title: string; udin?: string | null }[] } })),
       ]);
       const rems: { type: string; message: string }[] = [];
       for (const d of dl.data || []) {
@@ -167,7 +185,7 @@ export default function TimeTracker() {
       }
       setReminders(rems);
     } catch {
-      setLoadError('Failed to load.');
+      setReminders([]);
     }
   }
 
@@ -506,21 +524,34 @@ export default function TimeTracker() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 card p-4">
             <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2"><Calendar size={18} /> Recent time logs (7 days)</h3>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm table-fixed">
               <thead><tr className="table-header text-left">
-                <th className="px-4 py-3">Date</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Work Type</th><th className="px-4 py-3">Hours</th><th className="px-4 py-3">Billable</th>
+                <th className="w-[12%] px-3 py-3">Date</th>
+                <th className="w-[18%] px-3 py-3">User</th>
+                <th className="w-[28%] px-3 py-3">Client</th>
+                <th className="w-[24%] px-3 py-3">Work Type</th>
+                <th className="w-[10%] px-3 py-3 text-right">Hours</th>
+                <th className="w-[8%] px-3 py-3 text-right">Billable</th>
               </tr></thead>
               <tbody>
                 {entries.map(e => (
                   <tr key={e.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5">{new Date(e.date).toLocaleDateString('en-IN')}</td>
-                    <td className="px-4 py-2.5">{e.engagement.client.name}</td>
-                    <td className="px-4 py-2.5">{e.workType || '—'}</td>
-                    <td className="px-4 py-2.5">{e.hours.toFixed(2)}</td>
-                    <td className="px-4 py-2.5">{e.isBillable ? '✓' : '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">{new Date(e.date).toLocaleDateString('en-IN')}</td>
+                    <td className="px-3 py-2.5 truncate">
+                      {e.user ? `${e.user.firstName} ${e.user.lastName}` : user ? `${user.firstName} ${user.lastName}` : '—'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="truncate font-medium">{e.engagement?.client?.name ?? '—'}</div>
+                      {e.engagement?.title ? (
+                        <div className="truncate text-xs text-muted-foreground">{e.engagement.title}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2.5 truncate">{e.workType || '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{Number(e.hours).toFixed(2)}</td>
+                    <td className="px-3 py-2.5 text-right">{e.isBillable ? '✓' : '—'}</td>
                   </tr>
                 ))}
-                {entries.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">No entries yet</td></tr>}
+                {entries.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">No entries yet</td></tr>}
               </tbody>
             </table>
           </div>
@@ -570,10 +601,10 @@ export default function TimeTracker() {
                 {entries.map(e => (
                   <tr key={e.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2.5">{new Date(e.date).toLocaleDateString('en-IN')}</td>
-                    <td className="px-4 py-2.5">{e.engagement.client.name}</td>
-                    <td className="px-4 py-2.5 truncate max-w-xs">{e.engagement.title}</td>
+                    <td className="px-4 py-2.5">{e.engagement?.client?.name ?? '—'}</td>
+                    <td className="px-4 py-2.5 truncate max-w-xs">{e.engagement?.title ?? '—'}</td>
                     <td className="px-4 py-2.5">{e.workType || '—'}</td>
-                    <td className="px-4 py-2.5">{e.hours.toFixed(2)}</td>
+                    <td className="px-4 py-2.5">{Number(e.hours).toFixed(2)}</td>
                     <td className="px-4 py-2.5">{e.isBillable ? '✓' : '—'}</td>
                   </tr>
                 ))}
