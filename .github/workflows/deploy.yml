@@ -59,7 +59,7 @@ jobs:
       # SSH deploy — configure these secrets in your repo settings:
       #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_KEY
       # VPS must have /opt/auditiq with docker-compose.kvm2.yml + .env.kvm2
-      - name: Deploy via SSH (kvm2 — no Typesense/Tika)
+      - name: Deploy via SSH (kvm2 — Tika + PaddleOCR, no Typesense)
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}

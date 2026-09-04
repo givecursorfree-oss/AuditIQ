@@ -2,9 +2,7 @@
 
 ## 8 GB VPS (Hostinger KVM 2) — use this now
 
-**Do not** run full `docker-compose.yml` on 8 GB RAM (Typesense + Tika need ~3 GB extra).
-
-Use the kvm2 stack (MySQL + server + client only; document search falls back to MySQL / `pdf-parse`):
+**Do not** run full `docker-compose.yml` on 8 GB RAM if you also need Typesense (extra ~2 GB). kvm2 already includes **Tika + PaddleOCR** for documents/receipts; search stays on MySQL.
 
 ```bash
 cp .env.kvm2.example .env.kvm2
@@ -12,13 +10,7 @@ cp .env.kvm2.example .env.kvm2
 docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
 ```
 
-**Claims** (food/travel/batches) ship in the server image and need `prisma migrate deploy` only. **PaddleOCR is optional** — leave `PADDLE_OCR_URL` empty on 8 GB; managers still approve claimed amounts. To enable OCR later (~1.5 GB):
-
-```bash
-# in .env.kvm2:
-# PADDLE_OCR_URL=http://paddleocr:8090
-docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 --profile ocr up -d --build
-```
+**Claims** need `prisma migrate deploy`. OCR (Paddle) + Tika start with the stack above.
 
 Or from repo root: `npm run docker:up:kvm2`
 

@@ -1,9 +1,7 @@
-# Hostinger KVM 2 (2 vCPU / 8 GB / 100 GB) — default production compose for 8 GB VPS
+# Hostinger KVM 2 (2 vCPU / 8 GB) — production compose
 # Usage: docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
-#        npm run docker:up:kvm2
 #
-# Skips Typesense + Tika (saves ~3 GB RAM). App falls back to MySQL document search.
-# Use full docker-compose.yml only on 16 GB+ hosts.
+# Includes Tika + PaddleOCR (receipt/document text). Typesense still off (MySQL search).
 
 services:
   db:
@@ -13,7 +11,7 @@ services:
       MYSQL_DATABASE: auditiq
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
     command:
-      - --innodb-buffer-pool-size=1G
+      - --innodb-buffer-pool-size=768M
       - --max-connections=150
     volumes:
       - mysql_data:/var/lib/mysql
@@ -26,7 +24,23 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 1536M
+
+  tika:
+    image: apache/tika:3.3.0.0-full
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  paddleocr:
+    build: ./services/paddleocr-sidecar
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
 
   server:
     build: ./server
@@ -34,6 +48,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      tika:
+        condition: service_started
+      paddleocr:
+        condition: service_started
     environment:
       DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/auditiq
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
@@ -43,12 +61,11 @@ services:
       LOG_LEVEL: info
       MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-25}
       VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:?VAULT_ENCRYPTION_KEY must be set}
-      # Search / OCR disabled by default on 8 GB — MySQL fallback; optional profile: ocr
       SEMANTIC_SEARCH_ENABLED: "false"
       TYPESENSE_HOST: http://127.0.0.1:8108
       TYPESENSE_API_KEY: unused-on-kvm2
-      TIKA_URL: http://127.0.0.1:9998
-      PADDLE_OCR_URL: ${PADDLE_OCR_URL:-}
+      TIKA_URL: http://tika:9998
+      PADDLE_OCR_URL: http://paddleocr:8090
       ALLOW_STAFF_REGISTRATION: ${ALLOW_STAFF_REGISTRATION:-false}
       SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-true}
       SMTP_HOST: ${SMTP_HOST:-}
@@ -65,7 +82,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1280M
 
   client:
     build: ./client
@@ -85,18 +102,6 @@ services:
       resources:
         limits:
           memory: 256M
-
-  # Optional receipt OCR (~1.5 GB). Start with:
-  #   docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 --profile ocr up -d --build
-  # and set PADDLE_OCR_URL=http://paddleocr:8090 in .env.kvm2
-  paddleocr:
-    profiles: ['ocr']
-    build: ./services/paddleocr-sidecar
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
 
   certbot:
     image: certbot/certbot
