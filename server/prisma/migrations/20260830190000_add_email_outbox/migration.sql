@@ -1,4 +1,5 @@
-CREATE TABLE `EmailOutbox` (
+-- Idempotent: VPS may already have EmailOutbox / TemplateSend.scheduledAt from db push.
+CREATE TABLE IF NOT EXISTS `EmailOutbox` (
     `id` VARCHAR(191) NOT NULL,
     `clientId` VARCHAR(191) NULL,
     `engagementId` VARCHAR(191) NULL,
@@ -28,11 +29,48 @@ CREATE TABLE `EmailOutbox` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-ALTER TABLE `EmailOutbox`
-  ADD CONSTRAINT `EmailOutbox_clientId_fkey`
-  FOREIGN KEY (`clientId`) REFERENCES `Client`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-  ADD CONSTRAINT `EmailOutbox_engagementId_fkey`
-  FOREIGN KEY (`engagementId`) REFERENCES `Engagement`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+-- FKs: ignore if already present
+SET @fk_client := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'EmailOutbox'
+    AND CONSTRAINT_NAME = 'EmailOutbox_clientId_fkey'
+);
+SET @sql_client := IF(
+  @fk_client = 0,
+  'ALTER TABLE `EmailOutbox` ADD CONSTRAINT `EmailOutbox_clientId_fkey` FOREIGN KEY (`clientId`) REFERENCES `Client`(`id`) ON DELETE SET NULL ON UPDATE CASCADE',
+  'SELECT 1'
+);
+PREPARE stmt_client FROM @sql_client;
+EXECUTE stmt_client;
+DEALLOCATE PREPARE stmt_client;
 
-ALTER TABLE `TemplateSend`
-  ADD COLUMN `scheduledAt` DATETIME(3) NULL;
+SET @fk_eng := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'EmailOutbox'
+    AND CONSTRAINT_NAME = 'EmailOutbox_engagementId_fkey'
+);
+SET @sql_eng := IF(
+  @fk_eng = 0,
+  'ALTER TABLE `EmailOutbox` ADD CONSTRAINT `EmailOutbox_engagementId_fkey` FOREIGN KEY (`engagementId`) REFERENCES `Engagement`(`id`) ON DELETE SET NULL ON UPDATE CASCADE',
+  'SELECT 1'
+);
+PREPARE stmt_eng FROM @sql_eng;
+EXECUTE stmt_eng;
+DEALLOCATE PREPARE stmt_eng;
+
+SET @col := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TemplateSend'
+    AND COLUMN_NAME = 'scheduledAt'
+);
+SET @sql_col := IF(
+  @col = 0,
+  'ALTER TABLE `TemplateSend` ADD COLUMN `scheduledAt` DATETIME(3) NULL',
+  'SELECT 1'
+);
+PREPARE stmt_col FROM @sql_col;
+EXECUTE stmt_col;
+DEALLOCATE PREPARE stmt_col;
