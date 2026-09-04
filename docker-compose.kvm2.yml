@@ -2,6 +2,8 @@
 # Usage: docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build
 #
 # Includes Tika + PaddleOCR (receipt/document text). Typesense still off (MySQL search).
+# mem_limit is required — deploy.resources.limits is ignored outside Swarm and Paddle
+# can OOM-kill the Node API (nginx then returns 502).
 
 services:
   db:
@@ -11,8 +13,8 @@ services:
       MYSQL_DATABASE: auditiq
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
     command:
-      - --innodb-buffer-pool-size=768M
-      - --max-connections=150
+      - --innodb-buffer-pool-size=512M
+      - --max-connections=100
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -21,37 +23,25 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
+    mem_limit: 1280m
 
   tika:
     image: apache/tika:3.3.0.0-full
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 768M
+    mem_limit: 640m
 
   paddleocr:
     build: ./services/paddleocr-sidecar
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
+    mem_limit: 1280m
 
   server:
     build: ./server
     restart: unless-stopped
+    # API must not wait on OCR sidecars — they can be slow/OOM; OCR fails open at runtime
     depends_on:
       db:
         condition: service_healthy
-      tika:
-        condition: service_started
-      paddleocr:
-        condition: service_started
     environment:
       DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/auditiq
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
@@ -79,16 +69,26 @@ services:
     volumes:
       - server_logs:/app/logs
       - document_uploads:/app/uploads
-    deploy:
-      resources:
-        limits:
-          memory: 1280M
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    mem_limit: 1024m
 
   client:
     build: ./client
     restart: unless-stopped
     depends_on:
-      - server
+      server:
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"
@@ -98,10 +98,7 @@ services:
     volumes:
       - certbot_conf:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot
-    deploy:
-      resources:
-        limits:
-          memory: 256M
+    mem_limit: 192m
 
   certbot:
     image: certbot/certbot

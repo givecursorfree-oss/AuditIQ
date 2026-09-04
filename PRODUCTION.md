@@ -133,8 +133,8 @@ CI runs authz unit tests on every push.
 
 ## Security checklist
 
-- [ ] On 8 GB: running `docker-compose.kvm2.yml` (no Typesense/Tika containers)
-- [ ] Typesense and Tika **not** exposed on public ports (if using full compose)
+- [ ] On 8 GB: running `docker-compose.kvm2.yml` (Tika + PaddleOCR in-compose; no Typesense)
+- [ ] Typesense **not** exposed on public ports (if using full compose)
 - [ ] HTTPS via `./scripts/enable-https.sh`
 - [ ] `ALLOW_STAFF_REGISTRATION=false`
 - [ ] SMTP credentials configured with a verified sender domain

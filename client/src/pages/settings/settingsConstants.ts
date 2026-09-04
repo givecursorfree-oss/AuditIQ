@@ -24,6 +24,7 @@ export const MODULE_LABELS: Record<string, { label: string; icon: React.ElementT
   invoices: { label: 'Billing & Invoices', icon: Download },
   vault: { label: 'Password Vault', icon: Shield },
   approvals: { label: 'Approvals', icon: Shield },
+  expenses: { label: 'Claims / Expenses', icon: Download },
 };
 
 export const ACTION_LABELS: Record<string, string> = {

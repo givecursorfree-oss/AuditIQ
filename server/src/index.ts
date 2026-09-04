@@ -452,6 +452,11 @@ httpServer.listen(PORT, () => {
 });
 
 async function initSemanticSearch(): Promise<void> {
+  const { getEnv } = await import('./lib/env.js');
+  if (!getEnv().SEMANTIC_SEARCH_ENABLED) {
+    logger.info('Semantic search: disabled — using MySQL fallback');
+    return;
+  }
   const maxAttempts = 12;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {

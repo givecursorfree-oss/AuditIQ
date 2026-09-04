@@ -7,8 +7,21 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const MODULES = [
-  'dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance',
-  'leave', 'employees', 'messages', 'settings', 'clients', 'invoices', 'vault', 'approvals',
+  'dashboard',
+  'engagements',
+  'workpapers',
+  'documents',
+  'reports',
+  'attendance',
+  'leave',
+  'employees',
+  'messages',
+  'settings',
+  'clients',
+  'invoices',
+  'vault',
+  'approvals',
+  'expenses',
 ];
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'apply', 'manage'];
 
@@ -93,31 +106,50 @@ async function main() {
   await setRolePermissions(
     'Manager',
     pick(allPerms, MODULES.filter((m) => m !== 'settings'), [
-      'view', 'create', 'edit', 'approve', 'export', 'apply', 'manage',
+      'view',
+      'create',
+      'edit',
+      'approve',
+      'export',
+      'apply',
+      'manage',
     ])
   );
   await setRolePermissions(
     'Staff',
-    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages'], [
-      'view', 'create', 'edit', 'apply',
-    ])
+    pick(
+      allPerms,
+      ['dashboard', 'engagements', 'workpapers', 'documents', 'reports', 'attendance', 'leave', 'messages', 'expenses'],
+      ['view', 'create', 'edit', 'apply']
+    )
   );
   await setRolePermissions(
     'Intern',
-    pick(allPerms, ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages'], [
-      'view', 'apply',
-    ])
+    pick(
+      allPerms,
+      ['dashboard', 'engagements', 'workpapers', 'documents', 'attendance', 'leave', 'messages', 'expenses'],
+      ['view', 'apply', 'create']
+    )
   );
   await setRolePermissions('Client', pick(allPerms, ['dashboard', 'documents', 'reports', 'messages'], ['view']));
   await setRolePermissions(
     'HR',
-    pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages'], [
-      'view', 'manage', 'export', 'apply',
+    pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages', 'clients'], [
+      'view',
+      'manage',
+      'export',
+      'apply',
     ])
   );
   await setRolePermissions(
     'Accounts',
-    pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages'], ['view', 'create', 'edit', 'export'])
+    pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages', 'expenses'], [
+      'view',
+      'create',
+      'edit',
+      'export',
+      'manage',
+    ])
   );
   await syncUserRoleIds();
   console.log('Role permission repair complete');
