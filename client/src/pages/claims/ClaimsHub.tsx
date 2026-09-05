@@ -108,16 +108,7 @@ export default function ClaimsHub() {
         ) : loadError ? (
           <ErrorBanner message={loadError} onRetry={load} />
         ) : claims.length === 0 ? (
-          <EmptyState
-            title="No claims yet"
-            action={
-              canSubmitClaim ? (
-                <Button asChild size="sm">
-                  <Link to="/claims/new/food">New food claim</Link>
-                </Button>
-              ) : undefined
-            }
-          />
+          <EmptyState title="No claims yet" />
         ) : (
           <ul className="space-y-4">
             {claims.map((c) => (

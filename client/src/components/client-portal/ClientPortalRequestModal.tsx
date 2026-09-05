@@ -30,9 +30,10 @@ export function ClientPortalRequestModal() {
   if (!showRequestForm) return null;
 
   return (
-    <dialog
-      open
-      className="fixed inset-0 z-50 m-0 flex max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       aria-labelledby="engagement-request-title"
       onClick={closeRequestForm}
       onKeyDown={(e) => {
@@ -262,6 +263,6 @@ export function ClientPortalRequestModal() {
           </>
         )}
       </div>
-    </dialog>
+    </div>
   );
 }

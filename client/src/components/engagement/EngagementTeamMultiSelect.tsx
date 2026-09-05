@@ -3,6 +3,7 @@ import api from '@/services/api';
 import { PanelCard } from '@/components/layout/PanelCard';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { appAlert } from '@/context/AppDialogContext';
 import StaffAvailabilityPanel from './StaffAvailabilityPanel';
 import { filterUsersForSlot } from '@/lib/assigneeFilters';
 import {
@@ -59,6 +60,7 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
   const [workload, setWorkload] = useState<TeamWorkloadInfo[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [availabilityStaffId, setAvailabilityStaffId] = useState<string | null>(null);
 
   const refreshWorkload = useCallback(async () => {
@@ -115,10 +117,12 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
   function toggle(id: string, list: string[], setList: (v: string[]) => void) {
     setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
     setSaved(false);
+    setSaveError(null);
   }
 
   async function save() {
     setSaving(true);
+    setSaveError(null);
     try {
       await api.put(`/engagements/${engagementId}/team`, {
         managerIds,
@@ -128,6 +132,11 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
       setSaved(true);
       await refreshWorkload();
       onSaved?.();
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { error?: string } } };
+      const message = ax.response?.data?.error || 'Failed to save team';
+      setSaveError(message);
+      await appAlert({ title: 'Could not save team', message });
     } finally {
       setSaving(false);
     }
@@ -152,6 +161,7 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
             onChange={(e) => {
               setPartnerId(e.target.value || null);
               setSaved(false);
+              setSaveError(null);
             }}
           >
             <option value="">— Select partner —</option>
@@ -174,6 +184,7 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
             onMoveUser={(userId, direction, selectedIds) => {
               setManagerIds(moveInList(selectedIds, userId, direction));
               setSaved(false);
+              setSaveError(null);
             }}
             onViewAvailability={setAvailabilityStaffId}
           />
@@ -187,17 +198,19 @@ export default function EngagementTeamMultiSelect({ engagementId, disabled, onSa
             onMoveUser={(userId, direction, selectedIds) => {
               setStaffIds(moveInList(selectedIds, userId, direction));
               setSaved(false);
+              setSaveError(null);
             }}
             onViewAvailability={setAvailabilityStaffId}
           />
         </div>
 
         {!disabled && (
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={() => void save()} disabled={saving}>
               {saving ? 'Saving…' : 'Save team'}
             </Button>
             {saved && <span className="text-xs text-success">Saved</span>}
+            {saveError && <span className="text-xs text-danger">{saveError}</span>}
           </div>
         )}
       </PanelCard>

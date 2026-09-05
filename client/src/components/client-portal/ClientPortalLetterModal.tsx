@@ -20,9 +20,10 @@ export function ClientPortalLetterModal() {
   if (!reviewLetterId) return null;
 
   return (
-    <dialog
-      open
-      className="fixed inset-0 z-50 m-0 flex max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       aria-labelledby="engagement-letter-review-title"
       onClick={() => setReviewLetterId(null)}
       onKeyDown={(e) => {
@@ -94,6 +95,6 @@ export function ClientPortalLetterModal() {
           </Button>
         </div>
       </div>
-    </dialog>
+    </div>
   );
 }

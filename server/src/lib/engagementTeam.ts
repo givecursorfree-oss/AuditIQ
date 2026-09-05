@@ -97,6 +97,54 @@ function dedupePreserveOrder(ids: string[]): string[] {
   return out;
 }
 
+/** Build EngagementMember rows — one row per user (unique on engagementId+userId). */
+export function buildTeamMemberRows(
+  engagementId: string,
+  managerIds: string[],
+  staffIds: string[],
+  partnerId?: string | null
+) {
+  const uniqueManagers = dedupePreserveOrder(managerIds);
+  const uniqueStaff = dedupePreserveOrder(staffIds);
+  const claimed = new Set<string>([...uniqueManagers, ...uniqueStaff]);
+
+  const memberRows: {
+    engagementId: string;
+    userId: string;
+    teamRole: string;
+    role: string;
+    sortOrder: number;
+  }[] = [
+    ...uniqueManagers.map((userId, index) => ({
+      engagementId,
+      userId,
+      teamRole: 'Manager',
+      role: 'Lead',
+      sortOrder: index,
+    })),
+    ...uniqueStaff.map((userId, index) => ({
+      engagementId,
+      userId,
+      teamRole: 'Staff',
+      role: 'Preparer',
+      sortOrder: index,
+    })),
+  ];
+
+  // Partner lives on engagement.partnerInChargeId; only add a member row when not already manager/staff.
+  if (partnerId && !claimed.has(partnerId)) {
+    memberRows.push({
+      engagementId,
+      userId: partnerId,
+      teamRole: 'Partner',
+      role: 'Lead',
+      sortOrder: 0,
+    });
+  }
+
+  return { uniqueManagers, uniqueStaff, memberRows };
+}
+
 export async function setEngagementTeam(
   engagementId: string,
   managerIds: string[],
@@ -104,46 +152,17 @@ export async function setEngagementTeam(
   changedById: string,
   partnerId?: string | null
 ) {
-  const uniqueManagers = dedupePreserveOrder(managerIds);
-  const uniqueStaff = dedupePreserveOrder(staffIds);
+  const { uniqueManagers, uniqueStaff, memberRows } = buildTeamMemberRows(
+    engagementId,
+    managerIds,
+    staffIds,
+    partnerId
+  );
 
   await prisma.$transaction(async (tx) => {
     await tx.engagementMember.deleteMany({
       where: { engagementId, teamRole: { not: null } },
     });
-
-    const memberRows: {
-      engagementId: string;
-      userId: string;
-      teamRole: string;
-      role: string;
-      sortOrder: number;
-    }[] = [
-      ...uniqueManagers.map((userId, index) => ({
-        engagementId,
-        userId,
-        teamRole: 'Manager',
-        role: 'Lead',
-        sortOrder: index,
-      })),
-      ...uniqueStaff.map((userId, index) => ({
-        engagementId,
-        userId,
-        teamRole: 'Staff',
-        role: 'Preparer',
-        sortOrder: index,
-      })),
-    ];
-
-    if (partnerId) {
-      memberRows.push({
-        engagementId,
-        userId: partnerId,
-        teamRole: 'Partner',
-        role: 'Lead',
-        sortOrder: 0,
-      });
-    }
 
     if (memberRows.length > 0) {
       await tx.engagementMember.createMany({ data: memberRows, skipDuplicates: true });
@@ -152,7 +171,8 @@ export async function setEngagementTeam(
     await tx.engagement.update({
       where: { id: engagementId },
       data: {
-        partnerInChargeId: partnerId ?? undefined,
+        // explicit null clears partner; omit only when caller did not pass partnerId
+        ...(partnerId !== undefined ? { partnerInChargeId: partnerId } : {}),
         managerId: uniqueManagers[0] ?? null,
         articleAssistantId: uniqueStaff[0] ?? null,
         teamLastChangedById: changedById,
