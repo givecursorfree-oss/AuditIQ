@@ -7,6 +7,8 @@ export type ParticipantInput = {
   clientId?: string;
   workType?: string;
   workTypeOther?: string;
+  /** Explicit approver (Articles/Staff pick Manager or Partner on the claim form). */
+  managerId?: string;
 };
 
 type EngagementManagers = {
@@ -28,8 +30,10 @@ function managerFromEngagement(eng: EngagementManagers | undefined): string | nu
 export function resolveParticipantManagerId(
   reportsToId: string | null | undefined,
   engagementId: string | null | undefined,
-  engagementMap: Map<string, EngagementManagers>
+  engagementMap: Map<string, EngagementManagers>,
+  explicitManagerId?: string | null
 ): string | null {
+  if (explicitManagerId) return explicitManagerId;
   if (reportsToId) return reportsToId;
   if (!engagementId) return null;
   return managerFromEngagement(engagementMap.get(engagementId));
@@ -83,14 +87,24 @@ export async function createParticipantsAndApprovals(
       workType: p.workType,
       workTypeOther: p.workTypeOther,
       amountShare: shares[i],
-      managerId: resolveParticipantManagerId(reportsMap.get(p.userId), p.engagementId, engagementMap),
+      managerId: resolveParticipantManagerId(
+        reportsMap.get(p.userId),
+        p.engagementId,
+        engagementMap,
+        p.managerId
+      ),
     })),
   });
 
   const byManager = new Map<string, number>();
   for (let i = 0; i < unique.length; i++) {
     const p = unique[i];
-    const mgr = resolveParticipantManagerId(reportsMap.get(p.userId), p.engagementId, engagementMap);
+    const mgr = resolveParticipantManagerId(
+      reportsMap.get(p.userId),
+      p.engagementId,
+      engagementMap,
+      p.managerId
+    );
     if (!mgr) continue;
     byManager.set(mgr, (byManager.get(mgr) ?? 0) + shares[i]);
   }
@@ -126,7 +140,8 @@ export async function repairMissingClaimManagerApprovals(firmId?: string): Promi
       const managerId = resolveParticipantManagerId(
         staff?.reportsToId,
         claim.engagementId,
-        engagementMap
+        engagementMap,
+        null
       );
       await prisma.expenseClaimParticipant.create({
         data: {
@@ -158,7 +173,8 @@ export async function repairMissingClaimManagerApprovals(firmId?: string): Promi
       const mgrId = resolveParticipantManagerId(
         reportsMap.get(p.userId),
         p.engagementId,
-        engagementMap
+        engagementMap,
+        p.managerId
       );
       if (p.managerId !== mgrId) {
         await prisma.expenseClaimParticipant.update({

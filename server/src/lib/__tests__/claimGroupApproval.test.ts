@@ -9,6 +9,10 @@ describe('resolveParticipantManagerId', () => {
     ],
   ]);
 
+  it('prefers explicit manager over reportsTo and engagement', () => {
+    expect(resolveParticipantManagerId('sup-1', 'eng-1', engagementMap, 'picked-1')).toBe('picked-1');
+  });
+
   it('prefers reportsTo over engagement manager', () => {
     expect(resolveParticipantManagerId('sup-1', 'eng-1', engagementMap)).toBe('sup-1');
   });

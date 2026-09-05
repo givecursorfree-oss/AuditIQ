@@ -21,6 +21,7 @@ import {
   recomputeClaimStatus,
   type ParticipantInput,
 } from '../lib/claimGroupApproval.js';
+import { listLookupValues, LOOKUP_ACTIVITY } from '../lib/hrLookups.js';
 
 const router = Router();
 router.use(authenticate);
@@ -133,6 +134,7 @@ const participantSchema = z.object({
   clientId: z.string().optional(),
   workType: z.string().optional(),
   workTypeOther: z.string().optional(),
+  managerId: z.string().optional(),
 });
 
 const createSchema = z.object({
@@ -145,6 +147,8 @@ const createSchema = z.object({
   workTypeOther: z.string().optional(),
   expenseDate: z.string(),
   description: z.string().optional(),
+  /** Claim-level approver; applied to participants that omit managerId. */
+  managerId: z.string().optional(),
   participants: z.array(participantSchema).optional(),
 });
 
@@ -175,7 +179,10 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const participantRows: ParticipantInput[] =
       body.participants && body.participants.length > 0
-        ? body.participants
+        ? body.participants.map((p) => ({
+            ...p,
+            managerId: p.managerId ?? body.managerId,
+          }))
         : [
             {
               userId: req.user!.id,
@@ -183,11 +190,31 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
               clientId: body.clientId,
               workType: body.workType,
               workTypeOther: body.workTypeOther,
+              managerId: body.managerId,
             },
           ];
 
     if (body.claimType === 'travel' && !body.description?.trim() && participantRows.length === 1) {
       // travel notes optional
+    }
+
+    const isArticleRole = ['Intern', 'Staff'].includes(req.user!.role);
+    if (isArticleRole) {
+      const missingClient = participantRows.some((p) => !p.clientId && !body.clientId);
+      const missingActivity = participantRows.some((p) => !(p.workType ?? body.workType)?.trim());
+      const missingManager = participantRows.some((p) => !p.managerId);
+      if (missingClient) {
+        res.status(400).json({ error: 'Client Name is required' });
+        return;
+      }
+      if (missingActivity) {
+        res.status(400).json({ error: 'Activity Classification is required' });
+        return;
+      }
+      if (missingManager) {
+        res.status(400).json({ error: 'Manager/Partner is required' });
+        return;
+      }
     }
 
     for (const p of participantRows) {
@@ -199,12 +226,37 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         res.status(400).json({ error: 'Participant not in firm' });
         return;
       }
+      if (p.managerId) {
+        const mgr = await prisma.user.findFirst({
+          where: {
+            id: p.managerId,
+            firmId: req.user!.firmId!,
+            isActive: true,
+            role: { in: ['Partner', 'Admin', 'Manager'] },
+          },
+          select: { id: true },
+        });
+        if (!mgr) {
+          res.status(400).json({ error: 'Manager/Partner must be an active Partner, Admin, or Manager' });
+          return;
+        }
+      }
       if (p.engagementId && p.clientId) {
         const eng = await prisma.engagement.findFirst({
           where: { id: p.engagementId, firmId: req.user!.firmId!, clientId: p.clientId },
         });
         if (!eng) {
           res.status(400).json({ error: 'Participant engagement/client mismatch' });
+          return;
+        }
+      }
+      if (p.clientId && !p.engagementId) {
+        const client = await prisma.client.findFirst({
+          where: { id: p.clientId, firmId: req.user!.firmId! },
+          select: { id: true },
+        });
+        if (!client) {
+          res.status(400).json({ error: 'Client not in firm' });
           return;
         }
       }
@@ -658,9 +710,17 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
   res.json(claim);
 });
 
-router.get('/meta/work-types', async (_req: AuthRequest, res: Response) => {
+router.get('/meta/work-types', async (req: AuthRequest, res: Response) => {
+  const firmId = req.user?.firmId;
+  const fallback = ['Audit', 'GST Return', 'IT Return', 'Stat Audit', 'Consultation', 'Internal', 'Travel', 'Other'];
+  let activities = fallback;
+  if (firmId) {
+    const fromLookup = await listLookupValues(firmId, LOOKUP_ACTIVITY);
+    if (fromLookup.length > 0) activities = fromLookup;
+  }
   res.json({
-    workTypes: ['Audit', 'GST Return', 'IT Return', 'Stat Audit', 'Consultation', 'Internal', 'Travel', 'Other'],
+    workTypes: fallback,
+    activityClassifications: activities,
   });
 });
 
@@ -671,6 +731,31 @@ router.get('/meta/staff', authorize('Partner', 'Admin', 'Manager', 'Staff', 'Int
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
   });
   res.json({ staff });
+});
+
+/** Clients + Manager/Partner list for claim forms (Articles / Staff). */
+router.get('/meta/form-options', authorize('Partner', 'Admin', 'Manager', 'Staff', 'Intern'), async (req: AuthRequest, res: Response) => {
+  const firmId = req.user!.firmId!;
+  const [clients, approvers, activities] = await Promise.all([
+    prisma.client.findMany({
+      where: { firmId, isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+      take: 500,
+    }),
+    prisma.user.findMany({
+      where: { firmId, isActive: true, role: { in: ['Partner', 'Admin', 'Manager'] } },
+      select: { id: true, firstName: true, lastName: true, role: true },
+      orderBy: [{ role: 'asc' }, { firstName: 'asc' }, { lastName: 'asc' }],
+    }),
+    listLookupValues(firmId, LOOKUP_ACTIVITY),
+  ]);
+  const fallback = ['Audit', 'GST Return', 'IT Return', 'Stat Audit', 'Consultation', 'Internal', 'Travel', 'Other'];
+  res.json({
+    clients,
+    approvers,
+    activityClassifications: activities.length > 0 ? activities : fallback,
+  });
 });
 
 export default router;
