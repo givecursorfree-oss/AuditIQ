@@ -1,14 +1,23 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { NavCountBadge } from '@/components/ui/nav-count-badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import ClientActivationNotice from '@/components/engagement/ClientActivationNotice';
 import {
   Briefcase,
   CalendarBlank as CalendarClock,
+  CaretDown as ChevronDown,
   CheckCircle,
   Clock,
-  WarningCircle as AlertCircle,
 } from '@phosphor-icons/react';
+import PageLoading from '@/components/layout/PageLoading';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { ClientPortalProvider, useClientPortal } from '@/components/client-portal/ClientPortalContext';
 import { ClientPortalHeader } from '@/components/client-portal/ClientPortalHeader';
 import { ClientPortalTrackingTab } from '@/components/client-portal/ClientPortalTrackingTab';
@@ -22,6 +31,13 @@ import { ClientPortalNotificationsTab } from '@/components/client-portal/ClientP
 import { ClientPortalPriorities } from '@/components/client-portal/ClientPortalPriorities';
 import { ClientPortalLetterModal } from '@/components/client-portal/ClientPortalLetterModal';
 import { ClientPortalRequestModal } from '@/components/client-portal/ClientPortalRequestModal';
+
+const MORE_TABS = [
+  { value: 'engagements', label: 'Engagements' },
+  { value: 'invoices', label: 'Invoices' },
+  { value: 'reports', label: 'Reports' },
+  { value: 'alerts', label: 'Alerts' },
+] as const;
 
 function ClientPortalDashboard() {
   const {
@@ -42,26 +58,22 @@ function ClientPortalDashboard() {
   } = useClientPortal();
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <PageLoading className="py-20" />;
   }
 
   if (!profile?.clientId) {
     return (
-      <Card className="max-w-lg mx-auto mt-12">
-        <CardContent className="py-10 text-center space-y-3">
-          <AlertCircle size={40} className="mx-auto text-warning" />
-          <h2 className="text-lg font-semibold text-foreground">Account not linked</h2>
-          <p className="text-sm text-muted-foreground">
-            Your login is not linked to a client record. Please contact your CA firm to enable portal access.
-          </p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        className="max-w-lg mx-auto mt-12"
+        title="Account not linked"
+        description="Contact your CA firm to enable portal access."
+        illustration="person-wait"
+      />
     );
   }
+
+  const moreActive = MORE_TABS.some((t) => t.value === activeTab);
+  const moreLabel = MORE_TABS.find((t) => t.value === activeTab)?.label ?? 'More';
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -124,7 +136,7 @@ function ClientPortalDashboard() {
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList className="bg-card border border-border p-1 h-auto flex-wrap">
+            <TabsList className="bg-card border border-border p-1 h-auto flex-wrap gap-1">
               <TabsTrigger value="tracking" data-onboard="client-tab-tracking" className="gap-1.5">
                 Progress
                 <NavCountBadge
@@ -152,13 +164,29 @@ function ClientPortalDashboard() {
                   className="ml-0"
                 />
               </TabsTrigger>
-              <TabsTrigger value="engagements" className="gap-1.5">
-                Engagements
-                <NavCountBadge count={pendingActivationEngagements.length} className="ml-0" />
-              </TabsTrigger>
-              <TabsTrigger value="invoices">Invoices</TabsTrigger>
-              <TabsTrigger value="reports">Reports</TabsTrigger>
-              <TabsTrigger value="settings">Alerts</TabsTrigger>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={moreActive ? 'secondary' : 'ghost'}
+                    className="h-8 gap-1 px-3"
+                  >
+                    {moreLabel}
+                    <ChevronDown size={14} className="opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {MORE_TABS.map((t) => (
+                    <DropdownMenuItem key={t.value} onSelect={() => setActiveTab(t.value)}>
+                      {t.label}
+                      {t.value === 'engagements' && pendingActivationEngagements.length > 0
+                        ? ` (${pendingActivationEngagements.length})`
+                        : ''}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </TabsList>
 
             <TabsContent value="tracking">
@@ -182,7 +210,7 @@ function ClientPortalDashboard() {
             <TabsContent value="queries">
               <ClientPortalQueriesTab />
             </TabsContent>
-            <TabsContent value="settings">
+            <TabsContent value="alerts">
               <ClientPortalNotificationsTab />
             </TabsContent>
           </Tabs>

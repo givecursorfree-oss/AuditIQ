@@ -19,6 +19,7 @@ import {
   Users,
   BarChart3,
   Receipt,
+  Wallet,
   PieChart,
   Lock,
   Settings,
@@ -84,7 +85,7 @@ const iconByPath: Record<string, { icon: LucideIcon; iconColor: string }> = {
   '/messages': { icon: MessageSquare, iconColor: MUTED },
   '/client/dashboard': { icon: Building2, iconColor: MUTED },
   '/client/messages': { icon: MessageSquare, iconColor: MUTED },
-  '/claims': { icon: Receipt, iconColor: MUTED },
+  '/claims': { icon: Wallet, iconColor: MUTED },
   '/notices': { icon: Bell, iconColor: MUTED },
 };
 
@@ -104,7 +105,7 @@ interface ChromeItem {
 
 const chromeItems: ChromeItem[] = [
   { to: '#search', icon: Search, label: 'Search', iconColor: MUTED, action: 'search' },
-  { to: '#notifications', icon: Bell, label: 'Notification', iconColor: MUTED, action: 'notifications' },
+  { to: '#notifications', icon: Bell, label: 'Notifications', iconColor: MUTED, action: 'notifications' },
 ];
 
 function navIcon(item: NavCatalogItem) {
@@ -222,7 +223,7 @@ export default function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border/60">
         <div className="flex items-center justify-between gap-2 px-1 py-1">
           <Link to="/" className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-            <AuditIQLogo className="h-9 w-auto max-w-full object-contain group-data-[collapsible=icon]:h-8" />
+            <AuditIQLogo className="h-9 w-auto max-w-full object-contain bg-transparent group-data-[collapsible=icon]:h-8" />
           </Link>
           {isMobile && (
             <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 lg:hidden" onClick={() => setOpenMobile(false)} aria-label="Close menu">

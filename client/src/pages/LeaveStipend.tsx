@@ -461,7 +461,7 @@ export default function LeaveStipend() {
                 </tr>
               ))}
               {inbox.length === 0 && leaves.filter((l) => l.status === 'Pending').length === 0 && (
-                <tr><td colSpan={7}><EmptyState title="No leaves awaiting sanction" description="Leave requests needing sanction will show here." illustration="person-wait" /></td></tr>
+                <tr><td colSpan={7}><EmptyState title="No leaves awaiting sanction" description="Leave requests needing sanction will show here." illustration="person-wait" illustrationSize="sm" /></td></tr>
               )}
             </tbody>
           </table>
@@ -489,7 +489,7 @@ export default function LeaveStipend() {
           <div className="mt-4 space-y-2 border-t border-border pt-4">
             <p className="text-sm font-medium">Approved leaves this month</p>
             {calendar.length === 0 && (
-              <EmptyState title="No approved leaves in this month" description="Approved leaves for this month will list here." illustration="person-quiet" />
+              <EmptyState title="No approved leaves in this month" description="Approved leaves for this month will list here." illustration="person-quiet" illustrationSize="sm" />
             )}
             {calendar.map((l) => (
               <div key={l.id} className="flex justify-between items-center p-3 bg-surface-muted rounded">
@@ -602,7 +602,7 @@ export default function LeaveStipend() {
                   {compOffs.length === 0 && (
                     <tr>
                       <td colSpan={5}>
-                        <EmptyState title="No comp-off requests" description="Comp-off requests will appear here." illustration="person-mail" />
+                        <EmptyState title="No comp-off requests" description="Comp-off requests will appear here." illustration="person-mail" illustrationSize="sm" />
                       </td>
                     </tr>
                   )}
@@ -633,7 +633,7 @@ export default function LeaveStipend() {
             </Button>
           </div>
           {holidays.length === 0 ? (
-            <EmptyState title="No firm holidays configured yet" illustration="box" />
+            <EmptyState title="No firm holidays configured yet" illustration="box" illustrationSize="sm" />
           ) : (
             <ul className="text-sm space-y-1">
               {holidays.map((d) => (
@@ -673,7 +673,7 @@ export default function LeaveStipend() {
                     <td>{s.paidAt ? new Date(s.paidAt).toLocaleDateString('en-IN') : '—'}</td>
                   </tr>
                 ))}
-                {stipends.length === 0 && <tr><td colSpan={6}><EmptyState title="No stipend records" illustration="wallet" /></td></tr>}
+                {stipends.length === 0 && <tr><td colSpan={6}><EmptyState title="No stipend records" illustration="wallet" illustrationSize="sm" /></td></tr>}
               </tbody>
             </table>
           </div>

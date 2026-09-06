@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { RequestStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import {
   Buildings,
@@ -142,22 +143,19 @@ export function ClientPortalHeader() {
       )}
 
       {!hasDashboardContent && (
-        <Card className="border-dashed" data-onboard="client-empty-welcome">
-          <CardContent className="py-16 text-center space-y-4">
-            <h2 className="text-xl font-semibold text-foreground">Welcome, {user?.firstName} 👋</h2>
-            <p className="text-muted-foreground max-w-md mx-auto">
-              Submit your first service request. Your CA firm will review it, send an engagement letter to this
-              dashboard for your signature, and then assign your team.
-            </p>
-            <Button onClick={openRequestForm} size="lg" className="mt-2">
-              <Plus size={18} className="mr-2" />
-              Request a New Engagement
-            </Button>
-            <p className="text-xs text-muted-foreground pt-4">
-              After you submit, track status here — including when your engagement letter is ready to sign.
-            </p>
-          </CardContent>
-        </Card>
+        <div data-onboard="client-empty-welcome">
+          <EmptyState
+            title={`Welcome, ${user?.firstName ?? 'there'}`}
+            description="Submit a service request to get started."
+            illustration="person-wait"
+            action={
+              <Button onClick={openRequestForm} size="sm">
+                <Plus size={16} className="mr-1.5" />
+                Request a New Engagement
+              </Button>
+            }
+          />
+        </div>
       )}
     </>
   );

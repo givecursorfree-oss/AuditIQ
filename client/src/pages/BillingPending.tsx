@@ -7,6 +7,8 @@ import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import { PanelCard } from '@/components/layout/PanelCard';
 import PageHeader from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
+import { ErrorBanner } from '@/components/layout/ErrorBanner';
+import PageLoading from '@/components/layout/PageLoading';
 
 interface PendingRow {
   engagementId: string;
@@ -55,9 +57,9 @@ export default function BillingPending() {
       <PageHeader title="Pending billing" description="Engagements filed but not yet billed" />
       <PanelCard>
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <PageLoading className="py-8" />
         ) : loadError ? (
-          <p className="text-sm text-destructive">{loadError}</p>
+          <ErrorBanner message={loadError} onRetry={() => void load()} />
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No pending billing items.</p>
         ) : (

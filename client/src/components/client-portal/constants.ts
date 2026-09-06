@@ -33,5 +33,5 @@ export const CLIENT_PORTAL_TABS = new Set([
   'invoices',
   'reports',
   'queries',
-  'settings',
+  'alerts',
 ]);

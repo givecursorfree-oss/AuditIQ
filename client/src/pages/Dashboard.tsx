@@ -69,9 +69,11 @@ export default function Dashboard() {
   const [actionQueueLoading, setActionQueueLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [softError, setSoftError] = useState<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
+    setSoftError(null);
     const role = user?.role || '';
     const isPartnerAdmin = PARTNER_ADMIN_ROLES.includes(role);
     const isFirmLeadership = FIRM_LEADERSHIP_ROLES.includes(role);
@@ -157,6 +159,13 @@ export default function Dashboard() {
           (queriesRes.value.data as typeof openClientQueries) ?? { openCount: 0, recent: [] }
         );
       }
+    }
+
+    const secondaryFailed =
+      dashRes.status === 'fulfilled' &&
+      [dlRes, chartRes, ...extras].some((r) => r?.status === 'rejected');
+    if (secondaryFailed) {
+      setSoftError('Some dashboard widgets could not load.');
     }
 
     setLoading(false);
@@ -249,6 +258,9 @@ export default function Dashboard() {
             loadDashboard();
           }}
         />
+      )}
+      {!loadError && softError && (
+        <ErrorBanner className="mb-4" message={softError} onRetry={() => void loadDashboard()} />
       )}
       <DashboardWelcome
         userName={user?.firstName || 'there'}

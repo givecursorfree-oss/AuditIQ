@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Play, Plus, Calendar, ListChecks, BellRinging, Check, SignOut as LogOut } from '@phosphor-icons/react';
+import { Play, Plus, Calendar, ListChecks, BellRinging, Check } from '@phosphor-icons/react';
 import api from '../services/api';
 import { appAlert, appConfirm } from '../context/AppDialogContext';
 import { AppPageContainer } from '@/components/layout/AppPageContainer';
@@ -11,11 +11,8 @@ import EngagementTimerWidget from '@/components/time/EngagementTimerWidget';
 import PageLoading from '@/components/layout/PageLoading';
 import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { notifyStopwatchChanged, STOPWATCH_CHANGED } from '@/lib/stopwatchEvents';
-import { attendanceDayState } from '@/lib/attendanceDayGate';
-import { tryAttendanceCheckOut } from '@/lib/attendancePopup';
 import { isEditableKeyboardTarget } from '@/lib/keyboard';
 import { useAuth } from '@/context/AuthContext';
-import type { Attendance } from '@/types';
 
 interface Stopwatch {
   id: string;
@@ -71,8 +68,6 @@ export default function TimeTracker() {
   const [workTypes, setWorkTypes] = useState<string[]>(WORK_TYPES_FALLBACK);
   const [showStartForm, setShowStartForm] = useState(() => searchParams.get('start') === '1');
   const [startForm, setStartForm] = useState({ engagementId: '', workType: 'Audit', notes: '' });
-  const [todayAttendance, setTodayAttendance] = useState<Attendance | null>(null);
-  const [endingDay, setEndingDay] = useState(false);
 
   // Manual log form
   const [loading, setLoading] = useState(true);
@@ -85,15 +80,6 @@ export default function TimeTracker() {
     isBillable: true,
     description: '',
   });
-
-  async function loadTodayAttendance() {
-    try {
-      const { data } = await api.get<Attendance | null>('/attendance/me/today');
-      setTodayAttendance(data);
-    } catch {
-      setTodayAttendance(null);
-    }
-  }
 
   async function loadStopwatch() {
     try {
@@ -108,7 +94,6 @@ export default function TimeTracker() {
     try {
       await Promise.all([
         loadStopwatch(),
-        loadTodayAttendance(),
         api.get('/engagements?limit=100').then(r => setEngagements(r.data.engagements || [])).catch(() => null),
         api.get<{ workTypes: string[] }>('/time-entries/meta/vocab').then((r) => {
           if (r.data.workTypes?.length) {
@@ -373,31 +358,6 @@ export default function TimeTracker() {
     }
   }
 
-  async function handleEndDay() {
-    if (!user?.id) return;
-    const ok = await appConfirm({
-      title: 'End day (check out)?',
-      message:
-        'This closes attendance for today. Logging out of the app does not check you out. Resume day is on Attendance if you need to reopen.',
-      confirmLabel: 'End day',
-      cancelLabel: 'Keep working',
-    });
-    if (!ok) return;
-    setEndingDay(true);
-    try {
-      const done = await tryAttendanceCheckOut(user.id);
-      if (!done) {
-        await appAlert({ title: 'Could not end day', message: 'Check Attendance — you may already be checked out.' });
-        return;
-      }
-      await loadTodayAttendance();
-    } finally {
-      setEndingDay(false);
-    }
-  }
-
-  const dayState = attendanceDayState(todayAttendance);
-
   if (loading) {
     return <PageLoading className="h-64" />;
   }
@@ -406,22 +366,10 @@ export default function TimeTracker() {
     <AppPageContainer className="space-y-6">
       {loadError && <ErrorBanner message={loadError} onRetry={() => void loadAll()} />}
       <PageHeader
-        title="Time & tasks"
-        description="Live stopwatch, manual time logs, and your daily to-do"
+        title="Time tracker"
+        description="Stopwatch, manual logs, and tasks"
         actions={
           <div className="flex flex-wrap gap-2">
-            {dayState === 'open' && (
-              <Button
-                type="button"
-                size="sm"
-                variant="destructive"
-                disabled={endingDay}
-                onClick={() => void handleEndDay()}
-              >
-                <LogOut size={16} className="mr-1" />
-                {endingDay ? 'Ending…' : 'End day'}
-              </Button>
-            )}
             <Button type="button" size="sm" variant="outline" onClick={() => navigate('/attendance')}>
               Attendance
             </Button>
@@ -457,9 +405,6 @@ export default function TimeTracker() {
         ) : showStartForm && !stopwatch ? (
           <div className="space-y-3 max-w-lg mx-auto">
             <h3 className="font-semibold text-foreground text-center">Start client stopwatch</h3>
-            <p className="text-xs text-muted-foreground text-center">
-              Attendance is marked at login / on the Attendance page when you are at the office (GPS). Check out from Attendance at end of day — logging out of the app does not check you out.
-            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <select className="input-field" aria-label="Engagement" value={startForm.engagementId} onChange={e => setStartForm({ ...startForm, engagementId: e.target.value })}>
                 <option value="">Select engagement…</option>

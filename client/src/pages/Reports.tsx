@@ -220,6 +220,7 @@ export default function Reports() {
                 title="No reports yet"
                 description="Reports for selected engagements will list here."
                 illustration="doc-list"
+                illustrationSize="sm"
               />
             )}
           </AccessibleTabPanel>
@@ -268,12 +269,14 @@ export default function Reports() {
                 title="No Form 3CD clauses"
                 description="Nothing loaded for this engagement yet."
                 illustration="doc-list"
+                illustrationSize="sm"
               />
             ) : (
               <EmptyState
                 title="Select an engagement"
                 description="Choose a client above to load Form 3CD clauses."
                 illustration="tap-select"
+                illustrationSize="sm"
               />
             )}
           </AccessibleTabPanel>
@@ -298,6 +301,7 @@ export default function Reports() {
                 title="No observations yet"
                 description="Observations for this engagement will show here."
                 illustration="doc-list"
+                illustrationSize="sm"
               />
             )}
           </AccessibleTabPanel>

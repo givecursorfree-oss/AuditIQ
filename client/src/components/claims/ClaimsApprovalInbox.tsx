@@ -75,7 +75,7 @@ function ClaimActionBar({
         Accept
       </Button>
       <Button size="sm" variant="secondary" className="h-10 flex-1 min-w-0" disabled={!hasReceipt || isBusy} onClick={onLimit}>
-        Limit
+        Approve limited amount
       </Button>
       <Button size="sm" variant="destructive" className="h-10 flex-1 min-w-0" disabled={isBusy} onClick={onReject}>
         Reject
@@ -89,6 +89,7 @@ export function ClaimsApprovalInbox() {
   const isPartnerOrAdmin = user?.role === 'Partner' || user?.role === 'Admin';
   const [claims, setClaims] = useState<StaffClaimRow[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
   const [partialId, setPartialId] = useState<string | null>(null);
   const [partialAmount, setPartialAmount] = useState('');
   const [partialReason, setPartialReason] = useState('');
@@ -229,7 +230,7 @@ export function ClaimsApprovalInbox() {
     const ok = await appConfirm({
       title: 'Approve limited amount',
       message: `Accept ${formatInr(amount)} of ${claim ? formatInr(claim.amount) : 'claimed amount'} from ${claim ? staffName(claim.staff) : 'submitter'}?`,
-      confirmLabel: 'Accept limit',
+      confirmLabel: 'Accept limited amount',
     });
     if (!ok) return;
 
@@ -239,13 +240,13 @@ export function ClaimsApprovalInbox() {
         approvedAmount: amount,
         reason: partialReason.trim(),
       });
-      appToast({ message: 'Claim accepted with limit', variant: 'success' });
+      appToast({ message: 'Claim accepted with limited amount', variant: 'success' });
       setPartialId(null);
       setPartialAmount('');
       setPartialReason('');
       load();
     } catch (e) {
-      void appAlert({ title: 'Limit approve failed', message: formatApiError(e) });
+      void appAlert({ title: 'Approve limited amount failed', message: formatApiError(e) });
     } finally {
       setBusyId(null);
     }
@@ -257,7 +258,7 @@ export function ClaimsApprovalInbox() {
     return (
       <EmptyState
         title="No pending claims"
-        description="Staff food and travel claims routed to you will appear here."
+        description="Food, travel, and group claims routed to you will appear here."
         illustration="person-quiet"
         className="py-6"
       />
@@ -282,12 +283,25 @@ export function ClaimsApprovalInbox() {
         const claimedPct = percentOfClaimed(partialVal, c.amount);
         const showReject = rejectId === c.id;
         const showLimit = partialId === c.id;
+        const showDetails = Boolean(detailsOpen[c.id]);
 
         return (
           <article key={c.id} className="rounded-lg border border-border bg-card shadow-card">
             <div className="p-3 sm:p-4 space-y-3">
               <ClaimFirmHeader claim={c} />
+              <ManagerApprovalsStrip claim={c} />
 
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[11px] font-medium text-foreground"
+                onClick={() => setDetailsOpen((d) => ({ ...d, [c.id]: !d[c.id] }))}
+              >
+                {showDetails ? <CaretDown size={12} /> : <CaretRight size={12} />}
+                Details
+              </button>
+
+              {showDetails && (
+                <>
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-4">
                 <div className="min-w-0 space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
@@ -382,7 +396,6 @@ export function ClaimsApprovalInbox() {
 
                 <div className="min-w-0 space-y-2">
                   <ClaimValidationPanel claim={c} />
-                  <ManagerApprovalsStrip claim={c} />
                 </div>
               </div>
 
@@ -407,6 +420,8 @@ export function ClaimsApprovalInbox() {
                     </ul>
                   )}
                 </div>
+              )}
+                </>
               )}
 
               {showReject && (
@@ -472,7 +487,7 @@ export function ClaimsApprovalInbox() {
                       disabled={!partialReason.trim() || !partialAmount || isBusy}
                       onClick={() => void partialApprove(c.id, maxPartial)}
                     >
-                      Confirm limit
+                      Confirm limited amount
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setPartialId(null)}>
                       Cancel

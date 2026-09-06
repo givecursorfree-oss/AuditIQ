@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus, MagnifyingGlass as Search, Funnel as Filter, Briefcase, Calendar, Users as UsersIcon,
-  CaretRight as ChevronRight, DotsThreeVertical as MoreVertical, X, CheckCircle as CheckCircle2, XCircle, Clock,
+  CaretRight as ChevronRight, CaretDown as ChevronDown, DotsThreeVertical as MoreVertical, X, CheckCircle as CheckCircle2, XCircle, Clock,
   GitBranch, List, SquaresFour as LayoutGrid, Shield
 } from '@phosphor-icons/react';
 import api from '../services/api';
@@ -21,6 +21,12 @@ import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { EngagementLifecycleBadge, ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { formatApiError } from '@/lib/apiErrors';
 import { appAlert } from '@/context/AppDialogContext';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   SERVICE_CATALOG,
   WORKFLOW_DOMAIN_LABELS,
@@ -115,20 +121,28 @@ export default function Engagements() {
     <AppPageContainer>
       <PageHeader
         title="Engagements"
-        description={`${engagements.length} engagement${engagements.length === 1 ? '' : 's'} in your portfolio`}
+        description={
+          search || filterStatus || filterType
+            ? `${engagements.length} matching engagement${engagements.length === 1 ? '' : 's'}`
+            : `${engagements.length} engagement${engagements.length === 1 ? '' : 's'} in your portfolio`
+        }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => navigate('/services')}>
-              Service catalog
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => navigate('/engagements/portfolio')}>
-              Portfolio view
-            </Button>
-            {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
-              <Button type="button" variant="outline" size="sm" onClick={() => navigate('/compliance-calendar')}>
-                Compliance calendar
-              </Button>
-            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm">
+                  More
+                  <ChevronDown size={14} className="ml-1 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => navigate('/services')}>Service catalog</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate('/engagements/portfolio')}>Portfolio</DropdownMenuItem>
+                {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
+                  <DropdownMenuItem onSelect={() => navigate('/compliance-calendar')}>Compliance</DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {['Partner', 'Manager'].includes(user?.role || '') ? (
               <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
                 <Plus size={16} className="mr-1" /> New engagement
@@ -232,7 +246,12 @@ export default function Engagements() {
                   <div className="mt-4 pt-4 border-t border-border">
                     <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Digital sign-offs</h4>
                     {signoffs.length === 0 ? (
-                      <p className="mb-3 text-xs text-muted-foreground">No sign-offs yet for this engagement.</p>
+                      <EmptyState
+                        title="No sign-offs yet"
+                        illustration="person-quiet"
+                        illustrationSize="sm"
+                        className="py-4"
+                      />
                     ) : (
                       <div className="space-y-2 mb-3">
                         {signoffs.map((s) => (

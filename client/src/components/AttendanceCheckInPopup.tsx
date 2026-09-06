@@ -74,7 +74,7 @@ export default function AttendanceCheckInPopup({
             />
             <OrderConfirmationCard
               className="shadow-2xl border-primary/30 relative"
-              title={details.kind === 'check-out' ? 'Checked out' : 'Attendance marked'}
+              title={details.kind === 'check-out' ? 'Day ended' : 'Attendance marked'}
               buttonText="Got it"
               icon={
                 <m.div
@@ -91,7 +91,7 @@ export default function AttendanceCheckInPopup({
                 { label: 'Method', value: details.methodLabel },
                 { label: 'Date & Time', value: details.dateTime },
                 {
-                  label: details.kind === 'check-out' ? 'Check-out' : 'Check-in',
+                  label: details.kind === 'check-out' ? 'Ended' : 'Check-in',
                   value: details.checkIn,
                   isBold: true,
                 },

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CheckSquare,
   Clock,
@@ -24,9 +24,7 @@ import { PanelCard } from '../components/layout/PanelCard';
 import { EmptyState, ErrorBanner, LoadingCenter } from '../components/layout/StatePanels';
 import { WorkflowApprovalStatusBadge, PriorityBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
-import { NavCountBadge } from '@/components/ui/nav-count-badge';
 import { AccessibleTabList, AccessibleTabPanel } from '@/components/ui/accessible-tabs';
-import { ClaimsApprovalInbox } from '@/components/claims/ClaimsApprovalInbox';
 import {
   Dialog,
   DialogContent,
@@ -86,7 +84,7 @@ function parseApprovalView(raw: string | null): View {
   return 'pending';
 }
 
-const ENTITY_TYPES = ['leave', 'document', 'expense', 'workpaper', 'engagement'] as const;
+const ENTITY_TYPES = ['leave', 'document', 'workpaper', 'engagement'] as const;
 const APPROVER_ROLES = ['Staff', 'Manager', 'Admin', 'Partner'] as const;
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'] as const;
 
@@ -230,9 +228,14 @@ export default function Approvals() {
     <AppPageContainer className="flex min-h-[min(100dvh-6rem,900px)] flex-col">
       <PageHeader
         title="Approvals"
-        description="Manage approval workflows and requests"
+        description="Leave, documents, workpapers, and engagement workflows"
         actions={
           <>
+            {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link to="/claims?tab=approvals">Food–Travel claims →</Link>
+              </Button>
+            )}
             {['Partner', 'Admin', 'Manager', 'Accounts'].includes(user?.role || '') && (
               <Button type="button" variant="outline" size="sm" onClick={() => navigate('/claims/batches')}>
                 Claim batches
@@ -295,50 +298,6 @@ export default function Approvals() {
               }
             }}
           />
-        ) : view === 'pending' && ['Partner', 'Admin', 'Manager'].includes(user?.role ?? '') ? (
-          <div className="space-y-4">
-            <PanelCard title="Staff claims">
-              <ClaimsApprovalInbox />
-            </PanelCard>
-            <PanelCard title="Workflow requests">
-            <SplitPaneLayout
-            hasSelection={Boolean(selectedReq)}
-            onClearSelection={() => setSelectedReq(null)}
-            backLabel="Back to requests"
-            list={
-              <RequestList
-                requests={filteredRequests}
-                compactEmpty
-                onSelect={async (req) => {
-                  try {
-                    const { data } = await api.get<ApprovalRequest>(`/approvals/requests/${req.id}`);
-                    setSelectedReq(data);
-                  } catch {
-                    void appAlert({ title: 'Load failed', message: 'Failed to load request details' });
-                  }
-                }}
-                emptyText={emptyText}
-              />
-            }
-            detail={
-              selectedReq ? (
-                <RequestDetail
-                  req={selectedReq}
-                  onAction={handleAction}
-                  currentUserId={user?.id}
-                  currentUserRole={user?.role}
-                  isPrivileged={isAdmin}
-                />
-              ) : (
-                <div className="hidden flex-col items-center justify-center p-8 text-muted-foreground lg:flex lg:min-h-[320px]">
-                  <ListChecks size={48} className="mb-4 opacity-30" />
-                  <p className="text-sm">Select a request to view details</p>
-                </div>
-              )
-            }
-          />
-            </PanelCard>
-          </div>
         ) : (
           <SplitPaneLayout
             hasSelection={Boolean(selectedReq)}
@@ -393,13 +352,10 @@ function RequestList({
   requests,
   onSelect,
   emptyText,
-  /** When Staff claims already shows a full empty above, skip a second illustration. */
-  compactEmpty = false,
 }: {
   requests: ApprovalRequest[];
   onSelect: (r: ApprovalRequest) => void;
   emptyText: string;
-  compactEmpty?: boolean;
 }) {
   if (!requests.length) {
     return (
@@ -407,8 +363,7 @@ function RequestList({
         <EmptyState
           title={emptyText}
           description="Workflow requests needing your decision will show here."
-          illustration={compactEmpty ? false : 'person-quiet'}
-          className={compactEmpty ? 'py-4' : undefined}
+          illustration="person-quiet"
         />
       </div>
     );

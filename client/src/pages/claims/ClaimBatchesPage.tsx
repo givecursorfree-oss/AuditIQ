@@ -25,7 +25,7 @@ interface BatchRow {
   claims?: StaffClaimRow[];
 }
 
-export default function ClaimBatchesPage() {
+export default function ClaimBatchesPage({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const isAccounts = ['Accounts', 'Partner', 'Admin'].includes(user?.role ?? '');
   const canCreate = ['Partner', 'Admin', 'Manager'].includes(user?.role ?? '');
@@ -100,6 +100,7 @@ export default function ClaimBatchesPage() {
   }
 
   if (loading) {
+    if (embedded) return <PageLoading />;
     return (
       <AppPageContainer>
         <PageHeader title="Claim batches" />
@@ -108,10 +109,9 @@ export default function ClaimBatchesPage() {
     );
   }
 
-  return (
-    <AppPageContainer>
-      <PageHeader title="Claim batches" />
-      {error && <ErrorBanner message={error} onRetry={() => void load()} className="mb-3" />}
+  const body = (
+    <div className="space-y-4">
+      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
       {canCreate && (
         <PanelCard title="Create batch">
           <div className="space-y-2 max-w-xl">
@@ -181,6 +181,15 @@ export default function ClaimBatchesPage() {
           </ul>
         )}
       </PanelCard>
+    </div>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AppPageContainer>
+      <PageHeader title="Claim batches" />
+      {body}
     </AppPageContainer>
   );
 }

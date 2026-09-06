@@ -207,8 +207,9 @@ export default function Login() {
         <div className="w-full max-w-md">
 
           {/* Mobile-only logo */}
-          <div className="md:hidden mb-10 flex justify-center">
+          <div className="md:hidden mb-10 flex flex-col items-center gap-2">
             <AuditIQLogo className="h-12 w-auto object-contain" />
+            <span className="text-lg font-semibold tracking-tight text-foreground">AuditIQ</span>
           </div>
 
           <header className="mb-10 text-center sm:text-left">

@@ -16,6 +16,7 @@ import {
 import { Badge } from '../components/ui/badge';
 import PageHeader from '../components/layout/PageHeader';
 import PageLoading from '../components/layout/PageLoading';
+import { ErrorBanner } from '../components/layout/ErrorBanner';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
 import { appAlert } from '../context/AppDialogContext';
 
@@ -168,7 +169,7 @@ export default function Billing() {
 
   return (
     <AppPageContainer className="space-y-6">
-      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+      {loadError && <ErrorBanner message={loadError} onRetry={() => void load()} />}
       <PageHeader
         title="Billing & Invoices"
         description="WIP to bill to collect — GST on professional fees, payments, and aging."

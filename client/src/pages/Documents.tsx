@@ -22,6 +22,7 @@ import { useAuth } from '@/context/AuthContext';
 import { isPrivilegedRole } from '@/lib/permissions';
 import SearchStatusBanner from '@/components/SearchStatusBanner';
 import { EmptyState, LoadingCenter } from '@/components/layout/StatePanels';
+import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import GoogleDrivePanel from '@/components/GoogleDrivePanel';
 import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
@@ -63,6 +64,7 @@ export default function Documents() {
   const [versionUpload, setVersionUpload] = useState<Document | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [driveToast, setDriveToast] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const canManageDrive =
     user?.role === 'Partner' || user?.role === 'Admin' || user?.role === 'Manager';
@@ -72,10 +74,12 @@ export default function Documents() {
     const params = new URLSearchParams();
     if (category) params.set('category', category);
     if (activeFolder) params.set('folder', activeFolder);
+    setLoadError(null);
+    setLoading(true);
     api
       .get(`/documents?${params.toString()}`)
       .then(({ data }) => setDocuments(data))
-      .catch(console.error)
+      .catch(() => setLoadError('Failed to load documents.'))
       .finally(() => setLoading(false));
   }, [category, activeFolder]);
 
@@ -326,6 +330,8 @@ export default function Documents() {
         }
       />
 
+      {loadError && <ErrorBanner message={loadError} onRetry={fetchDocs} className="mb-4" />}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {FOLDERS.map((folder) => {
           const isActive = activeFolder === folder;
@@ -366,7 +372,7 @@ export default function Documents() {
 
       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
         <button type="button" onClick={() => setActiveFolder('')} className="hover:text-primary transition-colors">
-          My Drive
+          Document library
         </button>
         {activeFolder && (
           <>

@@ -7,14 +7,14 @@ type LogoProps = {
   forceTheme?: 'light' | 'dark';
 };
 
-/** Official AuditIQ wordmark — switches with app light/dark theme. */
+/** Official AuditIQ wordmark — transparent PNGs, no plate behind the mark. */
 export default function AuditIQLogo({ className = '', forceTheme }: LogoProps) {
   if (forceTheme === 'dark') {
     return (
       <img
         src={LOGO_DARK_URL}
         alt="AuditIQ"
-        className={className}
+        className={cn('bg-transparent', className)}
         draggable={false}
         decoding="async"
       />
@@ -26,7 +26,7 @@ export default function AuditIQLogo({ className = '', forceTheme }: LogoProps) {
       <img
         src={LOGO_LIGHT_URL}
         alt="AuditIQ"
-        className={className}
+        className={cn('bg-transparent', className)}
         draggable={false}
         decoding="async"
       />
@@ -38,14 +38,14 @@ export default function AuditIQLogo({ className = '', forceTheme }: LogoProps) {
       <img
         src={LOGO_LIGHT_URL}
         alt="AuditIQ"
-        className={cn(className, 'dark:hidden')}
+        className={cn('bg-transparent dark:hidden', className)}
         draggable={false}
         decoding="async"
       />
       <img
         src={LOGO_DARK_URL}
         alt="AuditIQ"
-        className={cn(className, 'hidden dark:block')}
+        className={cn('bg-transparent hidden dark:block', className)}
         draggable={false}
         decoding="async"
       />

@@ -263,9 +263,9 @@ export default function AttendancePage() {
 
   const handleCheckOut = async () => {
     const ok = await appConfirm({
-      title: 'End day (check out)?',
+      title: 'End day?',
       message:
-        'This closes attendance for today. Logging out of the app does not check you out. If you check out by mistake, use Resume day.',
+        'Closes attendance for today. App logout does not end the day. Use Resume day if this was a mistake.',
       confirmLabel: 'End day',
       cancelLabel: 'Keep working',
     });
@@ -281,13 +281,14 @@ export default function AttendancePage() {
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        'Check-out failed. Please try again.';
+        'Could not end day. Please try again.';
       await appAlert(msg);
     } finally {
       setCheckingIn(false);
     }
   };
 
+  // ponytail: yesterday-open prompt deferred (no lightweight prior-day API)
   const dayState = attendanceDayState(todayRecord);
 
   useEffect(() => {
@@ -552,7 +553,7 @@ export default function AttendancePage() {
                       <dd className="mt-0.5 font-medium tabular-nums">{summary.articlePolicy.lateDebitDays}</dd>
                     </div>
                     <div className="rounded-md border border-border bg-card px-3 py-2">
-                      <dt className="text-[11px] text-muted-foreground">No-attd debit (days)</dt>
+                      <dt className="text-[11px] text-muted-foreground">No attendance debit (days)</dt>
                       <dd className="mt-0.5 font-medium tabular-nums">{summary.articlePolicy.noAttdDebitDays}</dd>
                     </div>
                   </>

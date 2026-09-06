@@ -303,7 +303,9 @@ export function ClientPortalProvider({ children }: { children: ReactNode }) {
         setSelectedEngagementId(pick);
         setUploadEngagementId(pick);
       }
-      if (urlTab && CLIENT_PORTAL_TABS.has(urlTab)) {
+      if (urlTab === 'settings') {
+        setActiveTab('alerts');
+      } else if (urlTab && CLIENT_PORTAL_TABS.has(urlTab)) {
         setActiveTab(urlTab);
       }
 
@@ -324,7 +326,9 @@ export function ClientPortalProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const urlTab = searchParams.get('tab');
-    if (urlTab && CLIENT_PORTAL_TABS.has(urlTab)) {
+    if (urlTab === 'settings') {
+      setActiveTab('alerts');
+    } else if (urlTab && CLIENT_PORTAL_TABS.has(urlTab)) {
       setActiveTab(urlTab);
     }
   }, [searchParams]);

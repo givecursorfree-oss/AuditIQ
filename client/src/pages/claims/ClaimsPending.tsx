@@ -36,7 +36,7 @@ type DeptVisitRow = {
   staff: { firstName: string; lastName: string };
 };
 
-export default function ClaimsPending() {
+export default function ClaimsPending({ embedded = false }: { embedded?: boolean }) {
   const [lateHours, setLateHours] = useState<LateHoursRow[]>([]);
   const [deptVisits, setDeptVisits] = useState<DeptVisitRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,6 +107,7 @@ export default function ClaimsPending() {
   }
 
   if (loading) {
+    if (embedded) return <PageLoading />;
     return (
       <AppPageContainer>
         <PageHeader title="Claim approvals" description="Late hours and department visit claims" />
@@ -115,18 +116,8 @@ export default function ClaimsPending() {
     );
   }
 
-  return (
-    <AppPageContainer>
-      <PageHeader
-        title="Claim approvals"
-        description="Late hours and department visit claims"
-        actions={
-          <div className="flex gap-2">
-            <Button asChild size="sm" variant="outline"><Link to="/claims/new/late-hours">Late hours</Link></Button>
-            <Button asChild size="sm" variant="outline"><Link to="/claims/new/dept-visit">Dept visit</Link></Button>
-          </div>
-        }
-      />
+  const body = (
+    <>
       {loadError && <ErrorBanner message={loadError} onRetry={() => void load()} className="mb-4" />}
       <div className="grid gap-4 md:grid-cols-2">
         <PanelCard title="Late hours">
@@ -182,6 +173,24 @@ export default function ClaimsPending() {
           )}
         </PanelCard>
       </div>
+    </>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AppPageContainer>
+      <PageHeader
+        title="Claim approvals"
+        description="Late hours and department visit claims"
+        actions={
+          <div className="flex gap-2">
+            <Button asChild size="sm" variant="outline"><Link to="/claims/new/late-hours">Late hours</Link></Button>
+            <Button asChild size="sm" variant="outline"><Link to="/claims/new/dept-visit">Dept visit</Link></Button>
+          </div>
+        }
+      />
+      {body}
     </AppPageContainer>
   );
 }
