@@ -18,7 +18,10 @@ export function ClaimReceiptLightbox({
 }) {
   const [zoom, setZoom] = useState(1);
   const slide = slides[index];
-  const isPdf = slide?.mimeType === 'application/pdf' || slide?.name.toLowerCase().endsWith('.pdf');
+  const isPdf =
+    slide?.mimeType === 'application/pdf' ||
+    !!slide?.mimeType?.includes('pdf') ||
+    !!slide?.name.toLowerCase().endsWith('.pdf');
 
   const prev = useCallback(() => onIndexChange((index - 1 + slides.length) % slides.length), [index, onIndexChange, slides.length]);
   const next = useCallback(() => onIndexChange((index + 1) % slides.length), [index, onIndexChange, slides.length]);

@@ -45,6 +45,15 @@ const upload = multer({
   },
 });
 
+/** Browsers sometimes send PDF as octet-stream — normalize from extension. */
+function receiptMimeType(file: Express.Multer.File): string {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  return file.mimetype || 'application/octet-stream';
+}
+
 const claimInclude = {
   staff: { select: { id: true, firstName: true, lastName: true, email: true } },
   expensePayer: { select: { id: true, firstName: true, lastName: true } },
@@ -371,7 +380,7 @@ router.post('/:id/receipts', upload.array('files', 10), async (req: AuthRequest,
             expenseClaimId: claim.id,
             fileName: file.originalname,
             storagePath: file.path,
-            mimeType: file.mimetype,
+            mimeType: receiptMimeType(file),
           },
         })
       );

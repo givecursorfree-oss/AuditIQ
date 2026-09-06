@@ -30,7 +30,7 @@ export function ClaimValidationPanel({ claim }: { claim: StaffClaimRow }) {
           <dd className="mt-0.5 font-semibold tabular-nums">{formatInr(claim.amount)}</dd>
         </div>
         <div className="bg-card px-2.5 py-2">
-          <dt className="text-muted-foreground">OCR</dt>
+          <dt className="text-muted-foreground">OCR total</dt>
           <dd className="mt-0.5 font-semibold tabular-nums">
             {ocrAmount != null ? (
               formatInr(ocrAmount)

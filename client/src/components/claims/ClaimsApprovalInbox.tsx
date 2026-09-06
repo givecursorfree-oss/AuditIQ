@@ -324,30 +324,55 @@ export function ClaimsApprovalInbox() {
                     <div className="flex h-40 items-center justify-center rounded-md border border-dashed border-border bg-muted/20 text-xs text-warning">
                       No receipt
                     </div>
-                  ) : previewUrls[receipt.id] ? (
-                    <button
-                      type="button"
-                      className="block w-full rounded-md border border-border overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => void openLightbox(c)}
-                    >
-                      <img
-                        src={previewUrls[receipt.id]}
-                        alt={receipt.fileName}
-                        className="h-40 w-full object-contain bg-muted/20 sm:h-48"
-                      />
-                    </button>
-                  ) : (
-                    <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md border border-border bg-muted/20">
-                      {receipt.mimeType?.startsWith('image/') ? (
-                        <DotmSquare3 size={24} dotSize={3} aria-label="Loading receipt" />
-                      ) : (
-                        <p className="text-xs text-muted-foreground">{receipt.fileName}</p>
-                      )}
-                      <Button type="button" size="sm" variant="outline" onClick={() => void openLightbox(c)}>
-                        Open
-                      </Button>
-                    </div>
-                  )}
+                  ) : (() => {
+                    const isPdf =
+                      receipt.mimeType === 'application/pdf' ||
+                      receipt.fileName.toLowerCase().endsWith('.pdf');
+                    if (isPdf) {
+                      return (
+                        <button
+                          type="button"
+                          className="flex h-40 w-full flex-col items-center justify-center gap-2 rounded-md border border-border bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-48"
+                          onClick={() => void openLightbox(c)}
+                        >
+                          <span className="rounded border border-border px-2 py-0.5 text-[11px] font-medium">
+                            PDF
+                          </span>
+                          <span className="max-w-[90%] truncate px-2 text-xs text-muted-foreground">
+                            {receipt.fileName}
+                          </span>
+                          <span className="text-xs font-medium text-foreground">Open</span>
+                        </button>
+                      );
+                    }
+                    if (previewUrls[receipt.id]) {
+                      return (
+                        <button
+                          type="button"
+                          className="block w-full rounded-md border border-border overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => void openLightbox(c)}
+                        >
+                          <img
+                            src={previewUrls[receipt.id]}
+                            alt={receipt.fileName}
+                            className="h-40 w-full object-contain bg-muted/20 sm:h-48"
+                          />
+                        </button>
+                      );
+                    }
+                    return (
+                      <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md border border-border bg-muted/20">
+                        {receipt.mimeType?.startsWith('image/') ? (
+                          <DotmSquare3 size={24} dotSize={3} aria-label="Loading receipt" />
+                        ) : (
+                          <p className="text-xs text-muted-foreground">{receipt.fileName}</p>
+                        )}
+                        <Button type="button" size="sm" variant="outline" onClick={() => void openLightbox(c)}>
+                          Open
+                        </Button>
+                      </div>
+                    );
+                  })()}
                   {isGroup && (
                     <p className="text-[11px] text-muted-foreground">
                       {count} people · {formatInr(share)}/person
