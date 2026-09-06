@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { RequestStatusBadge, LetterWorkflowStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
-import { Briefcase } from '@phosphor-icons/react';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { serviceRequestNextStep } from './utils';
 import type { ServiceRequestRow } from './types';
 
@@ -26,10 +26,12 @@ export function ServiceRequestsPanel({ rows, loading }: ServiceRequestsPanelProp
         {loading ? (
           <div className="py-10 text-center text-muted-foreground text-sm">Loading…</div>
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-            <Briefcase size={40} />
-            <p>No service requests yet. Use &quot;Request New Engagement&quot; to get started.</p>
-          </div>
+          <EmptyState
+            title="No service requests yet"
+            description='Use "Request New Engagement" to get started.'
+            illustration="handshake"
+            illustrationSize="sm"
+          />
         ) : (
           <Table>
             <TableHeader>

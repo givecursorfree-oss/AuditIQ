@@ -106,6 +106,7 @@ export function HeaderNotificationsPanel({
           <EmptyState
             title="No notifications yet"
             description="Updates about requests, letters, and assignments appear here."
+            illustration="person-quiet"
             className="py-10 px-4"
           />
         </div>

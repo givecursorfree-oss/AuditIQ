@@ -1,5 +1,6 @@
 import { MagnifyingGlass, PushPin, BellSlash, Archive, NotePencil } from '@phosphor-icons/react';
 import UserPresenceAvatar from '../UserPresenceAvatar';
+import { EmptyState } from '@/components/layout/EmptyState';
 import {
   getRoomName,
   messagePreview,
@@ -111,18 +112,23 @@ export default function ChatConversationList({
 
       <div className="flex-1 overflow-y-auto">
         {sorted.length === 0 ? (
-          <div className="text-center py-8 px-4 space-y-3">
-            <p className="text-sm text-foreground-muted">No conversations yet</p>
-            {!isClient && onNewChat && (
-              <button
-                type="button"
-                onClick={onNewChat}
-                className="text-sm font-medium text-[var(--color-brand-primary)] hover:underline"
-              >
-                Start a new chat
-              </button>
-            )}
-          </div>
+          <EmptyState
+            title="No conversations yet"
+            description="Direct and group chats you start will list here."
+            illustration="person-mail"
+            className="py-8 px-4"
+            action={
+              !isClient && onNewChat ? (
+                <button
+                  type="button"
+                  onClick={onNewChat}
+                  className="text-sm font-medium text-[var(--color-brand-primary)] hover:underline"
+                >
+                  Start a new chat
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
           sorted.map((room) => {
             const active = room.id === activeRoomId;

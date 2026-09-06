@@ -3,7 +3,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import ClientActivationNotice from '@/components/engagement/ClientActivationNotice';
-import { DownloadSimple as Download, FileText, UploadSimple as Upload } from '@phosphor-icons/react';
+import { DownloadSimple as Download, UploadSimple as Upload } from '@phosphor-icons/react';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 
 export function ClientPortalDocumentsTab() {
@@ -150,10 +151,11 @@ export function ClientPortalDocumentsTab() {
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           {documentsForEngagement.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-              <FileText size={40} />
-              <p>{uploadEngagementId ? 'No documents for this engagement yet.' : 'No documents yet.'}</p>
-            </div>
+            <EmptyState
+              title={uploadEngagementId ? 'No documents for this engagement yet' : 'No documents yet'}
+              illustration="doc-list"
+              illustrationSize="sm"
+            />
           ) : (
             <Table>
               <TableHeader>

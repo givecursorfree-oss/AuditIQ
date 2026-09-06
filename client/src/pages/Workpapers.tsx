@@ -134,7 +134,11 @@ export default function Workpapers() {
       ) : loadError ? (
         <ErrorBanner message={loadError} onRetry={fetchWorkpapers} />
       ) : filtered.length === 0 ? (
-        <EmptyState title="No workpapers" />
+        <EmptyState
+          title="No workpapers"
+          description="Workpapers for this engagement will appear here."
+          illustration="doc-list"
+        />
       ) : (
         <div className="space-y-2">
           {filtered.map((wp) => (

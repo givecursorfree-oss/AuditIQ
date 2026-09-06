@@ -253,7 +253,16 @@ export function ClaimsApprovalInbox() {
 
   if (loading) return <PageLoading className="py-8" label="Loading claims…" />;
   if (loadError) return <ErrorBanner message={loadError} onRetry={() => { setLoading(true); load(); }} />;
-  if (claims.length === 0) return <EmptyState title="No pending claims" className="py-6" />;
+  if (claims.length === 0) {
+    return (
+      <EmptyState
+        title="No pending claims"
+        description="Staff food and travel claims routed to you will appear here."
+        illustration="person-quiet"
+        className="py-6"
+      />
+    );
+  }
 
   return (
     <div className="space-y-3">

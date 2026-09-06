@@ -481,12 +481,25 @@ export default function Documents() {
         <EmptyState
           title={search ? 'No matching files' : activeFolder ? 'This folder is empty' : 'No documents yet'}
           description={search ? 'Try a different search term' : 'Upload your first document to get started'}
+          illustration={search ? 'person-search' : 'doc-list'}
           action={
-            !search ? (
+            search ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setSearch('');
+                  setSearchParams({}, { replace: true });
+                }}
+              >
+                Clear search
+              </Button>
+            ) : (
               <Button type="button" size="sm" className="gap-2" onClick={() => setShowUpload(true)}>
                 <Upload size={16} /> Upload Files
               </Button>
-            ) : undefined
+            )
           }
           className="py-20"
         />

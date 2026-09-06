@@ -321,7 +321,11 @@ export default function PendingRequests() {
 
         ) : requests.length === 0 ? (
 
-          <EmptyState title="No requests in this queue" />
+          <EmptyState
+            title="No requests in this queue"
+            description="New requests for this filter will appear here."
+            illustration="person-wait"
+          />
 
         ) : (
 

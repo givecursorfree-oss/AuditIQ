@@ -13,6 +13,9 @@ export const PREFERRED_OFFICE_GPS_ACCURACY_M = 500;
  */
 export const MAX_OFFICE_GPS_ACCURACY_M = 2500;
 
+/** Soft max for Client Place / WFH — still require a real fix, not office geofence. */
+export const MAX_REMOTE_GPS_ACCURACY_M = 15_000;
+
 export type GpsFix = {
   latitude: number;
   longitude: number;

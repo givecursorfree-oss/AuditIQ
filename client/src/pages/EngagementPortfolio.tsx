@@ -104,7 +104,25 @@ export default function EngagementPortfolio() {
       ) : !data || data.rows.length === 0 ? (
         <EmptyState
           title="No clients for this service"
-          description="No engagements found for the selected service."
+          description="Pick another service, or create an engagement for this one."
+          illustration="person-search"
+          action={
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {service !== 'GST_MONTHLY_RETURNS' && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSearchParams({ service: 'GST_MONTHLY_RETURNS' })}
+                >
+                  Reset service
+                </Button>
+              )}
+              <Button asChild size="sm" variant="outline">
+                <Link to="/engagements">All engagements</Link>
+              </Button>
+            </div>
+          }
         />
       ) : (
         <div className="card overflow-hidden p-0">

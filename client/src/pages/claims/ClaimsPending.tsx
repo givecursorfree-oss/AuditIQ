@@ -131,7 +131,12 @@ export default function ClaimsPending() {
       <div className="grid gap-4 md:grid-cols-2">
         <PanelCard title="Late hours">
           {lateHours.length === 0 ? (
-            <EmptyState title="No late hours pending" className="py-6" />
+            <EmptyState
+              title="No late hours pending"
+              description="Late-sitting submissions awaiting review will show here."
+              illustration="person-wait"
+              className="py-6"
+            />
           ) : (
             lateHours.map((c) => (
               <div key={c.id} className="border-b py-3 text-sm space-y-2">
@@ -158,7 +163,12 @@ export default function ClaimsPending() {
         </PanelCard>
         <PanelCard title="Dept visits">
           {deptVisits.length === 0 ? (
-            <EmptyState title="No dept visits pending" className="py-6" />
+            <EmptyState
+              title="No dept visits pending"
+              description="Department visit claims awaiting review will show here."
+              illustration="person-mail"
+              className="py-6"
+            />
           ) : (
             deptVisits.map((c) => (
               <div key={c.id} className="border-b py-2 text-sm flex justify-between gap-2">

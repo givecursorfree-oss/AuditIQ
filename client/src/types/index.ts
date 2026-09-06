@@ -266,6 +266,10 @@ export interface Attendance {
   bioPresent?: boolean | null;
   forgiven?: boolean;
   isArticle?: boolean;
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+  gpsAccuracy?: number | null;
+  ipAddress?: string | null;
   user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email'> & { role?: string };
   office?: { name: string };
 }

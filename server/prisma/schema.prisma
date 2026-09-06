@@ -863,6 +863,8 @@ model Attendance {
   gpsLng    Float?
   /// Browser/device reported GPS accuracy in meters (Office check-in)
   gpsAccuracy Float?
+  /// Client IP at check-in (audit; especially WFH / Client Place)
+  ipAddress String?
   method    String    @default("face") // face | otp | manual | timer | manual-login
   createdAt DateTime  @default(now())
 

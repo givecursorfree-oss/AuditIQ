@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { PanelCard } from '../layout/PanelCard';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { DashboardRecentActivity } from './DashboardRecentActivity';
 import type { ActivityItem } from '@/types';
 import { NavCountBadge } from '../ui/nav-count-badge';
@@ -287,8 +288,13 @@ export function DashboardExtraPanels({
                   </li>
                 ))}
                 {(!compliance.statutory || compliance.statutory.length === 0) && (
-                  <li className="py-3 text-sm text-muted-foreground leading-relaxed">
-                    No statutory items in the next 30 days
+                  <li className="list-none">
+                    <EmptyState
+                      title="No statutory items in the next 30 days"
+                      illustration="person-alert"
+                      illustrationSize="sm"
+                      className="py-4"
+                    />
                   </li>
                 )}
               </ul>
@@ -319,8 +325,13 @@ export function DashboardExtraPanels({
                 ))}
                 {(!compliance.engagementDeadlines ||
                   compliance.engagementDeadlines.length === 0) && (
-                  <li className="py-3 text-sm text-muted-foreground leading-relaxed">
-                    No engagement deadlines in the next 30 days on your assignments
+                  <li className="list-none">
+                    <EmptyState
+                      title="No engagement deadlines in the next 30 days"
+                      illustration="person-wait"
+                      illustrationSize="sm"
+                      className="py-4"
+                    />
                   </li>
                 )}
               </ul>
@@ -329,9 +340,7 @@ export function DashboardExtraPanels({
         </PanelCard>
       )}
 
-      {!isClient && recentActivity.length > 0 && (
-        <DashboardRecentActivity activities={recentActivity} />
-      )}
+      {!isClient && <DashboardRecentActivity activities={recentActivity} />}
     </>
   );
 }

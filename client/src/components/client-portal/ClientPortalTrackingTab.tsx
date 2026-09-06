@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Timeline } from '@/components/ui/timeline';
 import ClientActivationNotice from '@/components/engagement/ClientActivationNotice';
 import { CaretRight, ChartLineUp } from '@phosphor-icons/react';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 import { stageToTimelineItems, statusBadgeVariant } from './utils';
 
@@ -38,7 +39,7 @@ export function ClientPortalTrackingTab() {
           </CardHeader>
           <CardContent className="space-y-2">
             {engagements.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No engagements yet.</p>
+              <EmptyState title="No engagements yet" illustration="handshake" illustrationSize="sm" />
             ) : (
               engagements.map((e) => (
                 <button

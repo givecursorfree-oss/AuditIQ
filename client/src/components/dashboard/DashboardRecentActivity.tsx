@@ -1,19 +1,12 @@
 import { FileText, Pencil, Plus, Trash2, LogIn } from 'lucide-react';
-
 import type { LucideIcon } from 'lucide-react';
-
 import { GradientAvatar } from '@/components/ui/gradient-avatar';
-
 import { cn } from '@/lib/utils';
-
+import { EmptyState } from '@/components/layout/EmptyState';
 import type { ActivityItem } from '@/types';
 
-
-
 interface DashboardRecentActivityProps {
-
   activities: ActivityItem[];
-
 }
 
 
@@ -57,10 +50,20 @@ function ActionCell({ action }: { action: string }) {
 
 
 export function DashboardRecentActivity({ activities }: DashboardRecentActivityProps) {
-
-  if (activities.length === 0) return null;
-
-
+  if (activities.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-card">
+        <div className="px-4 py-3 border-b border-border">
+          <h3 className="font-medium text-base text-foreground">Recent Activity</h3>
+        </div>
+        <EmptyState
+          title="No recent activity"
+          illustration="person-quiet"
+          illustrationSize="sm"
+        />
+      </div>
+    );
+  }
 
   return (
 

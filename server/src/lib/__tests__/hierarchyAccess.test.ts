@@ -20,6 +20,12 @@ describe('hierarchyAccess', () => {
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/tasks')).toBe(true);
   });
 
+  it('allows office staff to mark attendance', () => {
+    expect(apiPathAllowedForHierarchy('SENIOR_OFFICE_ADMIN', '/api/attendance/me/today')).toBe(true);
+    expect(apiPathAllowedForHierarchy('SENIOR_OFFICE_ADMIN', '/api/attendance/check-in')).toBe(true);
+    expect(apiPathAllowedForHierarchy('OFFICE_EXECUTIVE', '/api/attendance/check-out')).toBe(true);
+  });
+
   it('passes through unscoped hierarchy codes', () => {
     expect(apiPathAllowedForHierarchy('AUDIT_EXECUTIVE', '/api/engagements')).toBe(true);
   });

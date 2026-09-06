@@ -215,7 +215,13 @@ export default function Reports() {
                 </div>
               </div>
             ))}
-            {reports.length === 0 && <EmptyState title="No reports yet" />}
+            {reports.length === 0 && (
+              <EmptyState
+                title="No reports yet"
+                description="Reports for selected engagements will list here."
+                illustration="doc-list"
+              />
+            )}
           </AccessibleTabPanel>
 
           <AccessibleTabPanel id="reports-panel-form3cd" labelledBy="reports-tab-form3cd" hidden={tab !== 'form3cd'} className="space-y-4 mt-4">
@@ -258,9 +264,17 @@ export default function Reports() {
                 ))}
               </div>
             ) : selectedEngagement ? (
-              <EmptyState title="No Form 3CD clauses for this engagement" />
+              <EmptyState
+                title="No Form 3CD clauses"
+                description="Nothing loaded for this engagement yet."
+                illustration="doc-list"
+              />
             ) : (
-              <EmptyState title="Select an engagement" />
+              <EmptyState
+                title="Select an engagement"
+                description="Choose a client above to load Form 3CD clauses."
+                illustration="tap-select"
+              />
             )}
           </AccessibleTabPanel>
 
@@ -279,7 +293,13 @@ export default function Reports() {
                 </div>
               </div>
             ))}
-            {observations.length === 0 && <EmptyState title="No observations yet" />}
+            {observations.length === 0 && (
+              <EmptyState
+                title="No observations yet"
+                description="Observations for this engagement will show here."
+                illustration="doc-list"
+              />
+            )}
           </AccessibleTabPanel>
         </>
       )}

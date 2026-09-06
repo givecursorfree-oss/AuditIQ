@@ -16,6 +16,7 @@ import {
   CaretLeft,
 } from '@phosphor-icons/react';
 import UserPresenceAvatar from '@/components/UserPresenceAvatar';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { Status, StatusIndicator, StatusLabel } from '@/components/ui/status';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ChatMessageBubble from '@/components/chat/ChatMessageBubble';
@@ -386,11 +387,12 @@ export default function MessageThreadPanel({
                   <div className="w-5 h-5 border-2 border-[var(--color-brand-primary)] border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-foreground-muted">
-                  <p className="text-sm text-center max-w-xs">
-                    No messages in this conversation. Send a message to begin.
-                  </p>
-                </div>
+                <EmptyState
+                  title="No messages yet"
+                  description="Send the first message to start this thread."
+                  illustration="person-mail"
+                  className="h-full py-8"
+                />
               ) : (
                 messages.map((msg, i) => {
                   const isMe = msg.senderId === userId;

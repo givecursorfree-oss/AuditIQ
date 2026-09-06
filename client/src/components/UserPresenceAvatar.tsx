@@ -59,10 +59,8 @@ export default function UserPresenceAvatar({
   const seed = name?.trim() || initials;
 
   return (
-    <Avatar className={cn(sizeClasses[size], 'border-2 border-card', className)} title={name}>
-      {photo ? (
-        <AvatarImage src={photo} alt={name ?? initials} className="object-cover" />
-      ) : null}
+    <Avatar className={cn(sizeClasses[size], className)} title={name}>
+      {photo ? <AvatarImage src={photo} alt={name ?? initials} /> : null}
       <AvatarFallback className={cn('text-white font-semibold', avatarGradientClass(seed))}>
         {initials}
       </AvatarFallback>

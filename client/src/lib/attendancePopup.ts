@@ -1,11 +1,11 @@
 import api from '../services/api';
 import { todayKey } from './chatHelpers';
 import { LocationNeededError, type LocationFailCode } from './attendanceLoginNotice';
-import { getPreciseGps, isLikelyMobileDevice, type GpsFix } from './attendanceGps';
+import { getPreciseGps, isLikelyMobileDevice, MAX_REMOTE_GPS_ACCURACY_M, type GpsFix } from './attendanceGps';
 
 export { LocationNeededError, attendanceLoginNotice } from './attendanceLoginNotice';
 export type { LocationFailCode } from './attendanceLoginNotice';
-export { getPreciseGps, isLikelyMobileDevice, MAX_OFFICE_GPS_ACCURACY_M } from './attendanceGps';
+export { getPreciseGps, isLikelyMobileDevice, MAX_OFFICE_GPS_ACCURACY_M, MAX_REMOTE_GPS_ACCURACY_M } from './attendanceGps';
 export type { GpsFix } from './attendanceGps';
 
 /** Firm staff who must mark attendance after login. Client portal excluded. */
@@ -101,9 +101,10 @@ export function getBrowserGps(): Promise<GpsFix> {
 }
 
 /**
- * Confirm + acquire precise GPS for Office check-in (phone recommended).
+ * Confirm + acquire GPS. Office = precise vs pin; remote = Client Place / WFH (IP stored server-side).
  */
 export async function requestAttendanceLocation(options?: {
+  purpose?: 'office' | 'remote';
   confirm: (input: {
     title?: string;
     message: string;
@@ -111,10 +112,13 @@ export async function requestAttendanceLocation(options?: {
     cancelLabel?: string;
   }) => Promise<boolean>;
 }): Promise<GpsFix> {
+  const purpose = options?.purpose ?? 'office';
   if (!navigator.geolocation) {
     throw new LocationNeededError(
       'unsupported',
-      'This browser cannot share GPS. Open AuditIQ on your phone to check in at the office.'
+      purpose === 'office'
+        ? 'This browser cannot share GPS. Open AuditIQ on your phone to check in at the office.'
+        : 'This browser cannot share GPS. Allow location or open AuditIQ on your phone to check in.'
     );
   }
 
@@ -122,17 +126,20 @@ export async function requestAttendanceLocation(options?: {
   if (state === 'denied') {
     throw new LocationNeededError(
       'denied',
-      'Location permission is off. On your phone: allow Precise Location for the browser, then try again.'
+      'Location permission is off. Allow location for the browser, then try again.'
     );
   }
 
   if (state !== 'granted' && options?.confirm) {
     const onPhone = isLikelyMobileDevice();
     const allowed = await options.confirm({
-      title: 'Allow Precise Location',
-      message: onPhone
-        ? 'AuditIQ uses your phone GPS coordinates (not Wi‑Fi/IP) and checks you are at the office. Turn on Precise Location, then Allow.'
-        : 'Office check-in needs device GPS coordinates (not Wi‑Fi/IP). Desktop location is often rejected — prefer your phone at the office. Tap Allow, then Allow in the browser prompt.',
+      title: 'Allow location',
+      message:
+        purpose === 'office'
+          ? onPhone
+            ? 'AuditIQ uses your phone GPS coordinates (not Wi‑Fi/IP) and checks you are at the office. Turn on Precise Location, then Allow.'
+            : 'Office check-in needs device GPS coordinates (not Wi‑Fi/IP). Desktop location is often rejected — prefer your phone at the office. Tap Allow, then Allow in the browser prompt.'
+          : 'Client Place and Work from Home check-in record GPS and your network IP for verification. Tap Allow, then Allow in the browser prompt.',
       confirmLabel: 'Allow GPS',
       cancelLabel: 'Not now',
     });
@@ -144,6 +151,13 @@ export async function requestAttendanceLocation(options?: {
     }
   }
 
+  if (purpose === 'remote') {
+    return getPreciseGps({
+      maxAccuracyM: MAX_REMOTE_GPS_ACCURACY_M,
+      preferredAccuracyM: 1_000,
+      waitMs: 15_000,
+    });
+  }
   return getPreciseGps();
 }
 
@@ -199,13 +213,16 @@ export async function tryAttendanceCheckIn(
   const placeOfWork = options?.placeOfWork ?? 'Office';
   const apiKey = attendanceApiKey(userId);
   const popupKey = attendancePopupShownKey(userId);
+  // Explicit Attendance-page check-in must always hit the API (never skip on popup flag).
+  const isManualPageCheckIn = method === 'manual';
 
-  if (!forcePopup && sessionStorage.getItem(popupKey)) {
+  // Auto/login flows: one celebration popup per day. Manual page check-in is never gated here.
+  if (!isManualPageCheckIn && !forcePopup && sessionStorage.getItem(popupKey)) {
     return null;
   }
 
   const showPopup = (details: AttendancePopupDetails) => {
-    if (!forcePopup && sessionStorage.getItem(popupKey)) return null;
+    if (!forcePopup && !isManualPageCheckIn && sessionStorage.getItem(popupKey)) return null;
     sessionStorage.setItem(popupKey, '1');
     dispatchAttendanceConfirmed(details);
     return details;
@@ -213,24 +230,32 @@ export async function tryAttendanceCheckIn(
 
   if (skipApiIfDone && sessionStorage.getItem(apiKey)) {
     const existing = await fetchTodayAttendanceRecord();
-    if (existing && !existing.checkOut) {
-      return forcePopup ? showPopup(buildCheckInPopup(existing, method)) : null;
+    if (existing?.checkIn && !existing.checkOut) {
+      return forcePopup || isManualPageCheckIn
+        ? showPopup(buildCheckInPopup(existing, method))
+        : null;
     }
-    return null;
+    // Stale "done" flag from a failed earlier attempt — clear and POST again
+    sessionStorage.removeItem(apiKey);
   }
 
   const existing = await fetchTodayAttendanceRecord();
   if (existing?.checkIn && !existing.checkOut) {
     sessionStorage.setItem(apiKey, 'done');
-    return forcePopup ? showPopup(buildCheckInPopup(existing, method)) : null;
+    return forcePopup || isManualPageCheckIn
+      ? showPopup(buildCheckInPopup(existing, method))
+      : null;
   }
   // Accidental early checkout: reopen via tryAttendanceResume, not a second check-in
   if (existing?.checkIn && existing.checkOut) {
     sessionStorage.setItem(apiKey, 'done');
+    if (isManualPageCheckIn) {
+      throw new Error('Day already ended. Use Resume day to continue working.');
+    }
     return null;
   }
 
-  const needsGps = placeOfWork === 'Office';
+  const needsGps = placeOfWork === 'Office' || placeOfWork === 'Client Place' || placeOfWork === 'Work from Home';
   if (
     needsGps &&
     (options?.latitude == null || options?.longitude == null || options?.accuracyMeters == null)
@@ -238,7 +263,9 @@ export async function tryAttendanceCheckIn(
     if (options?.gpsAttempted) {
       throw new LocationNeededError(
         'unavailable',
-        'Could not get precise GPS. Use your phone at the office with Precise Location on.'
+        placeOfWork === 'Office'
+          ? 'Could not get precise GPS. Use your phone at the office with Precise Location on.'
+          : 'Could not get GPS. Allow location and try again.'
       );
     }
   }
@@ -256,19 +283,20 @@ export async function tryAttendanceCheckIn(
         accuracyMeters: options.accuracyMeters,
       };
     } else {
-      const fix = await getPreciseGps();
+      const fix =
+        placeOfWork === 'Office'
+          ? await getPreciseGps()
+          : await getPreciseGps({
+              maxAccuracyM: MAX_REMOTE_GPS_ACCURACY_M,
+              preferredAccuracyM: 1_000,
+              waitMs: 15_000,
+            });
       gps = {
         latitude: fix.latitude,
         longitude: fix.longitude,
         accuracyMeters: fix.accuracyMeters,
       };
     }
-  } else if (options?.latitude != null && options?.longitude != null) {
-    gps = {
-      latitude: options.latitude,
-      longitude: options.longitude,
-      accuracyMeters: options.accuracyMeters,
-    };
   }
 
   try {
@@ -284,21 +312,27 @@ export async function tryAttendanceCheckIn(
       ...gps,
     });
     sessionStorage.setItem(apiKey, 'done');
-    if (data.alreadyCheckedIn && !forcePopup) return null;
-    return showPopup(buildCheckInPopup(data, method));
+    if (data.alreadyCheckedIn && !forcePopup && !isManualPageCheckIn) return null;
+    return showPopup(buildCheckInPopup(data, method)) ?? buildCheckInPopup(data, method);
   } catch (err: unknown) {
     const status = (err as { response?: { status?: number } })?.response?.status;
     const serverMsg = (err as { response?: { data?: { error?: string } } })?.response?.data
       ?.error;
-    if (status === 400) {
-      // Don't treat GPS accuracy failures as "already checked in"
-      if (/accuracy|GPS|Precise|Wi‑Fi|Wi-Fi|phone/i.test(serverMsg || '')) {
+    if (status === 400 || status === 403) {
+      // Validation / policy failures must surface — never fake success
+      if (
+        /accuracy|GPS|Precise|Wi‑Fi|Wi-Fi|phone|Location|Client name|WFH|geofence|office/i.test(
+          serverMsg || ''
+        )
+      ) {
         throw new Error(serverMsg || 'Check-in failed');
       }
-      sessionStorage.setItem(apiKey, 'done');
       const today = await fetchTodayAttendanceRecord();
-      if (today && !today.checkOut) {
-        return forcePopup ? showPopup(buildCheckInPopup(today, method)) : null;
+      if (today?.checkIn && !today.checkOut) {
+        sessionStorage.setItem(apiKey, 'done');
+        return forcePopup || isManualPageCheckIn
+          ? showPopup(buildCheckInPopup(today, method)) ?? buildCheckInPopup(today, method)
+          : null;
       }
     }
     throw new Error(serverMsg || (err as Error).message || 'Check-in failed');

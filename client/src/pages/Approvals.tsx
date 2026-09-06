@@ -300,6 +300,7 @@ export default function Approvals() {
             <PanelCard title="Staff claims">
               <ClaimsApprovalInbox />
             </PanelCard>
+            <PanelCard title="Workflow requests">
             <SplitPaneLayout
             hasSelection={Boolean(selectedReq)}
             onClearSelection={() => setSelectedReq(null)}
@@ -307,6 +308,7 @@ export default function Approvals() {
             list={
               <RequestList
                 requests={filteredRequests}
+                compactEmpty
                 onSelect={async (req) => {
                   try {
                     const { data } = await api.get<ApprovalRequest>(`/approvals/requests/${req.id}`);
@@ -335,6 +337,7 @@ export default function Approvals() {
               )
             }
           />
+            </PanelCard>
           </div>
         ) : (
           <SplitPaneLayout
@@ -390,16 +393,23 @@ function RequestList({
   requests,
   onSelect,
   emptyText,
+  /** When Staff claims already shows a full empty above, skip a second illustration. */
+  compactEmpty = false,
 }: {
   requests: ApprovalRequest[];
   onSelect: (r: ApprovalRequest) => void;
   emptyText: string;
+  compactEmpty?: boolean;
 }) {
   if (!requests.length) {
     return (
-      <div className="flex flex-col items-center justify-center py-16">
-        <ListChecks size={40} className="mb-3 opacity-30 text-muted-foreground" />
-        <EmptyState title={emptyText} />
+      <div className="flex flex-col items-center justify-center py-8">
+        <EmptyState
+          title={emptyText}
+          description="Workflow requests needing your decision will show here."
+          illustration={compactEmpty ? false : 'person-quiet'}
+          className={compactEmpty ? 'py-4' : undefined}
+        />
       </div>
     );
   }
@@ -581,7 +591,11 @@ function WorkflowList({
     return (
       <div className="flex flex-col items-center justify-center py-16">
         <Settings size={40} className="mb-3 opacity-30 text-muted-foreground" />
-        <EmptyState title="No workflows configured" />
+        <EmptyState
+          title="No workflows configured"
+          description="Approval workflows set up for the firm will list here."
+          illustration="box"
+        />
       </div>
     );
   }

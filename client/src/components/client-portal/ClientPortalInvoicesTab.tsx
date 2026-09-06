@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 
 export function ClientPortalInvoicesTab() {
@@ -15,7 +16,7 @@ export function ClientPortalInvoicesTab() {
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           {invoices.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-10 text-center">No invoices on file yet.</p>
+            <EmptyState title="No invoices on file yet" illustration="add-card" illustrationSize="sm" />
           ) : (
             <Table>
               <TableHeader>

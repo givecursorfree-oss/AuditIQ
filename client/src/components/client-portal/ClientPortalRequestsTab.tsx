@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ChatCircle as MessageSquare } from '@phosphor-icons/react';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 import { ServiceRequestsPanel } from './ServiceRequestsPanel';
 
@@ -24,10 +24,11 @@ export function ClientPortalRequestsTab() {
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           {docRequests.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-              <MessageSquare size={40} />
-              <p>No document requests at this time.</p>
-            </div>
+            <EmptyState
+              title="No document requests at this time"
+              illustration="mailbox"
+              illustrationSize="sm"
+            />
           ) : (
             <Table>
               <TableHeader>

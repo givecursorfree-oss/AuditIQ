@@ -234,7 +234,12 @@ export default function AdminPresenceDashboard({ className }: AdminPresenceDashb
       {loading ? (
         <LoadingCenter label="Loading team presence…" className="py-12" />
       ) : rows.length === 0 ? (
-        <EmptyState title="No staff records" description="Team presence will appear when staff clock in." className="py-10" />
+        <EmptyState
+          title="No staff records"
+          description="Team presence will appear when staff clock in."
+          illustration="person-quiet"
+          className="py-10"
+        />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

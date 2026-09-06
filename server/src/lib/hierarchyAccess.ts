@@ -43,6 +43,7 @@ export const HIERARCHY_API_PREFIXES: Record<string, string[]> = {
   SENIOR_OFFICE_ADMIN: [
     '/api/documents',
     '/api/clients',
+    '/api/attendance',
     '/api/dashboard',
     '/api/notifications',
     '/api/nav-badges',
@@ -52,6 +53,7 @@ export const HIERARCHY_API_PREFIXES: Record<string, string[]> = {
   ],
   OFFICE_EXECUTIVE: [
     '/api/documents',
+    '/api/attendance',
     '/api/dashboard',
     '/api/notifications',
     '/api/nav-badges',

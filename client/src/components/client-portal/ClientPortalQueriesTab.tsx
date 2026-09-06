@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 
 export function ClientPortalQueriesTab() {
@@ -73,7 +74,7 @@ export function ClientPortalQueriesTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           {auditQueries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No queries yet.</p>
+            <EmptyState title="No queries yet" illustration="person-mail" illustrationSize="sm" />
           ) : (
             auditQueries.map((q) => (
               <div key={q.id} className="rounded-lg border border-border p-3 text-sm">

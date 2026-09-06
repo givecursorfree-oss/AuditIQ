@@ -275,7 +275,22 @@ export default function Employees() {
             ) : loadError ? (
               <ErrorBanner message={loadError} onRetry={() => void fetchEmployees()} className="m-3" />
             ) : filtered.length === 0 ? (
-              <EmptyState title="No employees found" />
+              <EmptyState
+                title={search.trim() ? 'No matching employees' : 'No employees yet'}
+                description={
+                  search.trim()
+                    ? 'Try another name or clear the search.'
+                    : 'People you add will appear in this list.'
+                }
+                illustration={search.trim() ? 'person-search' : 'people-list'}
+                action={
+                  search.trim() ? (
+                    <Button type="button" size="sm" variant="outline" onClick={() => setSearch('')}>
+                      Clear search
+                    </Button>
+                  ) : undefined
+                }
+              />
             ) : (
               filtered.map(emp => (
                 <button

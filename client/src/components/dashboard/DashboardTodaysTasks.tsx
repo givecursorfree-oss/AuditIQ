@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/layout/EmptyState';
 import type { DashboardTaskRow, ProjectColor } from './types';
 
 const projectColorMap: Record<ProjectColor, string> = {
@@ -119,18 +120,24 @@ export function DashboardTodaysTasks({ tasks, onTaskClick, onBrowseEngagements }
       </div>
       <div className="divide-y divide-border">
         {tasks.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground space-y-3">
-            <p>No open tasks right now.</p>
-            {onBrowseEngagements ? (
-              <Button type="button" variant="outline" size="sm" onClick={onBrowseEngagements}>
-                Browse engagements
-              </Button>
-            ) : null}
-          </div>
+          <EmptyState
+            title="No open tasks right now"
+            illustration="person-wait"
+            illustrationSize="sm"
+            action={
+              onBrowseEngagements ? (
+                <Button type="button" variant="outline" size="sm" onClick={onBrowseEngagements}>
+                  Browse engagements
+                </Button>
+              ) : undefined
+            }
+          />
         ) : filteredTasks.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            No tasks match your search.
-          </div>
+          <EmptyState
+            title="No tasks match your search"
+            illustration="person-search"
+            illustrationSize="sm"
+          />
         ) : (
           filteredTasks.map((task) => (
             <button

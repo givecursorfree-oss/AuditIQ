@@ -291,7 +291,7 @@ export default function LeaveStipend() {
 
       {loadError && <ErrorBanner message={loadError} onRetry={() => void load()} className="mb-4" />}
 
-      {balance && balance.isArticle && (
+      {balance && balance.isArticle && tab !== 'apply' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <BalanceCard label="Exam Leave" used={balance.used.exam} limit={balance.limits.exam} icon={GraduationCap} />
           <BalanceCard label="Casual Leave" used={balance.used.casual} limit={balance.limits.casual} icon={Calendar} />
@@ -306,7 +306,7 @@ export default function LeaveStipend() {
           )}
         </div>
       )}
-      {balance?.firmLeave && (
+      {balance?.firmLeave && tab !== 'apply' && (
         <p className="text-xs text-muted-foreground">
           Firm leave includes casual leave taken plus attendance debits (late / no attendance).
           Soft late {balance.firmLeave.softLateCount} · Hard late {balance.firmLeave.hardLateCount} ·
@@ -331,45 +331,93 @@ export default function LeaveStipend() {
       </div>
 
       {tab === 'apply' && canApply && (
-        <PanelCard title="Apply for leave" className="max-w-2xl">
-          <div className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-sm text-muted-foreground">From</span>
-              <input type="date" className="input-field mt-1 w-full" value={applyForm.startDate} onChange={(e) => setApplyForm({ ...applyForm, startDate: e.target.value })} />
-            </label>
-            <label className="block">
-              <span className="text-sm text-muted-foreground">To</span>
-              <input type="date" className="input-field mt-1 w-full" value={applyForm.endDate} onChange={(e) => setApplyForm({ ...applyForm, endDate: e.target.value })} />
-            </label>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <PanelCard title="Apply for leave">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-sm text-muted-foreground">From</span>
+                  <input type="date" className="input-field mt-1 w-full" value={applyForm.startDate} onChange={(e) => setApplyForm({ ...applyForm, startDate: e.target.value })} />
+                </label>
+                <label className="block">
+                  <span className="text-sm text-muted-foreground">To</span>
+                  <input type="date" className="input-field mt-1 w-full" value={applyForm.endDate} onChange={(e) => setApplyForm({ ...applyForm, endDate: e.target.value })} />
+                </label>
+              </div>
+              <label className="block">
+                <span className="text-sm text-muted-foreground">Leave type</span>
+                <select className="input-field mt-1 w-full" value={applyForm.type} onChange={(e) => setApplyForm({ ...applyForm, type: e.target.value as typeof applyForm.type })}>
+                  <option value="Casual">Casual</option>
+                  <option value="Sick">Sick</option>
+                  <option value="Exam">Exam (CA)</option>
+                  <option value="Study">Study</option>
+                  <option value="Earned">Earned</option>
+                </select>
+              </label>
+              {applyForm.type === 'Exam' && (
+                <label className="block">
+                  <span className="text-sm text-muted-foreground">Exam level</span>
+                  <select className="input-field mt-1 w-full" value={applyForm.examLevel} onChange={(e) => setApplyForm({ ...applyForm, examLevel: e.target.value as typeof applyForm.examLevel })}>
+                    <option value="Foundation">Foundation</option>
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Final">Final</option>
+                  </select>
+                </label>
+              )}
+              <label className="block">
+                <span className="text-sm text-muted-foreground">Reason</span>
+                <textarea className="input-field mt-1 w-full" rows={2} value={applyForm.reason} onChange={(e) => setApplyForm({ ...applyForm, reason: e.target.value })} />
+              </label>
+              <Button type="button" onClick={() => void applyLeave()}>Submit application</Button>
+            </div>
+          </PanelCard>
+
+          <div className="space-y-4">
+            {balance?.isArticle ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <BalanceCard label="Exam Leave" used={balance.used.exam} limit={balance.limits.exam} icon={GraduationCap} />
+                <BalanceCard label="Casual Leave" used={balance.used.casual} limit={balance.limits.casual} icon={Calendar} />
+                <BalanceCard label="Sick Leave" used={balance.used.sick} limit={balance.limits.sick} icon={Calendar} />
+                {balance.firmLeave && (
+                  <BalanceCard
+                    label="Firm leave (24)"
+                    used={balance.firmLeave.used}
+                    limit={balance.firmLeave.credit}
+                    icon={Calendar}
+                  />
+                )}
+              </div>
+            ) : balance?.firmLeave ? (
+              <BalanceCard
+                label="Firm leave"
+                used={balance.firmLeave.used}
+                limit={balance.firmLeave.credit}
+                icon={Calendar}
+              />
+            ) : null}
+            {balance?.firmLeave && (
+              <p className="text-xs text-muted-foreground">
+                Soft late {balance.firmLeave.softLateCount} · Hard late {balance.firmLeave.hardLateCount} ·
+                No attendance {balance.firmLeave.noAttdCount} · Debit{' '}
+                {balance.firmLeave.attendanceDebitDays}d · Remaining {balance.firmLeave.remaining}d
+              </p>
+            )}
+            <PanelCard
+              title="Calendar"
+              action={
+                <input
+                  type="month"
+                  aria-label="Leave calendar month"
+                  className="input-field w-auto"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              }
+            >
+              <LeaveMonthOverview month={month} leaves={calendar} />
+            </PanelCard>
           </div>
-          <label className="block">
-            <span className="text-sm text-muted-foreground">Leave type</span>
-            <select className="input-field mt-1 w-full" value={applyForm.type} onChange={(e) => setApplyForm({ ...applyForm, type: e.target.value as typeof applyForm.type })}>
-              <option value="Casual">Casual</option>
-              <option value="Sick">Sick</option>
-              <option value="Exam">Exam (CA)</option>
-              <option value="Study">Study</option>
-              <option value="Earned">Earned</option>
-            </select>
-          </label>
-          {applyForm.type === 'Exam' && (
-            <label className="block">
-              <span className="text-sm text-muted-foreground">Exam level</span>
-              <select className="input-field mt-1 w-full" value={applyForm.examLevel} onChange={(e) => setApplyForm({ ...applyForm, examLevel: e.target.value as typeof applyForm.examLevel })}>
-                <option value="Foundation">Foundation</option>
-                <option value="Intermediate">Intermediate</option>
-                <option value="Final">Final</option>
-              </select>
-            </label>
-          )}
-          <label className="block">
-            <span className="text-sm text-muted-foreground">Reason</span>
-            <textarea className="input-field mt-1 w-full" rows={2} value={applyForm.reason} onChange={(e) => setApplyForm({ ...applyForm, reason: e.target.value })} />
-          </label>
-          <Button type="button" onClick={() => void applyLeave()}>Submit application</Button>
-          </div>
-        </PanelCard>
+        </div>
       )}
 
       {tab === 'inbox' && canManage && (
@@ -413,7 +461,7 @@ export default function LeaveStipend() {
                 </tr>
               ))}
               {inbox.length === 0 && leaves.filter((l) => l.status === 'Pending').length === 0 && (
-                <tr><td colSpan={7}><EmptyState title="No leaves awaiting sanction" /></td></tr>
+                <tr><td colSpan={7}><EmptyState title="No leaves awaiting sanction" description="Leave requests needing sanction will show here." illustration="person-wait" /></td></tr>
               )}
             </tbody>
           </table>
@@ -441,7 +489,7 @@ export default function LeaveStipend() {
           <div className="mt-4 space-y-2 border-t border-border pt-4">
             <p className="text-sm font-medium">Approved leaves this month</p>
             {calendar.length === 0 && (
-              <EmptyState title="No approved leaves in this month" />
+              <EmptyState title="No approved leaves in this month" description="Approved leaves for this month will list here." illustration="person-quiet" />
             )}
             {calendar.map((l) => (
               <div key={l.id} className="flex justify-between items-center p-3 bg-surface-muted rounded">
@@ -554,7 +602,7 @@ export default function LeaveStipend() {
                   {compOffs.length === 0 && (
                     <tr>
                       <td colSpan={5}>
-                        <EmptyState title="No comp-off requests" />
+                        <EmptyState title="No comp-off requests" description="Comp-off requests will appear here." illustration="person-mail" />
                       </td>
                     </tr>
                   )}
@@ -585,7 +633,7 @@ export default function LeaveStipend() {
             </Button>
           </div>
           {holidays.length === 0 ? (
-            <EmptyState title="No firm holidays configured yet" />
+            <EmptyState title="No firm holidays configured yet" illustration="box" />
           ) : (
             <ul className="text-sm space-y-1">
               {holidays.map((d) => (
@@ -625,7 +673,7 @@ export default function LeaveStipend() {
                     <td>{s.paidAt ? new Date(s.paidAt).toLocaleDateString('en-IN') : '—'}</td>
                   </tr>
                 ))}
-                {stipends.length === 0 && <tr><td colSpan={6}><EmptyState title="No stipend records" /></td></tr>}
+                {stipends.length === 0 && <tr><td colSpan={6}><EmptyState title="No stipend records" illustration="wallet" /></td></tr>}
               </tbody>
             </table>
           </div>

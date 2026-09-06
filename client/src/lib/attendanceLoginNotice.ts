@@ -17,11 +17,11 @@ export function attendanceLoginNotice(err: unknown): {
 } {
   if (err instanceof LocationNeededError) {
     if (err.code === 'denied') {
-      return {
-        title: 'Attendance not marked',
-        message: 'Allow location, then check in at the office.',
-        variant: 'warning',
-      };
+    return {
+      title: 'Attendance not marked',
+      message: 'Allow location, then check in.',
+      variant: 'warning',
+    };
     }
     if (/accuracy|coarse|Precise/i.test(err.message)) {
       return {
@@ -60,7 +60,7 @@ export function attendanceLoginNotice(err: unknown): {
   }
   return {
     title: 'Attendance not marked',
-    message: raw || 'Check in from Attendance at the office.',
+    message: raw || 'Check in from Attendance.',
     variant: 'warning',
   };
 }

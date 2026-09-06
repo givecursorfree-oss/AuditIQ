@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/layout/EmptyState';
 import { useClientPortal } from './ClientPortalContext';
 
 export function ClientPortalReportsTab() {
@@ -16,8 +17,8 @@ export function ClientPortalReportsTab() {
     <div className="mt-4 space-y-4">
       {reports.length === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No reports shared yet.
+          <CardContent className="p-0">
+            <EmptyState title="No reports shared yet" illustration="doc-list" illustrationSize="sm" />
           </CardContent>
         </Card>
       ) : (

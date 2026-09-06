@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { EmptyState } from '@/components/layout/EmptyState';
 import type { DashboardEngagementRow, EngagementRowStatus, ProjectColor } from './types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -287,11 +288,12 @@ export function DashboardEngagementsTable({
           <TableBody>
             {table.getRowModel().rows.length === 0 ? (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="text-center text-muted-foreground py-8"
-                >
-                  No projects found.
+                <TableCell colSpan={columns.length} className="p-0">
+                  <EmptyState
+                    title="No projects found"
+                    illustration="box"
+                    illustrationSize="sm"
+                  />
                 </TableCell>
               </TableRow>
             ) : (

@@ -66,7 +66,7 @@ function Profitability() {
       <div className="card p-4">
         <h3 className="font-semibold mb-3">Top 10 by fees billed</h3>
         {chart.length === 0 ? (
-          <EmptyState title="No billing data yet" />
+          <EmptyState title="No billing data yet" illustration="wallet" />
         ) : (
           <div className="h-64">
             <ResponsiveContainer><BarChart data={chart}>
@@ -96,7 +96,7 @@ function Profitability() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={8}><EmptyState title="No engagements with billing data yet" className="py-8" /></td></tr>
+              <tr><td colSpan={8}><EmptyState title="No engagements with billing data yet" illustration="wallet" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>
@@ -122,7 +122,7 @@ function Deadlines() {
   if (error) return <ErrorBanner message={error} />;
   if (!data) return <PageLoading />;
   if (!data.items?.length) {
-    return <EmptyState title="No upcoming statutory deadlines" />;
+    return <EmptyState title="No upcoming statutory deadlines" description="Deadlines in range will appear here." illustration="person-alert" />;
   }
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -172,7 +172,7 @@ function UdinLog() {
                 <td>{l.status === 'Active' ? <span className="text-success">Active</span> : <span className="text-danger">Revoked</span>}</td>
               </tr>
             ))}
-            {logs.length === 0 && <tr><td colSpan={5}><EmptyState title="No UDIN entries" className="py-8" /></td></tr>}
+            {logs.length === 0 && <tr><td colSpan={5}><EmptyState title="No UDIN entries" illustration="box-zero" className="py-8" /></td></tr>}
           </tbody>
         </table>
       </div>
@@ -228,7 +228,7 @@ function BillingReport() {
               </tr>
             ))}
             {invoices.length === 0 && (
-              <tr><td colSpan={7}><EmptyState title="No invoices yet" className="py-8" /></td></tr>
+              <tr><td colSpan={7}><EmptyState title="No invoices yet" illustration="add-card" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>
@@ -277,7 +277,7 @@ function StaffProductivity() {
               </tr>
             ))}
             {data.rows.length === 0 && (
-              <tr><td colSpan={8}><EmptyState title="No time entries for this month" className="py-8" /></td></tr>
+              <tr><td colSpan={8}><EmptyState title="No time entries for this month" description="Logged time for this month will show here." illustration="person-wait" className="py-8" /></td></tr>
             )}
           </tbody>
         </table>

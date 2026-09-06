@@ -116,7 +116,12 @@ export default function ClaimBatchesPage() {
         <PanelCard title="Create batch">
           <div className="space-y-2 max-w-xl">
             {approved.length === 0 ? (
-              <EmptyState title="No approved claims ready to batch" className="py-6" />
+              <EmptyState
+                title="No approved claims ready to batch"
+                description="Fully approved claims ready for partner/accounts batching will appear here."
+                illustration="box-zero"
+                className="py-6"
+              />
             ) : (
               approved.map((c) => (
                 <label key={c.id} className="flex items-center gap-2 text-sm">
@@ -139,7 +144,12 @@ export default function ClaimBatchesPage() {
       )}
       <PanelCard title="Batches">
         {batches.length === 0 ? (
-          <EmptyState title="No batches yet" className="py-6" />
+          <EmptyState
+            title="No batches yet"
+            description="Batches you create for reimbursement export will list here."
+            illustration="doc-list"
+            className="py-6"
+          />
         ) : (
           <ul className="divide-y text-sm">
             {batches.map((b) => (

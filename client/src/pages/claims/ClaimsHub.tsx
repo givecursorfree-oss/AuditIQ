@@ -108,7 +108,11 @@ export default function ClaimsHub() {
         ) : loadError ? (
           <ErrorBanner message={loadError} onRetry={load} />
         ) : claims.length === 0 ? (
-          <EmptyState title="No claims yet" />
+          <EmptyState
+            title="No claims yet"
+            description="Food and travel claims you submit will show here with status."
+            illustration="person-wait"
+          />
         ) : (
           <ul className="space-y-4">
             {claims.map((c) => (

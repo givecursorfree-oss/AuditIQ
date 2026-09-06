@@ -278,9 +278,34 @@ export default function Engagements() {
               </PanelCard>
             );
           })}
-          {engagements.length === 0 && (
-            <EmptyState title="No engagements found" />
-          )}
+          {engagements.length === 0 &&
+            (search || filterStatus || filterType ? (
+              <EmptyState
+                title="No matching engagements"
+                description="Try another search or clear filters."
+                illustration="person-search"
+                action={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSearch('');
+                      setFilterStatus('');
+                      setFilterType('');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="No engagements yet"
+                description="Create an engagement to start client work."
+                illustration="box"
+              />
+            ))}
         </div>
       ) : (
         <PanelCard title="Portfolio">
@@ -361,12 +386,34 @@ export default function Engagements() {
             </Link>
           ))}
 
-          {engagements.length === 0 && (
-            <EmptyState
-              title="No engagements found"
-              description="Create your first engagement to get started"
-            />
-          )}
+          {engagements.length === 0 &&
+            (search || filterStatus || filterType ? (
+              <EmptyState
+                title="No matching engagements"
+                description="Try another search or clear filters."
+                illustration="person-search"
+                action={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSearch('');
+                      setFilterStatus('');
+                      setFilterType('');
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="No engagements yet"
+                description="Create an engagement to start client work."
+                illustration="box"
+              />
+            ))}
         </div>
         </PanelCard>
       )}

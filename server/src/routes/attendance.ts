@@ -24,10 +24,14 @@ import {
   hasWfhApproval,
   userIsArticleAssistant,
 } from '../lib/articleAttendanceCompute.js';
+import { clientIp } from '../lib/clientIp.js';
 
 // ICAI articleship leave limits (from articleship.ts but duplicated here to
 // avoid a circular runtime dep — values rarely change)
 const ICAI_LEAVE_LIMITS = { exam: 175, casual: 30, sick: 15 } as const;
+
+/** Coarse home/client GPS often reports large radii — store + soft-cap, not office geofence. */
+const MAX_REMOTE_GPS_ACCURACY_M = 15_000;
 
 const HR_ATTENDANCE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
 
@@ -53,22 +57,37 @@ const checkInBodySchema = z
     accuracyMeters: z.coerce.number().positive().optional(),
   })
   .superRefine((val, ctx) => {
-    if (val.placeOfWork === PLACE_OFFICE) {
+    const remote = val.placeOfWork === PLACE_CLIENT || val.placeOfWork === PLACE_WFH;
+    if (val.placeOfWork === PLACE_OFFICE || remote) {
       if (val.latitude == null || val.longitude == null) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Location is required for Office check-in',
+          message:
+            val.placeOfWork === PLACE_OFFICE
+              ? 'Location is required for Office check-in'
+              : 'Location is required for Client Place and Work from Home check-in',
           path: ['latitude'],
         });
       }
-      if (val.accuracyMeters == null) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            'GPS accuracy is required for Office check-in. Use your phone with Precise Location on.',
-          path: ['accuracyMeters'],
-        });
-      }
+    }
+    if (val.placeOfWork === PLACE_OFFICE && val.accuracyMeters == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'GPS accuracy is required for Office check-in. Use your phone with Precise Location on.',
+        path: ['accuracyMeters'],
+      });
+    }
+    if (
+      remote &&
+      val.accuracyMeters != null &&
+      val.accuracyMeters > MAX_REMOTE_GPS_ACCURACY_M
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Location accuracy is too coarse (±${Math.round(val.accuracyMeters)}m). Enable Precise Location and try again.`,
+        path: ['accuracyMeters'],
+      });
     }
   });
 
@@ -118,6 +137,10 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
         bioPresent: true,
         forgiven: true,
         totalActiveSeconds: true,
+        gpsLat: true,
+        gpsLng: true,
+        gpsAccuracy: true,
+        ipAddress: true,
       },
     });
     if (!record) {
@@ -380,6 +403,12 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       where: { userId: req.user!.id, date: attendanceDayFilter() },
     });
     if (existing?.checkIn) {
+      if (existing.checkOut) {
+        res.status(400).json({
+          error: 'Day already ended. Use Resume day to continue working.',
+        });
+        return;
+      }
       res.json({ ...existing, alreadyCheckedIn: true });
       return;
     }
@@ -398,9 +427,11 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
     let gpsLng: number | undefined;
     let gpsAccuracy: number | undefined;
     let wfhApprovedById: string | undefined;
+    const checkInIp = clientIp(req) ?? null;
 
-    // For Office check-in: require geofence. For Client Place / WFH: record GPS if available.
+    // Office: geofence. Client / WFH: require GPS + store IP (no office pin).
     const needsGeofence = place === PLACE_OFFICE;
+    const needsRemoteGps = place === PLACE_CLIENT || place === PLACE_WFH;
     if (needsGeofence) {
       if (body.latitude == null || body.longitude == null) {
         res.status(400).json({ error: 'Location is required for Office check-in' });
@@ -413,6 +444,22 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
         body.accuracyMeters
       );
       officeId = fence.officeId;
+      gpsLat = body.latitude;
+      gpsLng = body.longitude;
+      gpsAccuracy = body.accuracyMeters;
+    } else if (needsRemoteGps) {
+      if (body.latitude == null || body.longitude == null) {
+        res.status(400).json({
+          error: 'Location is required for Client Place and Work from Home check-in',
+        });
+        return;
+      }
+      if (body.accuracyMeters != null && body.accuracyMeters > MAX_REMOTE_GPS_ACCURACY_M) {
+        res.status(400).json({
+          error: `Location accuracy is too coarse (±${Math.round(body.accuracyMeters)}m). Enable Precise Location and try again.`,
+        });
+        return;
+      }
       gpsLat = body.latitude;
       gpsLng = body.longitude;
       gpsAccuracy = body.accuracyMeters;
@@ -448,6 +495,7 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       gpsLat: gpsLat ?? null,
       gpsLng: gpsLng ?? null,
       gpsAccuracy: gpsAccuracy ?? null,
+      ipAddress: checkInIp,
       officeId: officeId ?? null,
       location: place,
       clientName: place === PLACE_CLIENT ? body.clientName!.trim() : null,
