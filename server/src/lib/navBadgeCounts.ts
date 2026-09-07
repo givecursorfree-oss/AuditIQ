@@ -12,6 +12,8 @@ export type NavBadgeCounts = {
 
   approvals: number;
 
+  claims: number;
+
   messages: number;
 
   unassignedEngagements: number;
@@ -51,6 +53,8 @@ export const EMPTY_NAV_BADGES: NavBadgeCounts = {
   notifications: 0,
 
   approvals: 0,
+
+  claims: 0,
 
   messages: 0,
 
@@ -284,7 +288,7 @@ export async function computeNavBadgesForUser(user: {
 
   if (!user.firmId) {
 
-    badges.dashboardAttention = badges.approvals + badges.messages;
+    badges.dashboardAttention = badges.approvals + badges.claims + badges.messages;
 
     return badges;
 
@@ -339,16 +343,16 @@ export async function computeNavBadgesForUser(user: {
       }),
 
     (async () => {
+      // Claims hub owns Food–Travel pending — keep off Approvals badge.
       if (['Partner', 'Admin'].includes(user.role)) {
-        const claimCount = await prisma.expenseClaim.count({
+        badges.claims = await prisma.expenseClaim.count({
           where: {
             firmId,
             claimStatus: { in: ['pending_approval', 'partially_approved'] },
           },
         });
-        badges.approvals += claimCount;
       } else if (user.role === 'Manager') {
-        const claimCount = await prisma.expenseClaimManagerApproval.count({
+        badges.claims = await prisma.expenseClaimManagerApproval.count({
           where: {
             managerId: user.id,
             status: 'pending',
@@ -358,7 +362,6 @@ export async function computeNavBadgesForUser(user: {
             },
           },
         });
-        badges.approvals += claimCount;
       }
     })(),
 
@@ -533,9 +536,9 @@ export async function computeNavBadgesForUser(user: {
       },
     });
     badges.dashboardAttention =
-      badges.approvals + dashboardActionable + dashboardLetters;
+      badges.approvals + badges.claims + dashboardActionable + dashboardLetters;
   } else {
-    badges.dashboardAttention = badges.approvals + badges.messages;
+    badges.dashboardAttention = badges.approvals + badges.claims + badges.messages;
   }
 
   return badges;

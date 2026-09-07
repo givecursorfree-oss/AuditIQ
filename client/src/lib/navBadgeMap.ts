@@ -4,6 +4,8 @@ export type NavBadgeKey =
 
   | 'approvals'
 
+  | 'claims'
+
   | 'messages'
 
   | 'unassignedEngagements'
@@ -45,6 +47,8 @@ export const EMPTY_NAV_BADGES: NavBadges = {
   notifications: 0,
 
   approvals: 0,
+
+  claims: 0,
 
   messages: 0,
 
@@ -95,6 +99,8 @@ const NAV_ID_TO_BADGE_KEY: Partial<Record<string, NavBadgeKey>> = {
   documents: 'pendingDocuments',
 
   approvals: 'approvals',
+
+  claims: 'claims',
 
   messages: 'messages',
 

@@ -431,32 +431,12 @@ router.get('/pending-count', requirePermission('approvals', 'view'), async (req:
       },
     });
 
+    // Workflow approvals only — Food–Travel claims live under /claims (do not inflate this badge).
     const count = inProgress.filter((r) =>
       isPendingApproverForUser(userId, role, r)
     ).length;
 
-    let expenseClaimCount = 0;
-    if (['Partner', 'Admin'].includes(role)) {
-      expenseClaimCount = await prisma.expenseClaim.count({
-        where: {
-          firmId,
-          claimStatus: { in: ['pending_approval', 'partially_approved'] },
-        },
-      });
-    } else if (role === 'Manager') {
-      expenseClaimCount = await prisma.expenseClaimManagerApproval.count({
-        where: {
-          managerId: userId,
-          status: 'pending',
-          claim: {
-            firmId,
-            claimStatus: { in: ['pending_approval', 'partially_approved'] },
-          },
-        },
-      });
-    }
-
-    res.json({ count: count + expenseClaimCount });
+    res.json({ count });
   } catch (err) {
     logger.error('Failed to get pending count', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to get count' });

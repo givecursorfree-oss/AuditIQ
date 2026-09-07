@@ -206,15 +206,19 @@ export default function Approvals() {
     }
   }
 
+  // Tab badge must match the visible Pending list (not nav/claims totals).
+  const pendingTabBadge =
+    view === 'pending' ? filteredRequests.length : pendingCount;
+
   const viewTabs = useMemo(
     () =>
       [
-        { key: 'pending' as const, icon: Clock, label: 'Pending', badge: pendingCount },
+        { key: 'pending' as const, icon: Clock, label: 'Pending', badge: pendingTabBadge },
         { key: 'submitted' as const, icon: Send, label: 'My Requests' },
         { key: 'completed' as const, icon: Check, label: 'Completed' },
         ...(isAdmin ? [{ key: 'workflows' as const, icon: Settings, label: 'Workflows' }] : []),
       ],
-    [isAdmin, pendingCount]
+    [isAdmin, pendingTabBadge]
   );
 
   const emptyText =
