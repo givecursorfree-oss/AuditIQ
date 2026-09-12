@@ -270,7 +270,9 @@ export interface Attendance {
   gpsLng?: number | null;
   gpsAccuracy?: number | null;
   ipAddress?: string | null;
-  user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email'> & { role?: string };
+  user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email' | 'role' | 'designation'> & {
+    hierarchyLevel?: { title: string } | null;
+  };
   office?: { name: string };
 }
 

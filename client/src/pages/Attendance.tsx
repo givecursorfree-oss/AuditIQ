@@ -26,10 +26,22 @@ import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
 import { appToast, gooeyToast } from '@/context/AppToastContext';
 import { downloadCsv } from '@/lib/downloadCsv';
+import { formatStaffTitle } from '@/lib/roleLabels';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const PLACES: PlaceOfWork[] = ['Office', 'Client Place', 'Work from Home'];
 const FIRM_ATTENDANCE_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
+
+function defaultExportRange() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const last = new Date(y, now.getMonth() + 1, 0).getDate();
+  return {
+    from: `${y}-${m}-01`,
+    to: `${y}-${m}-${String(last).padStart(2, '0')}`,
+  };
+}
 
 export default function AttendancePage() {
   const { user } = useAuth();
@@ -52,6 +64,8 @@ export default function AttendancePage() {
   const [clientOptions, setClientOptions] = useState<string[]>([]);
   const [checkingIn, setCheckingIn] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportFrom, setExportFrom] = useState(() => defaultExportRange().from);
+  const [exportTo, setExportTo] = useState(() => defaultExportRange().to);
   const [selectedDate, setSelectedDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
@@ -324,19 +338,28 @@ export default function AttendancePage() {
     );
   };
 
-  const exportAttendanceMonth = async () => {
+  const exportAttendanceRange = async () => {
     if (!canViewFirmAttendance || exporting) return;
-    const monthKey = `${curYear}-${String(curMonth).padStart(2, '0')}`;
+    if (!exportFrom || !exportTo) {
+      await appAlert({ title: 'Select dates', message: 'Choose from and to dates for the export.' });
+      return;
+    }
+    if (exportFrom > exportTo) {
+      await appAlert({ title: 'Invalid range', message: 'From date must be on or before to date.' });
+      return;
+    }
     setExporting(true);
     try {
-      const { data } = await api.get<Attendance[]>(`/attendance?month=${monthKey}`);
+      const { data } = await api.get<Attendance[]>('/attendance', {
+        params: { from: exportFrom, to: exportTo },
+      });
       downloadCsv(
-        `attendance-${monthKey}.csv`,
-        ['Date', 'Staff', 'Role', 'Status', 'Location', 'Client', 'Check-in', 'Check-out', 'Hours', 'Method'],
+        `attendance-${exportFrom}_to_${exportTo}.csv`,
+        ['Date', 'Staff', 'Designation', 'Status', 'Location', 'Client', 'Check-in', 'Check-out', 'Hours', 'Method'],
         data.map((record) => [
           new Date(record.date).toLocaleDateString('en-IN'),
           record.user ? `${record.user.firstName} ${record.user.lastName}`.trim() : '',
-          record.user?.role || '',
+          record.user ? formatStaffTitle(record.user) : '',
           record.status,
           record.location || '',
           record.clientName || '',
@@ -347,7 +370,7 @@ export default function AttendancePage() {
         ])
       );
     } catch {
-      await appAlert({ title: 'Export failed', message: 'Could not export attendance records for this month.' });
+      await appAlert({ title: 'Export failed', message: 'Could not export attendance records for this date range.' });
     } finally {
       setExporting(false);
     }
@@ -359,12 +382,32 @@ export default function AttendancePage() {
         title="Attendance"
         description={`${MONTHS[curMonth - 1]} ${curYear}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             {canViewFirmAttendance && (
-              <Button type="button" size="sm" variant="outline" onClick={() => void exportAttendanceMonth()} disabled={exporting}>
-                <DownloadSimple size={16} className="mr-1" />
-                {exporting ? 'Exporting…' : 'Export month'}
-              </Button>
+              <>
+                <label className="block">
+                  <span className="text-xs text-muted-foreground">From</span>
+                  <Input
+                    type="date"
+                    className="mt-1 h-8 w-auto"
+                    value={exportFrom}
+                    onChange={(e) => setExportFrom(e.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs text-muted-foreground">To</span>
+                  <Input
+                    type="date"
+                    className="mt-1 h-8 w-auto"
+                    value={exportTo}
+                    onChange={(e) => setExportTo(e.target.value)}
+                  />
+                </label>
+                <Button type="button" size="sm" variant="outline" onClick={() => void exportAttendanceRange()} disabled={exporting}>
+                  <DownloadSimple size={16} className="mr-1" />
+                  {exporting ? 'Exporting…' : 'Export'}
+                </Button>
+              </>
             )}
             <Button type="button" size="sm" variant="outline" onClick={prevMonth} aria-label="Previous month">
               <ChevronLeft size={16} />

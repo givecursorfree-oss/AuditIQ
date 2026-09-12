@@ -158,6 +158,7 @@ model User {
   expenseClaimsReviewed    ExpenseClaim[]     @relation("ExpenseClaimManager")
   expenseClaimsPaid        ExpenseClaim[]     @relation("ExpenseClaimPayer")
   expenseClaimsAsPayer     ExpenseClaim[]     @relation("ExpenseClaimExpensePayer")
+  expenseClaimsVisitedBy   ExpenseClaim[]     @relation("ExpenseClaimVisitedBy")
   expenseClaimParticipants ExpenseClaimParticipant[]
   expenseClaimManagerApprovals ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalManager")
   expenseClaimManagerReviews   ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalReviewer")
@@ -899,6 +900,8 @@ model FirmLookupValue {
   /// attendance_client | activity_classification | firm_holiday (YYYY-MM-DD)
   kind      String
   value     String
+  /// Optional display label (e.g. festival name for firm_holiday)
+  label     String?
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1904,6 +1907,18 @@ model ExpenseClaim {
   workType            String?
   workTypeOther       String?
   description         String?   @db.Text
+  // Travel v0.2 (claimType === travel)
+  travelTime          String?   // HH:mm
+  jurisdiction        String?
+  centreState         String?
+  location            String?
+  mapLink             String?
+  visitedById         String?
+  visitedBy           User?     @relation("ExpenseClaimVisitedBy", fields: [visitedById], references: [id])
+  period              String?
+  issue               String?   @db.Text
+  replyFromDepartment String?   @db.Text
+  travelMode          String?   // cab | own_vehicle
   claimStatus         String    @default("pending_approval") // pending_approval | partially_approved | approved | rejected
   processingStatus    String    @default("unprocessed") // unprocessed | in_batch | partner_approved | accounts_approved | paid
   policyFlags         Json?
@@ -1940,6 +1955,7 @@ model ExpenseClaim {
   @@index([batchId])
   @@index([claimType])
   @@index([expensePayerId])
+  @@index([visitedById])
 }
 
 model ExpenseClaimParticipant {
@@ -2001,7 +2017,7 @@ model ClaimBatch {
   firm                Firm      @relation(fields: [firmId], references: [id], onDelete: Cascade)
   label               String
   batchType           String?   // food | travel | mixed
-  status              String    @default("draft") // draft | partner_approved | accounts_approved | paid
+  status              String    @default("sent") // sent | partner_approved | accounts_approved | paid | rejected
   createdById         String
   createdBy           User      @relation("ClaimBatchCreator", fields: [createdById], references: [id])
   partnerApprovedById String?

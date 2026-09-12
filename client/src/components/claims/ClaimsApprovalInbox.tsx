@@ -15,8 +15,13 @@ import { ClaimValidationPanel } from '@/components/claims/ClaimValidationPanel';
 import {
   CLAIM_TYPE_LABELS,
   MANAGER_APPROVAL_STATUS_LABELS,
+  batchRef,
+  batchStatusDisplay,
+  claimDetailPath,
+  claimHasRequiredProof,
   claimSliderStep,
   formatInr,
+  isBatchAwaitingPartner,
   managerApprovalBadgeVariant,
   ocrMarkerPercent,
   percentOfClaimed,
@@ -30,6 +35,17 @@ import { useAuth } from '@/context/AuthContext';
 import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { EmptyState } from '@/components/layout/EmptyState';
 import PageLoading from '@/components/layout/PageLoading';
+import { PanelCard } from '@/components/layout/PanelCard';
+import { Link } from 'react-router-dom';
+
+type BatchApprovalRow = {
+  id: string;
+  label: string;
+  status: string;
+  claimCount: number;
+  totalAmount: number;
+  claims?: StaffClaimRow[];
+};
 
 function ManagerApprovalsStrip({ claim }: { claim: StaffClaimRow }) {
   const rows = claim.managerApprovals ?? [];
@@ -88,6 +104,11 @@ export function ClaimsApprovalInbox() {
   const { user } = useAuth();
   const isPartnerOrAdmin = user?.role === 'Partner' || user?.role === 'Admin';
   const [claims, setClaims] = useState<StaffClaimRow[]>([]);
+  const [batches, setBatches] = useState<BatchApprovalRow[]>([]);
+  const [batchExpanded, setBatchExpanded] = useState<Record<string, boolean>>({});
+  const [batchRejectId, setBatchRejectId] = useState<string | null>(null);
+  const [batchRejectReason, setBatchRejectReason] = useState('');
+  const [batchBusyId, setBatchBusyId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
   const [partialId, setPartialId] = useState<string | null>(null);
@@ -114,10 +135,19 @@ export function ClaimsApprovalInbox() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadBatches = useCallback(() => {
+    if (!isPartnerOrAdmin) return;
+    void api
+      .get<{ batches: BatchApprovalRow[] }>('/claim-batches')
+      .then((r) => setBatches((r.data.batches ?? []).filter((b) => isBatchAwaitingPartner(b.status))))
+      .catch(() => setBatches([]));
+  }, [isPartnerOrAdmin]);
+
   useEffect(() => {
     setLoading(true);
     load();
-  }, [load]);
+    loadBatches();
+  }, [load, loadBatches]);
 
   useEffect(() => {
     const needsOcrPoll = claims.some((c) => (c.ocrStatus ?? 'pending') === 'pending');
@@ -171,7 +201,7 @@ export function ClaimsApprovalInbox() {
   }
 
   async function approve(c: StaffClaimRow) {
-    if (!c.receipts.length) {
+    if (!claimHasRequiredProof(c)) {
       void appAlert({ title: 'Receipt required', message: 'Upload a receipt before this claim can be approved.' });
       return;
     }
@@ -191,6 +221,42 @@ export function ClaimsApprovalInbox() {
       void appAlert({ title: 'Approve failed', message: formatApiError(e) });
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function partnerApproveBatch(id: string) {
+    setBatchBusyId(id);
+    try {
+      await api.patch(`/claim-batches/${id}/partner-approve`, {});
+      appToast({ message: 'Batch approved', variant: 'success' });
+      loadBatches();
+    } catch (e) {
+      void appAlert({ title: 'Approve failed', message: formatApiError(e) });
+    } finally {
+      setBatchBusyId(null);
+    }
+  }
+
+  async function partnerRejectBatch(id: string) {
+    if (!batchRejectReason.trim()) return;
+    const ok = await appConfirm({
+      title: 'Reject batch',
+      message: 'Reject this batch and return claims to unprocessed?',
+      confirmLabel: 'Reject',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBatchBusyId(id);
+    try {
+      await api.patch(`/claim-batches/${id}/partner-reject`, { reason: batchRejectReason.trim() });
+      appToast({ message: 'Batch rejected', variant: 'success' });
+      setBatchRejectId(null);
+      setBatchRejectReason('');
+      loadBatches();
+    } catch (e) {
+      void appAlert({ title: 'Reject failed', message: formatApiError(e) });
+    } finally {
+      setBatchBusyId(null);
     }
   }
 
@@ -254,18 +320,116 @@ export function ClaimsApprovalInbox() {
 
   if (loading) return <PageLoading className="py-8" label="Loading claims…" />;
   if (loadError) return <ErrorBanner message={loadError} onRetry={() => { setLoading(true); load(); }} />;
-  if (claims.length === 0) {
-    return (
-      <EmptyState
-        title="No pending claims"
-        description="Food, travel, and group claims routed to you will appear here."
-        illustration="person-quiet"
-        className="py-6"
-      />
-    );
-  }
 
   return (
+    <div className="space-y-6">
+      {isPartnerOrAdmin && (
+        <PanelCard title="Pending Approval">
+          {batches.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">No batches pending approval.</p>
+          ) : (
+            <ul className="divide-y text-sm">
+              {batches.map((b) => {
+                const open = Boolean(batchExpanded[b.id]);
+                const statusUi = batchStatusDisplay(b.status);
+                return (
+                  <li key={b.id} className="py-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1"
+                        onClick={() => setBatchExpanded((e) => ({ ...e, [b.id]: !e[b.id] }))}
+                        aria-expanded={open}
+                      >
+                        {open ? <CaretDown size={14} /> : <CaretRight size={14} />}
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span>{b.label}</span>
+                          <Badge variant="outline" className="font-mono text-[10px]">
+                            {batchRef(b.id)}
+                          </Badge>
+                          <Badge variant="warning">{statusUi.primary}</Badge>
+                          {statusUi.secondary && (
+                            <Badge variant="secondary" className="font-normal">
+                              {statusUi.secondary}
+                            </Badge>
+                          )}
+                          <span className="text-muted-foreground">
+                            · {b.claimCount} claims · {formatInr(b.totalAmount)}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="success"
+                          disabled={batchBusyId === b.id}
+                          onClick={() => void partnerApproveBatch(b.id)}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={batchBusyId === b.id}
+                          onClick={() => {
+                            setBatchRejectId(b.id);
+                            setBatchRejectReason('');
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                    {batchRejectId === b.id && (
+                      <div className="flex flex-wrap items-end gap-2 pl-5">
+                        <div className="flex-1 min-w-[12rem]">
+                          <Label>Reason</Label>
+                          <Input value={batchRejectReason} onChange={(e) => setBatchRejectReason(e.target.value)} />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={!batchRejectReason.trim() || batchBusyId === b.id}
+                          onClick={() => void partnerRejectBatch(b.id)}
+                        >
+                          Confirm reject
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setBatchRejectId(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    )}
+                    {open && (
+                      <ul className="ml-5 space-y-2 border-l border-border pl-3 text-xs">
+                        {(b.claims ?? []).map((c) => (
+                          <li key={c.id} className="flex flex-wrap items-center gap-2 py-1">
+                            <span>
+                              {staffName(c.staff)} · {CLAIM_TYPE_LABELS[c.claimType] ?? c.claimType} ·{' '}
+                              {formatInr(c.approvedAmount ?? c.amount)} · {c.receipts?.length ?? 0} receipt(s)
+                            </span>
+                            <Button size="sm" variant="outline" className="h-7" asChild>
+                              <Link to={claimDetailPath(c.id)}>Open claim</Link>
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </PanelCard>
+      )}
+
+      {claims.length === 0 ? (
+        <EmptyState
+          title="No pending claims"
+          description="Food, travel, and group claims routed to you will appear here."
+          illustration="person-quiet"
+          className="py-6"
+        />
+      ) : (
     <div className="space-y-3">
       {claims.map((c) => {
         const count = c.participantCount ?? c.participants?.length ?? 1;
@@ -500,7 +664,7 @@ export function ClaimsApprovalInbox() {
             <footer className="border-t border-border bg-muted/20 px-3 py-3 sm:px-4">
               <ClaimActionBar
                 isBusy={isBusy}
-                hasReceipt={c.receipts.length > 0}
+                hasReceipt={claimHasRequiredProof(c)}
                 onAccept={() => void approve(c)}
                 onLimit={() => {
                   setPartialId(c.id);
@@ -528,6 +692,8 @@ export function ClaimsApprovalInbox() {
           }}
           onIndexChange={(i) => setLightbox((lb) => (lb ? { ...lb, index: i } : null))}
         />
+      )}
+    </div>
       )}
     </div>
   );

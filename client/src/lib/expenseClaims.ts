@@ -31,6 +31,68 @@ export const PROCESSING_STATUS_LABELS: Record<string, string> = {
   paid: 'Paid',
 };
 
+export const BATCH_STATUS_LABELS: Record<string, string> = {
+  draft: 'Sent', // legacy
+  sent: 'Sent',
+  partner_approved: 'Approved',
+  accounts_approved: 'Approved (accounts)',
+  paid: 'Paid',
+  rejected: 'Rejected',
+};
+
+/** Spec history buckets: Sent | Pending Approval | Approved */
+export type BatchHistoryFilter = 'sent' | 'pending_approval' | 'approved' | 'rejected' | 'all';
+
+export const BATCH_HISTORY_FILTERS: { id: BatchHistoryFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'sent', label: 'Sent' },
+  { id: 'pending_approval', label: 'Pending Approval' },
+  { id: 'approved', label: 'Approved' },
+  { id: 'rejected', label: 'Rejected' },
+];
+
+export function normalizeBatchStatus(status: string): string {
+  return status === 'draft' ? 'sent' : status;
+}
+
+export function isBatchAwaitingPartner(status: string): boolean {
+  const s = normalizeBatchStatus(status);
+  return s === 'sent';
+}
+
+export function batchMatchesHistoryFilter(status: string, filter: BatchHistoryFilter): boolean {
+  const s = normalizeBatchStatus(status);
+  if (filter === 'all') return true;
+  if (filter === 'sent' || filter === 'pending_approval') return s === 'sent';
+  if (filter === 'approved') return s === 'partner_approved' || s === 'accounts_approved' || s === 'paid';
+  if (filter === 'rejected') return s === 'rejected';
+  return true;
+}
+
+/** Primary + secondary labels for a batch row (Sent · Pending Approval). */
+export function batchStatusDisplay(status: string): { primary: string; secondary?: string } {
+  const s = normalizeBatchStatus(status);
+  if (s === 'sent') return { primary: 'Sent', secondary: 'Pending Approval' };
+  if (s === 'partner_approved') return { primary: 'Approved', secondary: 'Partner' };
+  if (s === 'accounts_approved') return { primary: 'Approved', secondary: 'Accounts' };
+  if (s === 'paid') return { primary: 'Paid' };
+  if (s === 'rejected') return { primary: 'Rejected' };
+  return { primary: BATCH_STATUS_LABELS[status] ?? status };
+}
+
+export function batchRef(id: string): string {
+  return id.replace(/-/g, '').slice(0, 8).toUpperCase();
+}
+
+export function claimDetailPath(claimId: string): string {
+  return `/claims/detail/${claimId}`;
+}
+
+export const TRAVEL_MODE_LABELS: Record<string, string> = {
+  cab: 'Rapido / Uber / Other Cab',
+  own_vehicle: 'Own Vehicle',
+};
+
 export interface ClaimEngagementRef {
   id: string;
   title: string;
@@ -65,6 +127,18 @@ export interface StaffClaimRow {
   approvedAmount?: string | number | null;
   workType?: string | null;
   workTypeOther?: string | null;
+  description?: string | null;
+  travelTime?: string | null;
+  jurisdiction?: string | null;
+  centreState?: string | null;
+  location?: string | null;
+  mapLink?: string | null;
+  visitedById?: string | null;
+  visitedBy?: { id: string; firstName: string; lastName: string } | null;
+  period?: string | null;
+  issue?: string | null;
+  replyFromDepartment?: string | null;
+  travelMode?: string | null;
   claimStatus: string;
   processingStatus: string;
   participantCount?: number;
@@ -82,9 +156,16 @@ export interface StaffClaimRow {
   expensePayer?: { id: string; firstName: string; lastName: string } | null;
   client?: { id: string; name: string } | null;
   engagement?: ClaimEngagementRef | null;
+  batchId?: string | null;
   receipts: { id: string; fileName: string; mimeType?: string | null }[];
   participants?: ClaimParticipantRow[];
   managerApprovals?: ClaimManagerApprovalRow[];
+}
+
+/** Accept disabled when cab/food lacks receipt; own_vehicle travel may have none. */
+export function claimHasRequiredProof(claim: Pick<StaffClaimRow, 'claimType' | 'travelMode' | 'receipts'>): boolean {
+  if (claim.claimType === 'travel' && claim.travelMode === 'own_vehicle') return true;
+  return (claim.receipts?.length ?? 0) > 0;
 }
 
 export function formatInr(amount: string | number): string {

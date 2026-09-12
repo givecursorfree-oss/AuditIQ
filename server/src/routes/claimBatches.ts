@@ -1,8 +1,16 @@
 import { Router, Response } from 'express';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
 import { logClaimAudit } from '../lib/claimAudit.js';
+import {
+  buildClaimDataFromBatch,
+  generateApprovalExcel,
+  generateApprovalPdf,
+} from '../lib/claimApprovalExport.js';
 
 const router = Router();
 router.use(authenticate);
@@ -12,10 +20,42 @@ const batchInclude = {
   partnerApprovedBy: { select: { firstName: true, lastName: true } },
   claims: {
     include: {
-      staff: { select: { firstName: true, lastName: true } },
+      staff: { select: { id: true, firstName: true, lastName: true } },
+      expensePayer: { select: { firstName: true, lastName: true } },
       client: { select: { name: true } },
       engagement: { select: { title: true } },
-      receipts: { select: { id: true, fileName: true } },
+      managerReviewedBy: { select: { firstName: true, lastName: true } },
+      receipts: { select: { id: true, fileName: true, mimeType: true } },
+      participants: {
+        include: {
+          user: { select: { firstName: true, lastName: true } },
+          engagement: { select: { title: true } },
+        },
+      },
+      managerApprovals: {
+        include: { manager: { select: { firstName: true, lastName: true } } },
+      },
+    },
+  },
+};
+
+const exportInclude = {
+  claims: {
+    include: {
+      staff: { select: { firstName: true, lastName: true } },
+      expensePayer: { select: { firstName: true, lastName: true } },
+      client: { select: { name: true } },
+      engagement: { select: { title: true } },
+      managerReviewedBy: { select: { firstName: true, lastName: true } },
+      participants: {
+        include: {
+          user: { select: { firstName: true, lastName: true } },
+          engagement: { select: { title: true } },
+        },
+      },
+      managerApprovals: {
+        include: { manager: { select: { firstName: true, lastName: true } } },
+      },
     },
   },
 };
@@ -26,10 +66,15 @@ function batchTotal(claims: { approvedAmount: { toString(): string } | null; amo
 
 /** POST /api/claim-batches — group manager-approved claims */
 router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
-  const body = z.object({
-    label: z.string().min(1),
-    claimIds: z.array(z.string()).min(1),
-  }).parse(req.body);
+  const body = z
+    .object({
+      label: z.string().min(1),
+      claimIds: z.array(z.string()).min(1),
+      expenseDateFrom: z.string().optional(),
+      expenseDateTo: z.string().optional(),
+      mode: z.enum(['day', 'range', 'manual']).optional(),
+    })
+    .parse(req.body);
   const firmId = req.user!.firmId!;
   const claims = await prisma.expenseClaim.findMany({
     where: {
@@ -47,7 +92,7 @@ router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthReque
   const batchType = types.size === 1 ? [...types][0]! : 'mixed';
   const batch = await prisma.$transaction(async (tx) => {
     const b = await tx.claimBatch.create({
-      data: { firmId, label: body.label, batchType, createdById: req.user!.id, status: 'draft' },
+      data: { firmId, label: body.label, batchType, createdById: req.user!.id, status: 'sent' },
     });
     await tx.expenseClaim.updateMany({
       where: { id: { in: body.claimIds } },
@@ -55,7 +100,18 @@ router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthReque
     });
     for (const id of body.claimIds) {
       await tx.claimAuditEvent.create({
-        data: { claimId: id, batchId: b.id, actorId: req.user!.id, action: 'batch_created', details: { batchId: b.id } },
+        data: {
+          claimId: id,
+          batchId: b.id,
+          actorId: req.user!.id,
+          action: 'batch_created',
+          details: {
+            batchId: b.id,
+            mode: body.mode,
+            expenseDateFrom: body.expenseDateFrom,
+            expenseDateTo: body.expenseDateTo,
+          },
+        },
       });
     }
     return b;
@@ -93,7 +149,7 @@ router.get('/:id', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (
 
 router.patch('/:id/partner-approve', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response) => {
   const batch = await prisma.claimBatch.findFirst({ where: { id: String(req.params.id), firmId: req.user!.firmId! } });
-  if (!batch || batch.status !== 'draft') {
+  if (!batch || !['sent', 'draft'].includes(batch.status)) {
     res.status(400).json({ error: 'Batch not ready' });
     return;
   }
@@ -113,6 +169,41 @@ router.patch('/:id/partner-approve', authorize('Partner', 'Admin'), async (req: 
     return b;
   });
   res.json(updated);
+});
+
+router.patch('/:id/partner-reject', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response) => {
+  const body = z.object({ reason: z.string().min(1) }).parse(req.body);
+  const batch = await prisma.claimBatch.findFirst({
+    where: { id: String(req.params.id), firmId: req.user!.firmId! },
+    include: { claims: { select: { id: true } } },
+  });
+  if (!batch || !['sent', 'draft'].includes(batch.status)) {
+    res.status(400).json({ error: 'Batch not ready' });
+    return;
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.claimBatch.update({
+      where: { id: batch.id },
+      data: { status: 'rejected' },
+    });
+    const claimIds = batch.claims.map((c) => c.id);
+    await tx.expenseClaim.updateMany({
+      where: { id: { in: claimIds } },
+      data: { processingStatus: 'unprocessed', batchId: null },
+    });
+    for (const id of claimIds) {
+      await tx.claimAuditEvent.create({
+        data: {
+          claimId: id,
+          batchId: batch.id,
+          actorId: req.user!.id,
+          action: 'batch_partner_rejected',
+          details: { reason: body.reason },
+        },
+      });
+    }
+  });
+  res.json({ ok: true });
 });
 
 router.patch('/:id/accounts-approve', authorize('Partner', 'Admin', 'Accounts'), async (req: AuthRequest, res: Response) => {
@@ -159,6 +250,53 @@ router.patch('/:id/mark-paid', authorize('Partner', 'Admin', 'Accounts'), async 
     }
   });
   res.json({ ok: true });
+});
+
+async function loadBatchForExport(req: AuthRequest, id: string) {
+  return prisma.claimBatch.findFirst({
+    where: { id, firmId: req.user!.firmId! },
+    include: exportInclude,
+  });
+}
+
+/** GET /api/claim-batches/:id/export.xlsx */
+router.get('/:id/export.xlsx', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (req: AuthRequest, res: Response) => {
+  const batch = await loadBatchForExport(req, String(req.params.id));
+  if (!batch) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  const data = buildClaimDataFromBatch(batch);
+  const tmp = path.join(os.tmpdir(), `claim-batch-${batch.id.slice(0, 8)}-${Date.now()}.xlsx`);
+  try {
+    await generateApprovalExcel(data, tmp);
+    res.download(tmp, `claim-batch-${batch.id.slice(0, 8)}.xlsx`, () => {
+      fs.unlink(tmp, () => {});
+    });
+  } catch {
+    fs.unlink(tmp, () => {});
+    res.status(500).json({ error: 'Export failed' });
+  }
+});
+
+/** GET /api/claim-batches/:id/export.pdf */
+router.get('/:id/export.pdf', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (req: AuthRequest, res: Response) => {
+  const batch = await loadBatchForExport(req, String(req.params.id));
+  if (!batch) {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  const data = buildClaimDataFromBatch(batch);
+  const tmp = path.join(os.tmpdir(), `claim-batch-${batch.id.slice(0, 8)}-${Date.now()}.pdf`);
+  try {
+    await generateApprovalPdf(data, tmp);
+    res.download(tmp, `claim-batch-${batch.id.slice(0, 8)}.pdf`, () => {
+      fs.unlink(tmp, () => {});
+    });
+  } catch {
+    fs.unlink(tmp, () => {});
+    res.status(500).json({ error: 'Export failed' });
+  }
 });
 
 /** GET /api/claim-batches/:id/export.csv — reimbursement-style export */

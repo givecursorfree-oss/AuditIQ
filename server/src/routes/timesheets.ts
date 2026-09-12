@@ -4,6 +4,7 @@ import prisma from '../lib/prisma.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { canAttestTimesheets } from '../lib/gradeCapabilities.js';
+import { formatStaffTitle } from '../lib/staffTitle.js';
 
 const router = Router();
 router.use(authenticate);
@@ -12,6 +13,7 @@ const FIRM_TIMESHEET_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
 
 /** Users who appear on firm timesheets / attendance (exclude Client portal accounts). */
 const FIRM_MEMBER_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'] as const;
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 function canViewFirmTimesheets(role: string): boolean {
   return (FIRM_TIMESHEET_ROLES as readonly string[]).includes(role);
@@ -49,6 +51,31 @@ function monthBounds(month: string) {
     dayKeyEnd: dateOnly(`${nextMonth}-01`),
   };
 }
+
+/** Inclusive from/to (YYYY-MM-DD) → half-open IST bounds. */
+function rangeBounds(from: string, to: string) {
+  if (!YMD.test(from) || !YMD.test(to)) throw new Error('from/to must use YYYY-MM-DD format');
+  if (from > to) throw new Error('from must be on or before to');
+  const [y, m, d] = to.split('-').map(Number);
+  const next = new Date(y, m - 1, d + 1);
+  const nextKey = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+  return {
+    start: new Date(`${from}T00:00:00.000+05:30`),
+    end: new Date(`${nextKey}T00:00:00.000+05:30`),
+    dayKeyStart: dateOnly(from),
+    dayKeyEnd: dateOnly(nextKey),
+  };
+}
+
+const staffTitleSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  initials: true,
+  role: true,
+  designation: true,
+  hierarchyLevel: { select: { title: true } },
+} as const;
 
 function istDateKey(value: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -198,7 +225,7 @@ router.get('/firm', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const staff = await prisma.user.findMany({
       where: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } },
-      select: { id: true, firstName: true, lastName: true, initials: true, role: true },
+      select: staffTitleSelect,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
     const ids = staff.map((s) => s.id);
@@ -239,7 +266,7 @@ router.get('/firm', async (req: AuthRequest, res: Response): Promise<void> => {
         const a = attdByUser.get(s.id);
         const d = dayByUser.get(s.id);
         return {
-          user: s,
+          user: { ...s, title: formatStaffTitle(s) },
           totalHours: Math.round((h?._sum.hours ?? 0) * 100) / 100,
           entryCount: h?._count ?? 0,
           attestationStatus: d?.status ?? 'Draft',
@@ -263,7 +290,7 @@ router.get('/firm', async (req: AuthRequest, res: Response): Promise<void> => {
   }
 });
 
-/** GET /api/timesheets/firm/export?month=YYYY-MM — HR month CSV export. */
+/** GET /api/timesheets/firm/export?from=&to= or ?month=YYYY-MM — HR CSV export. */
 router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!canViewFirmTimesheets(req.user!.role)) {
@@ -276,15 +303,39 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const month = String(req.query.month || '');
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-      res.status(400).json({ error: 'month query required (YYYY-MM)' });
+    const fromQ = req.query.from ? String(req.query.from) : '';
+    const toQ = req.query.to ? String(req.query.to) : '';
+    const month = req.query.month ? String(req.query.month) : '';
+
+    let start: Date;
+    let end: Date;
+    let dayKeyStart: Date;
+    let dayKeyEnd: Date;
+    let fileLabel: string;
+
+    if (fromQ || toQ) {
+      if (!fromQ || !toQ) {
+        res.status(400).json({ error: 'from and to are both required (YYYY-MM-DD)' });
+        return;
+      }
+      try {
+        ({ start, end, dayKeyStart, dayKeyEnd } = rangeBounds(fromQ, toQ));
+      } catch (e) {
+        res.status(400).json({ error: (e as Error).message });
+        return;
+      }
+      fileLabel = `${fromQ}_to_${toQ}`;
+    } else if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      ({ start, end, dayKeyStart, dayKeyEnd } = monthBounds(month));
+      fileLabel = month;
+    } else {
+      res.status(400).json({ error: 'Provide from+to (YYYY-MM-DD) or month (YYYY-MM)' });
       return;
     }
-    const { start, end, dayKeyStart, dayKeyEnd } = monthBounds(month);
+
     const staff = await prisma.user.findMany({
       where: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } },
-      select: { id: true, firstName: true, lastName: true, role: true },
+      select: staffTitleSelect,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
     const ids = staff.map((member) => member.id);
@@ -362,7 +413,7 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
       dateStyle: 'short',
       timeStyle: 'short',
     });
-    const dateOnly = new Intl.DateTimeFormat('en-IN', {
+    const dateOnlyFmt = new Intl.DateTimeFormat('en-IN', {
       timeZone: 'Asia/Kolkata',
       dateStyle: 'short',
     });
@@ -377,9 +428,9 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
         const time = timeByKey.get(key);
         const attendance = attendanceByKey.get(key);
         return [
-          dateOnly.format(new Date(`${date}T12:00:00+05:30`)),
+          dateOnlyFmt.format(new Date(`${date}T12:00:00+05:30`)),
           member ? `${member.firstName} ${member.lastName}`.trim() : '',
-          member?.role || '',
+          member ? formatStaffTitle(member) : '',
           time?.hours.toFixed(2) || '0.00',
           time?.entries || 0,
           formatDateTime(time?.checkIn),
@@ -394,7 +445,7 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
     const headers = [
       'Date',
       'Staff',
-      'Role',
+      'Designation',
       'Hours',
       'Time entries',
       'First start',
@@ -408,7 +459,7 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
       .map((row) => row.map(csvCell).join(','))
       .join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="timesheets-${month}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="timesheets-${fileLabel}.csv"`);
     res.send(csv);
   } catch (err) {
     logger.error('Timesheet export error', { error: (err as Error).message });

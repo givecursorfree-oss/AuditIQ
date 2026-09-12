@@ -4,7 +4,7 @@ import {
   Phone, Envelope as Mail, MapPin, CreditCard, Buildings as Building, FileText, CurrencyDollar as DollarSign, Shield
 } from '@phosphor-icons/react';
 import api from '../services/api';
-import { appAlert } from '../context/AppDialogContext';
+import { appAlert, appConfirm } from '../context/AppDialogContext';
 import { getApiErrorMessage } from '@/lib/formPayload';
 import { useAuth } from '../context/AuthContext';
 import UserPresenceAvatar from '../components/UserPresenceAvatar';
@@ -20,6 +20,17 @@ import {
   type PresenceStatus,
 } from '@/lib/presence';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { formatStaffTitle } from '@/lib/roleLabels';
+import type { Role } from '@/types';
 
 interface EmployeeProfile {
   id: string;
@@ -91,8 +102,10 @@ interface Employee {
   role: string;
   designation?: string;
   phone?: string;
+  isActive?: boolean;
   reportsToId?: string;
   reportsTo?: { firstName: string; lastName: string };
+  hierarchyLevel?: { id: string; code: string; title: string } | null;
   employeeProfile?: EmployeeProfile;
   presenceStatus?: PresenceStatus;
 }
@@ -139,6 +152,18 @@ export default function Employees() {
 
   const isAdmin = user?.role === 'Partner' || user?.role === 'Admin';
   const canEdit = isAdmin || user?.role === 'Manager';
+  const canManagePeople = isAdmin || user?.role === 'HR';
+  const [showCreate, setShowCreate] = useState(false);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [createForm, setCreateForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    roleId: '',
+    designation: '',
+  });
+  const [creating, setCreating] = useState(false);
 
   const searchRef = useRef(search);
   searchRef.current = search;
@@ -155,6 +180,55 @@ export default function Employees() {
   }, []);
 
   useEffect(() => { void fetchEmployees(); }, [fetchEmployees]);
+
+  useEffect(() => {
+    if (!canManagePeople) return;
+    void api
+      .get<Role[]>('/admin/roles')
+      .then((r) => {
+        setRoles(r.data || []);
+        if (r.data?.[0]?.id) setCreateForm((f) => ({ ...f, roleId: f.roleId || r.data[0].id }));
+      })
+      .catch(() => setRoles([]));
+  }, [canManagePeople]);
+
+  async function createEmployee(e: React.FormEvent) {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      await api.post('/admin/users', createForm);
+      setShowCreate(false);
+      setCreateForm({
+        firstName: '',
+        lastName: '',
+        email: '',
+        password: '',
+        roleId: roles[0]?.id || '',
+        designation: '',
+      });
+      await fetchEmployees();
+      await appAlert({ title: 'Added', message: 'Employee account created.' });
+    } catch (err) {
+      await appAlert({ title: 'Could not add', message: getApiErrorMessage(err, 'Failed to create employee') });
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function deactivateEmployee(emp: Employee) {
+    const ok = await appConfirm({
+      title: 'Remove employee?',
+      message: `Deactivate ${emp.firstName} ${emp.lastName}?`,
+    });
+    if (!ok) return;
+    try {
+      await api.put(`/admin/users/${emp.id}`, { isActive: false });
+      if (selected?.id === emp.id) setSelected(null);
+      await fetchEmployees();
+    } catch (err) {
+      await appAlert({ title: 'Could not remove', message: getApiErrorMessage(err, 'Failed to deactivate') });
+    }
+  }
 
   async function fetchDetail(id: string) {
     try {
@@ -244,7 +318,18 @@ export default function Employees() {
 
   return (
     <AppPageContainer className="flex min-h-[min(100dvh-6rem,900px)] flex-col">
-      <PageHeader title="Employees" description="Statutory data and HR records" />
+      <PageHeader
+        title="Employees"
+        description="Statutory data and HR records"
+        actions={
+          canManagePeople ? (
+            <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
+              <Plus size={16} className="mr-1" />
+              Add employee
+            </Button>
+          ) : undefined
+        }
+      />
 
       <SplitPaneLayout
         hasSelection={!!selected}
@@ -310,8 +395,21 @@ export default function Employees() {
                   />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground truncate">{emp.firstName} {emp.lastName}</p>
-                    <p className="text-xs text-foreground-muted truncate">{emp.designation || emp.role}</p>
+                    <p className="text-xs text-foreground-muted truncate">{formatStaffTitle(emp)}</p>
                   </div>
+                  {canManagePeople && !['Partner', 'Admin'].includes(emp.role) && (
+                    <button
+                      type="button"
+                      className="p-1.5 rounded hover:bg-red-50 text-foreground-muted hover:text-red-600"
+                      aria-label={`Remove ${emp.firstName}`}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        void deactivateEmployee(emp);
+                      }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                   <Status
                     status={normalizePresenceStatus(emp.presenceStatus)}
                     className="shrink-0 border-0 bg-transparent px-0 py-0 shadow-none"
@@ -605,6 +703,89 @@ export default function Employees() {
           )
         }
       />
+
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add employee</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => void createEmployee(e)} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="emp-first">First name</Label>
+                <Input
+                  id="emp-first"
+                  value={createForm.firstName}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, firstName: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="emp-last">Last name</Label>
+                <Input
+                  id="emp-last"
+                  value={createForm.lastName}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, lastName: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="emp-email">Email</Label>
+                <Input
+                  id="emp-email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="emp-password">Password</Label>
+                <Input
+                  id="emp-password"
+                  type="password"
+                  value={createForm.password}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
+                  required
+                  minLength={8}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="emp-role">Role</Label>
+                <select
+                  id="emp-role"
+                  className="input-field w-full"
+                  value={createForm.roleId}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, roleId: e.target.value }))}
+                  required
+                >
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="emp-designation">Designation</Label>
+                <Input
+                  id="emp-designation"
+                  value={createForm.designation}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, designation: e.target.value }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowCreate(false)} disabled={creating}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creating}>
+                {creating ? 'Creating…' : 'Add'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppPageContainer>
   );
 }

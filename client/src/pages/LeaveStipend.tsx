@@ -94,8 +94,10 @@ export default function LeaveStipend() {
     workDate: new Date().toISOString().slice(0, 10),
     reason: '',
   });
-  const [holidays, setHolidays] = useState<string[]>([]);
+  const [holidays, setHolidays] = useState<{ id: string; date: string; name: string }[]>([]);
   const [holidayDate, setHolidayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [holidayName, setHolidayName] = useState('');
+  const [editingHolidayId, setEditingHolidayId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [applyForm, setApplyForm] = useState({
@@ -135,8 +137,8 @@ export default function LeaveStipend() {
     if (canManageHolidays) {
       tasks.push(
         api
-          .get<{ values: string[] }>('/hr-masters/lookups?kind=firm_holiday')
-          .then((r) => setHolidays(r.data.values || []))
+          .get<{ holidays: { id: string; date: string; name: string }[] }>('/hr-masters/holidays')
+          .then((r) => setHolidays(r.data.holidays || []))
           .catch(() => setHolidays([]))
       );
     }
@@ -259,12 +261,45 @@ export default function LeaveStipend() {
 
   async function addHoliday() {
     try {
-      await api.post('/hr-masters/holidays', { date: holidayDate });
-      await appAlert({ title: 'Holiday added', message: `${holidayDate} is on the firm holiday list (comp-off eligible).` });
+      if (editingHolidayId) {
+        await api.patch(`/hr-masters/holidays/${editingHolidayId}`, {
+          date: holidayDate,
+          name: holidayName,
+        });
+        await appAlert({ title: 'Holiday updated', message: 'Firm holiday saved.' });
+        setEditingHolidayId(null);
+      } else {
+        await api.post('/hr-masters/holidays', { date: holidayDate, name: holidayName || undefined });
+        await appAlert({
+          title: 'Holiday added',
+          message: `${holidayDate}${holidayName ? ` (${holidayName})` : ''} is on the firm holiday list (comp-off eligible).`,
+        });
+      }
+      setHolidayName('');
       await load();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
-      await appAlert({ title: 'Could not add', message: err?.response?.data?.error || 'Failed' });
+      await appAlert({ title: 'Could not save', message: err?.response?.data?.error || 'Failed' });
+    }
+  }
+
+  async function editHoliday(h: { id: string; date: string; name: string }) {
+    setEditingHolidayId(h.id);
+    setHolidayDate(h.date);
+    setHolidayName(h.name || '');
+  }
+
+  async function deleteHoliday(id: string) {
+    try {
+      await api.delete(`/hr-masters/holidays/${id}`);
+      if (editingHolidayId === id) {
+        setEditingHolidayId(null);
+        setHolidayName('');
+      }
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      await appAlert({ title: 'Could not delete', message: err?.response?.data?.error || 'Failed' });
     }
   }
 
@@ -628,16 +663,56 @@ export default function LeaveStipend() {
                 onChange={(e) => setHolidayDate(e.target.value)}
               />
             </label>
+            <label className="block min-w-[12rem] flex-1">
+              <span className="text-sm text-muted-foreground">Name of the Festival</span>
+              <input
+                type="text"
+                className="input-field mt-1"
+                value={holidayName}
+                onChange={(e) => setHolidayName(e.target.value)}
+              />
+            </label>
             <Button type="button" onClick={() => void addHoliday()}>
-              Add holiday
+              {editingHolidayId ? 'Save holiday' : 'Add holiday'}
             </Button>
+            {editingHolidayId && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingHolidayId(null);
+                  setHolidayName('');
+                  setHolidayDate(new Date().toISOString().slice(0, 10));
+                }}
+              >
+                Cancel
+              </Button>
+            )}
           </div>
           {holidays.length === 0 ? (
             <EmptyState title="No firm holidays configured yet" illustration="box" illustrationSize="sm" />
           ) : (
-            <ul className="text-sm space-y-1">
-              {holidays.map((d) => (
-                <li key={d}>{new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}</li>
+            <ul className="text-sm space-y-2">
+              {holidays.map((h) => (
+                <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+                  <span>
+                    {new Date(`${h.date}T00:00:00`).toLocaleDateString('en-IN', {
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                    {h.name ? ` — ${h.name}` : ''}
+                  </span>
+                  <span className="flex gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => void editHoliday(h)}>
+                      Edit
+                    </Button>
+                    <Button type="button" size="sm" variant="destructive" onClick={() => void deleteHoliday(h.id)}>
+                      Delete
+                    </Button>
+                  </span>
+                </li>
               ))}
             </ul>
           )}

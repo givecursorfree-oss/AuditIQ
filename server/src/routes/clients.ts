@@ -373,7 +373,7 @@ router.put('/:id', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: A
 });
 
 // DELETE /api/clients/:id
-router.delete('/:id', authorize('Partner'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const result = await prisma.client.updateMany({
       where: { id: req.params.id, firmId: req.user!.firmId! },

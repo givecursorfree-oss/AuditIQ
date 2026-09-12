@@ -77,6 +77,7 @@ const LateHoursClaimForm = lazyRetry(() => import('./pages/claims/LateHoursClaim
 const DeptVisitClaimForm = lazyRetry(() => import('./pages/claims/DeptVisitClaimForm').then((m) => ({ default: m.DeptVisitClaimForm })));
 const ClaimBatchesPage = lazyRetry(() => import('./pages/claims/ClaimBatchesPage'));
 const ClaimsHub = lazyRetry(() => import('./pages/claims/ClaimsHub'));
+const ClaimDetailPage = lazyRetry(() => import('./pages/claims/ClaimDetailPage'));
 const NewStaffClaimForm = lazyRetry(() => import('./pages/claims/NewStaffClaimForm').then((m) => ({ default: m.NewStaffClaimForm })));
 
 // Error boundary to catch render errors and prevent blank screen
@@ -233,6 +234,7 @@ export default function App() {
                   <Route path="/claims/new/late-hours" element={<LateHoursClaimForm />} />
                   <Route path="/claims/new/dept-visit" element={<DeptVisitClaimForm />} />
                   <Route path="/claims" element={<ClaimsHub />} />
+                  <Route path="/claims/detail/:id" element={<ClaimDetailPage />} />
                   <Route path="/claims/new/:claimType" element={<NewStaffClaimForm />} />
                   <Route path="/claims/batches" element={<ClaimBatchesPage />} />
                   <Route path="/expenses" element={<Navigate to="/claims" replace />} />

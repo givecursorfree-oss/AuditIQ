@@ -15,7 +15,7 @@ router.use(authenticate);
 // ─── ROLES ───
 
 // GET /api/admin/roles — List all roles with permission counts
-router.get('/roles', authorize('Partner', 'Admin'), async (_req: AuthRequest, res: Response): Promise<void> => {
+router.get('/roles', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const roles = await prisma.role.findMany({
       include: {
@@ -43,6 +43,10 @@ router.get('/roles', authorize('Partner', 'Admin'), async (_req: AuthRequest, re
       createdAt: r.createdAt,
     }));
 
+    if (req.user!.role === 'HR') {
+      res.json(result.filter((r) => !['Partner', 'Admin'].includes(r.name)));
+      return;
+    }
     res.json(result);
   } catch (err) {
     logger.error('Fetch roles error:', err);
@@ -300,7 +304,7 @@ router.get('/permissions', authorize('Partner', 'Admin'), async (_req: AuthReque
 // ─── USERS ───
 
 // GET /api/admin/users — List all users with roles
-router.get('/users', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/users', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const users = await prisma.user.findMany({
       where: { firmId: req.user!.firmId },
@@ -338,7 +342,7 @@ const updateUserSchema = z.object({
   password: z.string().min(8).optional(),
 });
 
-router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/users/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firmId = req.user!.firmId;
     if (!firmId) {
@@ -354,12 +358,21 @@ router.put('/users/:id', authorize('Partner', 'Admin'), async (req: AuthRequest,
       return;
     }
 
+    if (req.user!.role === 'HR' && ['Partner', 'Admin'].includes(existing.role)) {
+      res.status(403).json({ error: 'HR cannot modify Partner or Admin accounts' });
+      return;
+    }
+
     // If roleId changes, also update the legacy role string
     let legacyRole: string | undefined;
     if (data.roleId) {
       const role = await prisma.role.findUnique({ where: { id: data.roleId } });
       if (!role) {
         res.status(400).json({ error: 'Invalid role ID' });
+        return;
+      }
+      if (req.user!.role === 'HR' && ['Partner', 'Admin'].includes(role.name)) {
+        res.status(403).json({ error: 'HR cannot assign Partner or Admin roles' });
         return;
       }
       legacyRole = role.name;
@@ -455,7 +468,7 @@ const createUserSchema = z.object({
   phone: z.string().optional(),
 });
 
-router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/users', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = createUserSchema.parse(req.body);
     const email = normalizeEmail(data.email);
@@ -473,6 +486,10 @@ router.post('/users', authorize('Partner', 'Admin'), async (req: AuthRequest, re
     }
     if (role.name === 'Partner' && req.user!.role !== 'Partner') {
       res.status(403).json({ error: 'Only Partners can create Partner accounts' });
+      return;
+    }
+    if (req.user!.role === 'HR' && ['Partner', 'Admin'].includes(role.name)) {
+      res.status(403).json({ error: 'HR cannot create Partner or Admin accounts' });
       return;
     }
 

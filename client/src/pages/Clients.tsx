@@ -9,10 +9,12 @@ import {
   CheckCircle,
   CaretRight as ChevronRight,
   PencilSimple as Edit2,
+  Trash as Trash2,
   Warning,
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { appConfirm } from '../context/AppDialogContext';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -121,9 +123,11 @@ export default function Clients() {
   const canAssign = ['Partner', 'Admin', 'Manager'].includes(user?.role || '');
   const canImportHrList = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
   const canEditClient = ['Partner', 'Admin', 'Manager', 'HR'].includes(user?.role || '');
+  const canAddDeleteClient = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
   const [importing, setImporting] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [editingClient, setEditingClient] = useState<ClientRow | null>(null);
+  const [addingClient, setAddingClient] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
     pan: '',
@@ -291,6 +295,65 @@ export default function Clients() {
     }
   }
 
+  function openAddClient() {
+    setAddingClient(true);
+    setEditForm({
+      name: '',
+      pan: '',
+      gstin: '',
+      contactName: '',
+      contactEmail: '',
+      contactPhone: '',
+    });
+  }
+
+  async function saveAddClient() {
+    if (!editForm.name.trim()) return;
+    setEditSaving(true);
+    setMessage(null);
+    try {
+      await api.post('/clients', {
+        name: editForm.name.trim(),
+        pan: editForm.pan.trim() || undefined,
+        gstin: editForm.gstin.trim() || undefined,
+        contactName: editForm.contactName.trim() || undefined,
+        contactEmail: editForm.contactEmail.trim() || undefined,
+        contactPhone: editForm.contactPhone.trim() || undefined,
+      });
+      setMessage({ type: 'success', text: `Added ${editForm.name.trim()}.` });
+      setAddingClient(false);
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setMessage({
+        type: 'error',
+        text: err?.response?.data?.error || 'Could not add client.',
+      });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function deleteClient(c: ClientRow) {
+    const ok = await appConfirm({
+      title: 'Remove client?',
+      message: `Deactivate ${c.name}?`,
+    });
+    if (!ok) return;
+    setMessage(null);
+    try {
+      await api.delete(`/clients/${c.id}`);
+      setMessage({ type: 'success', text: `${c.name} deactivated.` });
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setMessage({
+        type: 'error',
+        text: err?.response?.data?.error || 'Could not delete client.',
+      });
+    }
+  }
+
   const letterGateBlocked = selectedEngagement
     ? isTeamAssignmentBlocked(selectedEngagement.letterStatus, engagementHasTeam(selectedEngagement))
     : false;
@@ -328,25 +391,35 @@ export default function Clients() {
           ) : undefined
         }
         actions={
-          canImportHrList ? (
-            <>
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                aria-label="Upload HR client CSV"
-                onChange={(e) => void onCsvSelected(e.target.files?.[0] ?? null)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={importing}
-                onClick={() => void importHrClientList()}
-              >
-                {importing ? 'Importing…' : 'Import / sync HR client list'}
-              </Button>
-            </>
+          canImportHrList || canAddDeleteClient ? (
+            <div className="flex flex-wrap gap-2">
+              {canAddDeleteClient && (
+                <Button type="button" onClick={() => openAddClient()}>
+                  <UserPlus size={16} className="mr-1" />
+                  Add client
+                </Button>
+              )}
+              {canImportHrList && (
+                <>
+                  <input
+                    ref={csvInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    aria-label="Upload HR client CSV"
+                    onChange={(e) => void onCsvSelected(e.target.files?.[0] ?? null)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={importing}
+                    onClick={() => void importHrClientList()}
+                  >
+                    {importing ? 'Importing…' : 'Import / sync HR client list'}
+                  </Button>
+                </>
+              )}
+            </div>
           ) : undefined
         }
       />
@@ -427,6 +500,17 @@ export default function Clients() {
                             >
                               <Edit2 size={14} />
                               Edit
+                            </Button>
+                          )}
+                          {canAddDeleteClient && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1 text-destructive"
+                              onClick={() => void deleteClient(c)}
+                            >
+                              <Trash2 size={14} />
+                              Delete
                             </Button>
                           )}
                           <Button
@@ -718,6 +802,81 @@ export default function Clients() {
               disabled={editSaving || !editForm.name.trim()}
             >
               {editSaving ? 'Saving…' : 'Save changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addingClient} onOpenChange={(open) => !open && setAddingClient(false)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add client</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-client-name">Name</Label>
+              <Input
+                id="add-client-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="add-client-pan">PAN</Label>
+                <Input
+                  id="add-client-pan"
+                  value={editForm.pan}
+                  onChange={(e) => setEditForm((f) => ({ ...f, pan: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="add-client-gstin">GSTIN</Label>
+                <Input
+                  id="add-client-gstin"
+                  value={editForm.gstin}
+                  onChange={(e) => setEditForm((f) => ({ ...f, gstin: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-client-contact">Contact name</Label>
+              <Input
+                id="add-client-contact"
+                value={editForm.contactName}
+                onChange={(e) => setEditForm((f) => ({ ...f, contactName: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="add-client-email">Contact email</Label>
+                <Input
+                  id="add-client-email"
+                  type="email"
+                  value={editForm.contactEmail}
+                  onChange={(e) => setEditForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="add-client-phone">Contact phone</Label>
+                <Input
+                  id="add-client-phone"
+                  value={editForm.contactPhone}
+                  onChange={(e) => setEditForm((f) => ({ ...f, contactPhone: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddingClient(false)} disabled={editSaving}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void saveAddClient()}
+              disabled={editSaving || !editForm.name.trim()}
+            >
+              {editSaving ? 'Saving…' : 'Add'}
             </Button>
           </DialogFooter>
         </DialogContent>

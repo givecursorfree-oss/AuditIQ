@@ -28,7 +28,15 @@ interface Timesheet {
 }
 
 interface FirmRow {
-  user: { id: string; firstName: string; lastName: string; initials: string; role: string };
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    initials: string;
+    role: string;
+    designation?: string | null;
+    title?: string;
+  };
   totalHours: number;
   entryCount: number;
   attestationStatus?: string;
@@ -52,6 +60,15 @@ interface PendingDay {
 
 const FIRM_VIEW_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
 
+function defaultExportRange(anchor: string) {
+  const [y, m] = anchor.slice(0, 7).split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return {
+    from: `${y}-${String(m).padStart(2, '0')}-01`,
+    to: `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`,
+  };
+}
+
 export default function Timesheets() {
   const { user } = useAuth();
   const canFirm = Boolean(user && FIRM_VIEW_ROLES.includes(user.role));
@@ -59,6 +76,8 @@ export default function Timesheets() {
     user && canAttestTimesheets(user.role, user.hierarchyLevel?.code)
   );
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [exportFrom, setExportFrom] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).from);
+  const [exportTo, setExportTo] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).to);
   const [staffId, setStaffId] = useState(user?.id || '');
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [firmRows, setFirmRows] = useState<FirmRow[]>([]);
@@ -131,18 +150,25 @@ export default function Timesheets() {
     }
   }
 
-  async function exportTimesheetsMonth() {
+  async function exportTimesheetsRange() {
     if (!canFirm || exporting) return;
-    const month = date.slice(0, 7);
+    if (!exportFrom || !exportTo) {
+      await appAlert({ title: 'Select dates', message: 'Choose from and to dates for the export.' });
+      return;
+    }
+    if (exportFrom > exportTo) {
+      await appAlert({ title: 'Invalid range', message: 'From date must be on or before to date.' });
+      return;
+    }
     setExporting(true);
     try {
       const response = await api.get<Blob>('/timesheets/firm/export', {
-        params: { month },
+        params: { from: exportFrom, to: exportTo },
         responseType: 'blob',
       });
-      downloadBlob(`timesheets-${month}.csv`, response.data);
+      downloadBlob(`timesheets-${exportFrom}_to_${exportTo}.csv`, response.data);
     } catch {
-      await appAlert({ title: 'Export failed', message: 'Could not export timesheet records for this month.' });
+      await appAlert({ title: 'Export failed', message: 'Could not export timesheet records for this date range.' });
     } finally {
       setExporting(false);
     }
@@ -165,10 +191,20 @@ export default function Timesheets() {
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
         {canFirm && (
-          <Button type="button" variant="outline" size="sm" onClick={() => void exportTimesheetsMonth()} disabled={exporting}>
-            <Download size={16} className="mr-1" />
-            {exporting ? 'Exporting…' : `Export ${date.slice(0, 7)}`}
-          </Button>
+          <>
+            <div>
+              <Label>From</Label>
+              <Input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
+            </div>
+            <div>
+              <Label>To</Label>
+              <Input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => void exportTimesheetsRange()} disabled={exporting}>
+              <Download size={16} className="mr-1" />
+              {exporting ? 'Exporting…' : 'Export'}
+            </Button>
+          </>
         )}
         <div className="flex flex-wrap gap-2">
           {canFirm && (
@@ -247,6 +283,11 @@ export default function Timesheets() {
                         }}
                       >
                         {row.user.firstName} {row.user.lastName}
+                        {(row.user.title || row.user.designation) && (
+                          <span className="block text-xs text-muted-foreground font-normal no-underline">
+                            {row.user.title || row.user.designation}
+                          </span>
+                        )}
                       </button>
                     </td>
                     <td className="py-2 pr-3">

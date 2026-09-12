@@ -16,9 +16,11 @@ export function formatRoleLabel(role: string): string {
   return ROLE_DISPLAY_NAMES[role] ?? role;
 }
 
-/** Prefer hierarchy title from API, then designation, then role label. */
+/** Prefer article designation, then hierarchy title, then designation, then role label. */
 export function formatStaffTitle(user: Pick<User, 'role' | 'designation'> & { hierarchyLevel?: { title: string } | null }): string {
+  const des = user.designation?.trim();
+  if (des && /article/i.test(des)) return des;
   if (user.hierarchyLevel?.title) return user.hierarchyLevel.title;
-  if (user.designation?.trim()) return user.designation.trim();
+  if (des) return des;
   return formatRoleLabel(user.role);
 }

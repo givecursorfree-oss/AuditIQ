@@ -172,10 +172,12 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
   }
 });
 
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
 // GET /api/attendance — list attendance records
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { userId, date, month } = req.query;
+    const { userId, date, month, from, to } = req.query;
     const where: Record<string, unknown> = { userId: req.user!.id };
 
     // Partners / Managers / Admin / HR see firm-wide attendance
@@ -189,9 +191,29 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       else delete where.userId;
     }
 
-    if (date) {
+    if (from || to) {
+      const fromKey = from ? String(from) : '';
+      const toKey = to ? String(to) : '';
+      if ((fromKey && !YMD.test(fromKey)) || (toKey && !YMD.test(toKey))) {
+        res.status(400).json({ error: 'from/to must use YYYY-MM-DD format' });
+        return;
+      }
+      if (fromKey && toKey && fromKey > toKey) {
+        res.status(400).json({ error: 'from must be on or before to' });
+        return;
+      }
+      const range: { gte?: Date; lt?: Date } = {};
+      if (fromKey) range.gte = new Date(`${fromKey}T00:00:00+05:30`);
+      if (toKey) {
+        const [y, m, d] = toKey.split('-').map(Number);
+        const next = new Date(y, m - 1, d + 1);
+        const nextKey = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+        range.lt = new Date(`${nextKey}T00:00:00+05:30`);
+      }
+      where.date = range;
+    } else if (date) {
       const dateKey = String(date);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+      if (!YMD.test(dateKey)) {
         res.status(400).json({ error: 'date must use YYYY-MM-DD format' });
         return;
       }
@@ -220,7 +242,17 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       where,
       orderBy: { date: 'desc' },
       include: {
-        user: { select: { firstName: true, lastName: true, initials: true, email: true, role: true } },
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            initials: true,
+            email: true,
+            role: true,
+            designation: true,
+            hierarchyLevel: { select: { title: true } },
+          },
+        },
         office: { select: { name: true } },
       },
     });

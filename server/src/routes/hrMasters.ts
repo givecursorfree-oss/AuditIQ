@@ -155,18 +155,24 @@ router.post(
   }
 );
 
-/** POST /api/hr-masters/holidays — add firm holiday YYYY-MM-DD */
+/** POST /api/hr-masters/holidays — add firm holiday YYYY-MM-DD (+ optional festival name) */
 router.post('/holidays', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firmId = requireFirmId(req, res);
     if (!firmId) return;
-    const body = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(req.body);
+    const body = z
+      .object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        name: z.string().max(200).optional(),
+      })
+      .parse(req.body);
+    const label = body.name?.trim() || null;
     const row = await prisma.firmLookupValue.upsert({
       where: {
         firmId_kind_value: { firmId, kind: LOOKUP_HOLIDAY, value: body.date },
       },
-      create: { firmId, kind: LOOKUP_HOLIDAY, value: body.date },
-      update: { isActive: true },
+      create: { firmId, kind: LOOKUP_HOLIDAY, value: body.date, label },
+      update: { isActive: true, label },
     });
     res.status(201).json(row);
   } catch (err) {
@@ -176,6 +182,95 @@ router.post('/holidays', authorize('Partner', 'Admin', 'HR'), async (req: AuthRe
     }
     logger.error('Add holiday error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to add holiday' });
+  }
+});
+
+/** GET /api/hr-masters/holidays — list firm holidays with id + festival name */
+router.get('/holidays', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = requireFirmId(req, res);
+    if (!firmId) return;
+    const rows = await prisma.firmLookupValue.findMany({
+      where: { firmId, kind: LOOKUP_HOLIDAY, isActive: true },
+      orderBy: { value: 'asc' },
+      select: { id: true, value: true, label: true },
+    });
+    res.json({
+      holidays: rows.map((r) => ({ id: r.id, date: r.value, name: r.label || '' })),
+    });
+  } catch (err) {
+    logger.error('List holidays error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to list holidays' });
+  }
+});
+
+/** PATCH /api/hr-masters/holidays/:id — edit date and/or festival name */
+router.patch('/holidays/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = requireFirmId(req, res);
+    if (!firmId) return;
+    const body = z
+      .object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        name: z.string().max(200).optional(),
+      })
+      .parse(req.body);
+
+    const existing = await prisma.firmLookupValue.findFirst({
+      where: { id: req.params.id, firmId, kind: LOOKUP_HOLIDAY },
+    });
+    if (!existing) {
+      res.status(404).json({ error: 'Holiday not found' });
+      return;
+    }
+
+    if (body.date && body.date !== existing.value) {
+      const clash = await prisma.firmLookupValue.findFirst({
+        where: { firmId, kind: LOOKUP_HOLIDAY, value: body.date, NOT: { id: existing.id } },
+        select: { id: true },
+      });
+      if (clash) {
+        res.status(409).json({ error: 'A holiday already exists for that date' });
+        return;
+      }
+    }
+
+    const updated = await prisma.firmLookupValue.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.date ? { value: body.date } : {}),
+        ...(body.name !== undefined ? { label: body.name.trim() || null } : {}),
+        isActive: true,
+      },
+    });
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: err.errors });
+      return;
+    }
+    logger.error('Patch holiday error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to update holiday' });
+  }
+});
+
+/** DELETE /api/hr-masters/holidays/:id — remove firm holiday */
+router.delete('/holidays/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = requireFirmId(req, res);
+    if (!firmId) return;
+    const result = await prisma.firmLookupValue.updateMany({
+      where: { id: req.params.id, firmId, kind: LOOKUP_HOLIDAY },
+      data: { isActive: false },
+    });
+    if (result.count === 0) {
+      res.status(404).json({ error: 'Holiday not found' });
+      return;
+    }
+    res.json({ message: 'Holiday removed' });
+  } catch (err) {
+    logger.error('Delete holiday error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to delete holiday' });
   }
 });
 

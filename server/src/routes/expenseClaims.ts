@@ -57,6 +57,7 @@ function receiptMimeType(file: Express.Multer.File): string {
 const claimInclude = {
   staff: { select: { id: true, firstName: true, lastName: true, email: true } },
   expensePayer: { select: { id: true, firstName: true, lastName: true } },
+  visitedBy: { select: { id: true, firstName: true, lastName: true } },
   client: { select: { id: true, name: true } },
   engagement: { select: { id: true, title: true, serviceCode: true, financialYear: true, type: true } },
   receipts: { select: { id: true, fileName: true, mimeType: true, uploadedAt: true } },
@@ -74,6 +75,11 @@ const claimInclude = {
     },
   },
 };
+
+function receiptRequiredForClaim(claim: { claimType: string; travelMode?: string | null; receipts: unknown[] }) {
+  if (claim.claimType === 'travel' && claim.travelMode === 'own_vehicle') return false;
+  return true;
+}
 
 function stripOcrForEmployee<T extends { ocrDetectedAmount?: unknown; ocrStatus?: unknown }>(claim: T, role: string): T {
   if (['Partner', 'Admin', 'Manager', 'Accounts'].includes(role)) return claim;
@@ -159,6 +165,17 @@ const createSchema = z.object({
   /** Claim-level approver; applied to participants that omit managerId. */
   managerId: z.string().optional(),
   participants: z.array(participantSchema).optional(),
+  // Travel v0.2
+  travelTime: z.string().optional(),
+  jurisdiction: z.string().optional(),
+  centreState: z.string().optional(),
+  location: z.string().optional(),
+  mapLink: z.string().optional(),
+  visitedById: z.string().optional(),
+  period: z.string().optional(),
+  issue: z.string().optional(),
+  replyFromDepartment: z.string().optional(),
+  travelMode: z.enum(['cab', 'own_vehicle']).optional(),
 });
 
 function canSubmit(role: string) {
@@ -186,6 +203,30 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
+    if (body.claimType === 'travel') {
+      const missing: string[] = [];
+      if (!body.clientId?.trim()) missing.push('client');
+      if (!body.travelTime?.trim()) missing.push('travelTime');
+      if (!body.jurisdiction?.trim()) missing.push('jurisdiction');
+      if (!body.location?.trim()) missing.push('location');
+      if (!body.visitedById?.trim()) missing.push('visitedBy');
+      if (!body.period?.trim()) missing.push('period');
+      if (!body.issue?.trim()) missing.push('issue');
+      if (!body.travelMode) missing.push('travelMode');
+      if (missing.length) {
+        res.status(400).json({ error: `Travel claim requires: ${missing.join(', ')}` });
+        return;
+      }
+      const visitor = await prisma.user.findFirst({
+        where: { id: body.visitedById!, firmId: req.user!.firmId!, isActive: true },
+        select: { id: true },
+      });
+      if (!visitor) {
+        res.status(400).json({ error: 'Visited By must be a firm user' });
+        return;
+      }
+    }
+
     const participantRows: ParticipantInput[] =
       body.participants && body.participants.length > 0
         ? body.participants.map((p) => ({
@@ -194,7 +235,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
           }))
         : [
             {
-              userId: req.user!.id,
+              userId: body.claimType === 'travel' && body.visitedById ? body.visitedById : req.user!.id,
               engagementId: body.engagementId,
               clientId: body.clientId,
               workType: body.workType,
@@ -203,14 +244,12 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             },
           ];
 
-    if (body.claimType === 'travel' && !body.description?.trim() && participantRows.length === 1) {
-      // travel notes optional
-    }
-
     const isArticleRole = ['Intern', 'Staff'].includes(req.user!.role);
     if (isArticleRole) {
       const missingClient = participantRows.some((p) => !p.clientId && !body.clientId);
-      const missingActivity = participantRows.some((p) => !(p.workType ?? body.workType)?.trim());
+      const missingActivity =
+        body.claimType !== 'travel' &&
+        participantRows.some((p) => !(p.workType ?? body.workType)?.trim());
       const missingManager = participantRows.some((p) => !p.managerId);
       if (missingClient) {
         res.status(400).json({ error: 'Client Name is required' });
@@ -319,6 +358,16 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         workType: headerWork,
         workTypeOther: body.workTypeOther ?? participantRows[0]?.workTypeOther,
         description: body.description,
+        travelTime: body.travelTime,
+        jurisdiction: body.jurisdiction,
+        centreState: body.centreState,
+        location: body.location,
+        mapLink: body.mapLink,
+        visitedById: body.visitedById,
+        period: body.period,
+        issue: body.issue,
+        replyFromDepartment: body.replyFromDepartment,
+        travelMode: body.travelMode,
         policyFlags: policyFlags != null ? (policyFlags as Prisma.InputJsonValue) : undefined,
         participantCount: participantRows.length,
         claimStatus: 'pending_approval',
@@ -528,7 +577,7 @@ router.patch('/:id/approve', authorize('Partner', 'Admin', 'Manager'), async (re
     res.status(400).json({ error: 'Claim not pending' });
     return;
   }
-  if (existing.receipts.length === 0) {
+  if (receiptRequiredForClaim(existing) && existing.receipts.length === 0) {
     res.status(400).json({ error: 'Receipt required' });
     return;
   }
@@ -637,7 +686,7 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
     res.status(400).json({ error: 'Claim not pending' });
     return;
   }
-  if (existing.receipts.length === 0) {
+  if (receiptRequiredForClaim(existing) && existing.receipts.length === 0) {
     res.status(400).json({ error: 'Receipt required' });
     return;
   }
@@ -765,6 +814,36 @@ router.get('/meta/form-options', authorize('Partner', 'Admin', 'Manager', 'Staff
     approvers,
     activityClassifications: activities.length > 0 ? activities : fallback,
   });
+});
+
+/** GET /api/expense-claims/:id — claim detail (staff own / participants / managers / accounts) */
+router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const claim = await prisma.expenseClaim.findFirst({
+      where: { id: String(req.params.id), firmId: req.user!.firmId! },
+      include: claimInclude,
+    });
+    if (!claim) {
+      res.status(404).json({ error: 'Claim not found' });
+      return;
+    }
+    const role = req.user!.role;
+    const uid = req.user!.id;
+    const isElevated = ['Partner', 'Admin', 'Manager', 'Accounts'].includes(role);
+    const isOwner =
+      claim.staffId === uid ||
+      claim.expensePayerId === uid ||
+      claim.visitedById === uid ||
+      claim.participants.some((p) => p.userId === uid);
+    if (!isElevated && !isOwner) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    res.json(stripOcrForEmployee(claim, role));
+  } catch (err) {
+    logger.error('Get claim error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to load claim' });
+  }
 });
 
 export default router;

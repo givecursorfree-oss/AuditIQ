@@ -52,7 +52,7 @@ export default function ClaimsHub() {
   const canApprove = ['Partner', 'Admin', 'Manager'].includes(user?.role ?? '');
   const canSubmitClaim = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'].includes(user?.role ?? '');
   const canBatches =
-    user?.role === 'Accounts' || ['Partner', 'Admin'].includes(user?.role ?? '');
+    user?.role === 'Accounts' || ['Partner', 'Admin', 'Manager'].includes(user?.role ?? '');
 
   const tab = useMemo(
     () => parseClaimsTab(searchParams.get('tab'), canApprove, canBatches),
@@ -147,9 +147,14 @@ export default function ClaimsHub() {
                           <p className="text-xs text-muted-foreground">Approved {formatInr(c.approvedAmount)}</p>
                         )}
                       </div>
-                      <Badge variant={claimStatusBadgeVariant(c.claimStatus)}>
-                        {CLAIM_STATUS_LABELS[c.claimStatus] ?? c.claimStatus}
-                      </Badge>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant={claimStatusBadgeVariant(c.claimStatus)}>
+                          {CLAIM_STATUS_LABELS[c.claimStatus] ?? c.claimStatus}
+                        </Badge>
+                        <Button size="sm" variant="outline" className="h-7" asChild>
+                          <Link to={`/claims/detail/${c.id}`}>Open</Link>
+                        </Button>
+                      </div>
                     </div>
                     <ClaimProgressStepper claim={c} audience="staff" />
                     <ClaimStaffTimeline claim={c} />
