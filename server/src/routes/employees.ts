@@ -331,48 +331,58 @@ router.get('/:id', requirePermission('employees', 'view'), async (req: AuthReque
 // ─── Profile Update ───
 
 const profileSchema = z.object({
-  dateOfBirth: z.string().optional(),
-  gender: z.string().optional(),
-  bloodGroup: z.string().optional(),
-  maritalStatus: z.string().optional(),
-  fatherName: z.string().optional(),
-  pan: z.string().max(10).optional(),
-  aadhaar: z.string().max(12).optional(),
-  passportNo: z.string().optional(),
-  uanNumber: z.string().optional(),
-  currentAddress: z.string().optional(),
-  currentCity: z.string().optional(),
-  currentState: z.string().optional(),
-  currentPincode: z.string().optional(),
-  permanentAddress: z.string().optional(),
-  permanentCity: z.string().optional(),
-  permanentState: z.string().optional(),
-  permanentPincode: z.string().optional(),
-  bankName: z.string().optional(),
-  bankBranch: z.string().optional(),
-  accountNumber: z.string().optional(),
-  ifscCode: z.string().optional(),
-  emergencyName: z.string().optional(),
-  emergencyRelation: z.string().optional(),
-  emergencyPhone: z.string().optional(),
-  joiningDate: z.string().optional(),
-  department: z.string().optional(),
-  employeeCode: z.string().optional(),
-  employmentType: z.string().optional(),
-  probationEnd: z.string().optional(),
+  dateOfBirth: z.string().nullable().optional(),
+  gender: z.string().nullable().optional(),
+  bloodGroup: z.string().nullable().optional(),
+  maritalStatus: z.string().nullable().optional(),
+  fatherName: z.string().nullable().optional(),
+  pan: z.string().max(10).nullable().optional(),
+  aadhaar: z.string().max(12).nullable().optional(),
+  passportNo: z.string().nullable().optional(),
+  uanNumber: z.string().nullable().optional(),
+  currentAddress: z.string().nullable().optional(),
+  currentCity: z.string().nullable().optional(),
+  currentState: z.string().nullable().optional(),
+  currentPincode: z.string().nullable().optional(),
+  permanentAddress: z.string().nullable().optional(),
+  permanentCity: z.string().nullable().optional(),
+  permanentState: z.string().nullable().optional(),
+  permanentPincode: z.string().nullable().optional(),
+  bankName: z.string().nullable().optional(),
+  bankBranch: z.string().nullable().optional(),
+  accountNumber: z.string().nullable().optional(),
+  ifscCode: z.string().nullable().optional(),
+  emergencyName: z.string().nullable().optional(),
+  emergencyRelation: z.string().nullable().optional(),
+  emergencyPhone: z.string().nullable().optional(),
+  joiningDate: z.string().nullable().optional(),
+  department: z.string().nullable().optional(),
+  employeeCode: z.string().nullable().optional(),
+  employmentType: z.string().nullable().optional(),
+  probationEnd: z.string().nullable().optional(),
 });
 
 // PUT /api/employees/:id/profile — upsert profile
-router.put('/:id/profile', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/:id/profile', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     if (!(await requireUserInFirm(req, res, id))) return;
     const data = profileSchema.parse(req.body);
 
-    // Convert date strings to Date objects
     const parsed: Record<string, unknown> = { ...data };
-    for (const key of ['dateOfBirth', 'joiningDate', 'probationEnd']) {
-      if (parsed[key]) parsed[key] = new Date(parsed[key] as string);
+    // Empty strings from the form must not hit Prisma DateTime / optional columns
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value === '') parsed[key] = null;
+    }
+    for (const key of ['dateOfBirth', 'joiningDate', 'probationEnd'] as const) {
+      const raw = parsed[key];
+      if (raw == null) continue;
+      const d = new Date(raw as string);
+      if (Number.isNaN(d.getTime())) {
+        res.status(400).json({ error: `Invalid ${key}` });
+        return;
+      }
+      parsed[key] = d;
     }
 
     const profile = await prisma.employeeProfile.upsert({

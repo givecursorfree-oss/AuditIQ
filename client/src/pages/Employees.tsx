@@ -5,7 +5,7 @@ import {
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import { appAlert, appConfirm } from '../context/AppDialogContext';
-import { getApiErrorMessage } from '@/lib/formPayload';
+import { getApiErrorMessage, pickFormPayload } from '@/lib/formPayload';
 import { useAuth } from '../context/AuthContext';
 import UserPresenceAvatar from '../components/UserPresenceAvatar';
 import { SplitPaneLayout } from '@/components/layout/SplitPaneLayout';
@@ -151,7 +151,7 @@ export default function Employees() {
   const [saving, setSaving] = useState(false);
 
   const isAdmin = user?.role === 'Partner' || user?.role === 'Admin';
-  const canEdit = isAdmin || user?.role === 'Manager';
+  const canEdit = isAdmin || user?.role === 'Manager' || user?.role === 'HR';
   const canManagePeople = isAdmin || user?.role === 'HR';
   const [showCreate, setShowCreate] = useState(false);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -241,7 +241,20 @@ export default function Employees() {
     if (!selected) return;
     setSaving(true);
     try {
-      await api.put(`/employees/${selected.id}/profile`, formData);
+      const payload = pickFormPayload(formData, [
+        'dateOfBirth', 'gender', 'bloodGroup', 'maritalStatus', 'fatherName',
+        'pan', 'aadhaar', 'passportNo', 'uanNumber',
+        'currentAddress', 'currentCity', 'currentState', 'currentPincode',
+        'permanentAddress', 'permanentCity', 'permanentState', 'permanentPincode',
+        'bankName', 'bankBranch', 'accountNumber', 'ifscCode',
+        'emergencyName', 'emergencyRelation', 'emergencyPhone',
+        'joiningDate', 'department', 'employeeCode', 'employmentType', 'probationEnd',
+      ]);
+      // Explicitly clear emptied date fields
+      for (const key of ['dateOfBirth', 'joiningDate', 'probationEnd'] as const) {
+        if (formData[key] === '') payload[key] = null;
+      }
+      await api.put(`/employees/${selected.id}/profile`, payload);
       await fetchDetail(selected.id);
       setEditing(false);
       await appAlert({ title: 'Saved', message: 'Employee profile updated.' });
