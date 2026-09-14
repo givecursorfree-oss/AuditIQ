@@ -8,7 +8,7 @@ import { createGoogleOAuthState, verifyGoogleOAuthState } from '../lib/googleOAu
 import {
   buildGoogleAuthUrl,
   exchangeGoogleCode,
-  listDriveFolders,
+  listDriveBrowseItems,
   parseSyncFolders,
   serializeSyncFolders,
   syncGoogleDriveConnection,
@@ -113,8 +113,11 @@ router.get(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const parent = String(req.query.parent || 'root');
-      const folders = await listDriveFolders(req.user!.id, parent);
-      res.json({ folders, parent });
+      const items = await listDriveBrowseItems(req.user!.id, parent);
+      const folders = items
+        .filter((i) => i.kind === 'folder')
+        .map((i) => ({ id: i.id, name: i.name }));
+      res.json({ items, folders, parent });
     } catch (err) {
       const msg = (err as Error).message;
       logger.error('Drive folders error', { error: msg });

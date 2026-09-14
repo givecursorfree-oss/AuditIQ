@@ -173,10 +173,13 @@ async function listFilesInFolder(
 
   do {
     const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
+      q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed = false`,
       fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, size)',
       pageSize: 100,
       pageToken,
+      spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
     for (const f of res.data.files ?? []) {
       if (!f.id || !f.name || !f.mimeType) continue;
@@ -199,11 +202,18 @@ async function listFilesInFolder(
   return files;
 }
 
-/** List immediate child folders in Drive (for folder picker UI). */
-export async function listDriveFolders(
+export type DriveBrowseItem = {
+  id: string;
+  name: string;
+  mimeType: string;
+  kind: 'folder' | 'file';
+};
+
+/** List immediate children (folders + files) for the Drive picker UI. */
+export async function listDriveBrowseItems(
   userId: string,
   parentId = 'root'
-): Promise<SyncFolder[]> {
+): Promise<DriveBrowseItem[]> {
   const conn = await prisma.googleDriveConnection.findUnique({
     where: { userId },
     select: { id: true, isActive: true },
@@ -214,21 +224,51 @@ export async function listDriveFolders(
 
   const { drive } = await getDriveClient(conn.id);
   const parent = parentId === 'root' ? 'root' : parentId;
+  const safeParent = parent.replace(/'/g, "\\'");
   const q =
     parent === 'root'
-      ? "mimeType = 'application/vnd.google-apps.folder' and 'root' in parents and trashed = false"
-      : `mimeType = 'application/vnd.google-apps.folder' and '${parent}' in parents and trashed = false`;
+      ? "'root' in parents and trashed = false"
+      : `'${safeParent}' in parents and trashed = false`;
 
-  const res = await drive.files.list({
-    q,
-    fields: 'files(id, name)',
-    pageSize: 200,
-    orderBy: 'name',
+  const items: DriveBrowseItem[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.files.list({
+      q,
+      fields: 'nextPageToken, files(id, name, mimeType)',
+      pageSize: 200,
+      pageToken,
+      spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+    for (const f of res.data.files ?? []) {
+      if (!f.id || !f.name || !f.mimeType) continue;
+      items.push({
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        kind: f.mimeType === GOOGLE_FOLDER_MIME ? 'folder' : 'file',
+      });
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  // Folders first, then files — alphabetical within each group
+  items.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
   });
+  return items;
+}
 
-  return (res.data.files ?? [])
-    .filter((f): f is { id: string; name: string } => Boolean(f.id && f.name))
-    .map((f) => ({ id: f.id, name: f.name }));
+/** @deprecated Prefer listDriveBrowseItems — kept for callers that only need folders. */
+export async function listDriveFolders(
+  userId: string,
+  parentId = 'root'
+): Promise<SyncFolder[]> {
+  const items = await listDriveBrowseItems(userId, parentId);
+  return items.filter((i) => i.kind === 'folder').map((i) => ({ id: i.id, name: i.name }));
 }
 
 export async function syncGoogleDriveConnection(connectionId: string): Promise<DriveSyncResult> {

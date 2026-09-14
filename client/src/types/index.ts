@@ -209,6 +209,13 @@ export interface SyncFolder {
   name: string;
 }
 
+export interface DriveBrowseItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  kind: 'folder' | 'file';
+}
+
 export interface GoogleDriveStatus {
   configured: boolean;
   connected: boolean;

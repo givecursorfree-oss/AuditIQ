@@ -4,12 +4,13 @@ import {
   X,
   ArrowsClockwise,
   Folder,
+  File,
   CaretRight as ChevronRight,
   CaretLeft as ChevronLeft,
   Check,
 } from '@phosphor-icons/react';
 import api from '../services/api';
-import type { GoogleDriveStatus, SyncFolder } from '../types';
+import type { DriveBrowseItem, GoogleDriveStatus, SyncFolder } from '../types';
 import { Button } from '@/components/ui/button';
 
 function timeAgo(date: string) {
@@ -41,7 +42,7 @@ export default function GoogleDrivePanel({
   const [engagements, setEngagements] = useState<{ id: string; title: string }[]>([]);
   const [browseParent, setBrowseParent] = useState('root');
   const [browseStack, setBrowseStack] = useState<SyncFolder[]>([]);
-  const [browseFolders, setBrowseFolders] = useState<SyncFolder[]>([]);
+  const [browseItems, setBrowseItems] = useState<DriveBrowseItem[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,17 +80,30 @@ export default function GoogleDrivePanel({
       .catch(() => {});
   }, []);
 
-  const loadBrowseFolders = useCallback(
+  const loadBrowseItems = useCallback(
     async (parent: string) => {
       if (!status?.connected || !canManage) return;
       setBrowseLoading(true);
       try {
-        const { data } = await api.get<{ folders: SyncFolder[] }>(
-          `/integrations/google-drive/folders?parent=${encodeURIComponent(parent)}`
-        );
-        setBrowseFolders(data.folders);
+        const { data } = await api.get<{
+          items?: DriveBrowseItem[];
+          folders: SyncFolder[];
+        }>(`/integrations/google-drive/folders?parent=${encodeURIComponent(parent)}`);
+        if (Array.isArray(data.items)) {
+          setBrowseItems(data.items);
+        } else {
+          // Fallback if older API returns folders only
+          setBrowseItems(
+            (data.folders || []).map((f) => ({
+              id: f.id,
+              name: f.name,
+              mimeType: 'application/vnd.google-apps.folder',
+              kind: 'folder' as const,
+            }))
+          );
+        }
       } catch {
-        setBrowseFolders([]);
+        setBrowseItems([]);
       } finally {
         setBrowseLoading(false);
       }
@@ -99,9 +113,18 @@ export default function GoogleDrivePanel({
 
   useEffect(() => {
     if (status?.connected && canManage) {
-      void loadBrowseFolders(browseParent);
+      void loadBrowseItems(browseParent);
     }
-  }, [status?.connected, canManage, browseParent, loadBrowseFolders]);
+  }, [status?.connected, canManage, browseParent, loadBrowseItems]);
+
+  // Live refresh while panel is open (Drive listing, not Document Library import)
+  useEffect(() => {
+    if (!status?.connected || !canManage) return;
+    const id = window.setInterval(() => {
+      void loadBrowseItems(browseParent);
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [status?.connected, canManage, browseParent, loadBrowseItems]);
 
   const showMsg = (text: string, tone: 'info' | 'error' | 'success' = 'info') => {
     setMessage(text);
@@ -204,17 +227,8 @@ export default function GoogleDrivePanel({
             Google Drive sync
           </h2>
           <p className="text-xs text-foreground-muted mt-1 max-w-xl">
-            Sync folders from Google Drive into Document Library. Files are extracted with Apache Tika
-            and indexed in Typesense for instant name + content search — same stack as{' '}
-            <a
-              href="https://github.com/Hamza5/file-brain"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              File Brain
-            </a>
-            .
+            Open a folder (›) to see PDFs/DOCX inside. Tick the folder, pick an engagement, then Sync
+            now. Listing refreshes every 15s.
           </p>
         </div>
         <button type="button" onClick={onClose} className="icon-btn" aria-label="Close">
@@ -275,36 +289,60 @@ export default function GoogleDrivePanel({
                         <ChevronLeft size={14} />
                       </button>
                     )}
-                    <span className="font-medium text-foreground-secondary">
+                    <span className="font-medium text-foreground-secondary flex-1">
                       {browseStack.length === 0 ? 'My Drive' : browseStack[browseStack.length - 1].name}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => void loadBrowseItems(browseParent)}
+                      className="icon-btn p-1"
+                      aria-label="Refresh"
+                      disabled={browseLoading}
+                    >
+                      <ArrowsClockwise size={14} className={browseLoading ? 'animate-spin' : ''} />
+                    </button>
                   </div>
-                  <ul className="max-h-48 overflow-y-auto divide-y divide-border">
-                    {browseLoading ? (
-                      <li className="px-3 py-4 text-sm text-foreground-muted text-center">Loading folders…</li>
-                    ) : browseFolders.length === 0 ? (
-                      <li className="px-3 py-4 text-sm text-foreground-muted text-center">No subfolders</li>
+                  <ul className="max-h-56 overflow-y-auto divide-y divide-border">
+                    {browseLoading && browseItems.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-foreground-muted text-center">
+                        Loading…
+                      </li>
+                    ) : browseItems.length === 0 ? (
+                      <li className="px-3 py-4 text-sm text-foreground-muted text-center">
+                        No files or folders here
+                      </li>
                     ) : (
-                      browseFolders.map((folder) => {
-                        const selected = selectedFolders.some((f) => f.id === folder.id);
+                      browseItems.map((item) => {
+                        if (item.kind === 'file') {
+                          return (
+                            <li
+                              key={item.id}
+                              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground"
+                            >
+                              <File size={16} className="text-foreground-muted shrink-0" />
+                              <span className="truncate flex-1">{item.name}</span>
+                            </li>
+                          );
+                        }
+                        const selected = selectedFolders.some((f) => f.id === item.id);
                         return (
-                          <li key={folder.id} className="flex items-center gap-1">
+                          <li key={item.id} className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => toggleFolder(folder)}
+                              onClick={() => toggleFolder({ id: item.id, name: item.name })}
                               className={`flex flex-1 items-center gap-2 px-3 py-2 text-sm text-left hover:bg-hover-bg ${
                                 selected ? 'bg-surface-muted font-medium' : ''
                               }`}
                             >
                               <Folder size={16} className="text-foreground-muted shrink-0" />
-                              <span className="truncate flex-1">{folder.name}</span>
+                              <span className="truncate flex-1">{item.name}</span>
                               {selected && <Check size={14} className="text-success shrink-0" />}
                             </button>
                             <button
                               type="button"
-                              onClick={() => openSubfolder(folder)}
+                              onClick={() => openSubfolder({ id: item.id, name: item.name })}
                               className="p-2 text-foreground-muted hover:text-foreground hover:bg-hover-bg"
-                              title="Open folder"
+                              aria-label="Open folder"
                             >
                               <ChevronRight size={16} />
                             </button>
