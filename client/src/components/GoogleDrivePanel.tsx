@@ -8,6 +8,8 @@ import {
   CaretRight as ChevronRight,
   CaretLeft as ChevronLeft,
   Check,
+  Square,
+  CheckSquare,
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import type { DriveBrowseItem, GoogleDriveStatus, SyncFolder } from '../types';
@@ -333,7 +335,13 @@ export default function GoogleDrivePanel({
                               className={`flex flex-1 items-center gap-2 px-3 py-2 text-sm text-left hover:bg-hover-bg ${
                                 selected ? 'bg-surface-muted font-medium' : ''
                               }`}
+                              aria-pressed={selected}
                             >
+                              {selected ? (
+                                <CheckSquare size={18} className="text-success shrink-0" weight="fill" />
+                              ) : (
+                                <Square size={18} className="text-foreground-muted shrink-0" />
+                              )}
                               <Folder size={16} className="text-foreground-muted shrink-0" />
                               <span className="truncate flex-1">{item.name}</span>
                               {selected && <Check size={14} className="text-success shrink-0" />}
@@ -366,7 +374,7 @@ export default function GoogleDrivePanel({
                   }
                   className="input-field text-sm"
                 >
-                  <option value="">Select engagement (required for sync)</option>
+                  <option value="">Optional — firm library if empty</option>
                   {engagements.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.title}
@@ -384,7 +392,7 @@ export default function GoogleDrivePanel({
                   size="sm"
                   className="gap-1"
                   onClick={runSync}
-                  disabled={syncing || selectedFolders.length === 0 || !engagementId}
+                  disabled={syncing || selectedFolders.length === 0}
                 >
                   <ArrowsClockwise size={14} className={syncing ? 'animate-spin' : ''} />
                   {syncing ? 'Syncing…' : 'Sync now'}

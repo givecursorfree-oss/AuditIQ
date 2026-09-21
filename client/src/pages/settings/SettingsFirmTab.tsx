@@ -9,6 +9,7 @@ import api from '../../services/api';
 import { appAlert } from '../../context/AppDialogContext';
 import type { Firm } from '../../types';
 import { getApiErrorMessage, pickFormPayload } from '@/lib/formPayload';
+import { useAuth } from '../../context/AuthContext';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,6 +36,11 @@ const FIRM_FIELDS: { key: keyof Firm; label: string }[] = [
 ];
 
 export default function SettingsFirmTab() {
+  const { user } = useAuth();
+  const isHrOnly = user?.role === 'HR';
+  const visibleFields = isHrOnly
+    ? FIRM_FIELDS.filter((f) => f.key === 'expenseSubmissionWindowDays')
+    : FIRM_FIELDS;
   const [firm, setFirm] = useState<Firm | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -50,14 +56,17 @@ export default function SettingsFirmTab() {
   }, []);
 
   const handleSave = async () => {
-    if (!form.name?.trim()) {
+    if (!isHrOnly && !form.name?.trim()) {
       setError('Firm name is required.');
       return;
     }
     setError('');
     setSaving(true);
     try {
-      const payload = pickFormPayload(form as Record<string, unknown>, [...FIRM_FIELD_KEYS]);
+      const keys = isHrOnly
+        ? (['expenseSubmissionWindowDays'] as const)
+        : FIRM_FIELD_KEYS;
+      const payload = pickFormPayload(form as Record<string, unknown>, [...keys]);
       const { data } = await api.put('/admin/firm', payload);
       setFirm(data);
       setForm(data);
@@ -80,8 +89,12 @@ export default function SettingsFirmTab() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Firm Profile</CardTitle>
-          <CardDescription>Manage your CA firm details and contact information</CardDescription>
+          <CardTitle>{isHrOnly ? 'Claim submission cutoff' : 'Firm Profile'}</CardTitle>
+          <CardDescription>
+            {isHrOnly
+              ? 'T+N days after expense date allowed for claim submit'
+              : 'Manage your CA firm details and contact information'}
+          </CardDescription>
         </div>
         {!editing ? (
           <Button variant="outline" onClick={() => setEditing(true)}>
@@ -106,7 +119,7 @@ export default function SettingsFirmTab() {
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {FIRM_FIELDS.map(({ key, label }) => (
+          {visibleFields.map(({ key, label }) => (
             <div key={key} className="space-y-2">
               <Label>{label}</Label>
               {editing ? (

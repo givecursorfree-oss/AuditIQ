@@ -37,7 +37,7 @@ export default function Settings() {
   const { user: currentUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  if (currentUser && !['Partner', 'Admin', 'Manager'].includes(currentUser.role)) {
+  if (currentUser && !['Partner', 'Admin', 'Manager', 'HR'].includes(currentUser.role)) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
@@ -49,9 +49,12 @@ export default function Settings() {
     );
   }
 
-  const visibleTabs = currentUser?.role === 'Manager'
-    ? SETTINGS_TABS.filter((t) => t.id === 'users' || t.id === 'shortcuts')
-    : SETTINGS_TABS;
+  const visibleTabs =
+    currentUser?.role === 'Manager'
+      ? SETTINGS_TABS.filter((t) => t.id === 'users' || t.id === 'shortcuts')
+      : currentUser?.role === 'HR'
+        ? SETTINGS_TABS.filter((t) => t.id === 'firm' || t.id === 'users')
+        : SETTINGS_TABS;
 
   const requestedTab = searchParams.get('tab') as Tab_ | null;
   const activeTab =

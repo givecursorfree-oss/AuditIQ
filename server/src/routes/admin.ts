@@ -551,7 +551,7 @@ router.post('/users', authorize('Partner', 'Admin', 'HR'), async (req: AuthReque
 // ─── FIRM SETTINGS ───
 
 // GET /api/admin/firm — Get firm details
-router.get('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.get('/firm', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firm = await prisma.firm.findFirst({
       where: { users: { some: { id: req.user!.id } } },
@@ -585,9 +585,17 @@ const updateFirmSchema = z.object({
   expenseSubmissionWindowDays: z.number().int().min(1).max(30).optional(),
 });
 
-router.put('/firm', authorize('Partner', 'Admin'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/firm', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = updateFirmSchema.parse(req.body);
+
+    if (req.user!.role === 'HR') {
+      const keys = Object.keys(data).filter((k) => (data as Record<string, unknown>)[k] !== undefined);
+      if (keys.length !== 1 || !keys.includes('expenseSubmissionWindowDays')) {
+        res.status(403).json({ error: 'HR can only update expense submission window (days)' });
+        return;
+      }
+    }
 
     const firm = await prisma.firm.findFirst({
       where: { users: { some: { id: req.user!.id } } },

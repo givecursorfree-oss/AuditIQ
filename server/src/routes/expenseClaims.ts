@@ -245,24 +245,43 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
           ];
 
     const isArticleRole = ['Intern', 'Staff'].includes(req.user!.role);
-    if (isArticleRole) {
-      const missingClient = participantRows.some((p) => !p.clientId && !body.clientId);
-      const missingActivity =
-        body.claimType !== 'travel' &&
-        participantRows.some((p) => !(p.workType ?? body.workType)?.trim());
+    // Food: client / manager / engagement / notes are optional for all roles.
+    // Travel still requires its own fields above; Intern/Staff travel still needs manager.
+    if (isArticleRole && body.claimType === 'travel') {
       const missingManager = participantRows.some((p) => !p.managerId);
-      if (missingClient) {
-        res.status(400).json({ error: 'Client Name is required' });
-        return;
-      }
-      if (missingActivity) {
-        res.status(400).json({ error: 'Activity Classification is required' });
-        return;
-      }
       if (missingManager) {
         res.status(400).json({ error: 'Manager/Partner is required' });
         return;
       }
+    }
+
+    const firm = await prisma.firm.findFirst({
+      where: { id: req.user!.firmId! },
+      select: { expenseSubmissionWindowDays: true },
+    });
+    const windowDays = firm?.expenseSubmissionWindowDays ?? 3;
+    const expenseDate = new Date(body.expenseDate);
+    if (Number.isNaN(expenseDate.getTime())) {
+      res.status(400).json({ error: 'Invalid expense date' });
+      return;
+    }
+    const today = new Date();
+    const startExpense = Date.UTC(
+      expenseDate.getUTCFullYear(),
+      expenseDate.getUTCMonth(),
+      expenseDate.getUTCDate()
+    );
+    const startToday = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const daysLate = Math.floor((startToday - startExpense) / 86_400_000);
+    if (daysLate < 0) {
+      res.status(400).json({ error: 'Expense date cannot be in the future' });
+      return;
+    }
+    if (daysLate > windowDays) {
+      res.status(400).json({
+        error: `Claims must be submitted within ${windowDays} day(s) of the expense date (T+${windowDays})`,
+      });
+      return;
     }
 
     for (const p of participantRows) {
@@ -310,7 +329,6 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       }
     }
 
-    const expenseDate = new Date(body.expenseDate);
     const payerId = body.expensePayerId ?? req.user!.id;
     const payerOk = await prisma.user.findFirst({
       where: { id: payerId, firmId: req.user!.firmId! },

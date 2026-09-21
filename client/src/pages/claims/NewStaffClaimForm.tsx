@@ -234,24 +234,6 @@ export function NewStaffClaimForm() {
         await appAlert({ title: 'People required', message: 'Select at least one person covered.' });
         return;
       }
-      if (isArticleRole || filled.some((p) => !p.clientId)) {
-        if (filled.some((p) => !p.clientId)) {
-          await appAlert({ title: 'Client required', message: 'Select Client Name.' });
-          return;
-        }
-      }
-      if (isArticleRole || filled.some((p) => !p.workType?.trim())) {
-        if (filled.some((p) => !p.workType?.trim())) {
-          await appAlert({ title: 'Activity required', message: 'Select Activity Classification.' });
-          return;
-        }
-      }
-      if (isArticleRole || filled.some((p) => !p.managerId)) {
-        if (filled.some((p) => !p.managerId)) {
-          await appAlert({ title: 'Manager required', message: 'Select Manager/Partner.' });
-          return;
-        }
-      }
     }
 
     const amount = parseFloat(form.amount);
@@ -340,9 +322,13 @@ export function NewStaffClaimForm() {
 
           <div>
             <Label>Client Name</Label>
-            <Select value={form.clientId} onValueChange={setClaimClient} required={isArticleRole || type === 'travel'}>
+            <Select
+              value={form.clientId || undefined}
+              onValueChange={setClaimClient}
+              required={type === 'travel'}
+            >
               <SelectTrigger>
-                <SelectValue placeholder="Select client" />
+                <SelectValue placeholder={type === 'food' ? 'Optional' : 'Select client'} />
               </SelectTrigger>
               <SelectContent>
                 {clients.map((c) => (
@@ -509,9 +495,9 @@ export function NewStaffClaimForm() {
             <>
               <div>
                 <Label>Activity Classification</Label>
-                <Select value={form.workType} onValueChange={setClaimActivity} required={isArticleRole}>
+                <Select value={form.workType || undefined} onValueChange={setClaimActivity}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select activity" />
+                    <SelectValue placeholder="Optional" />
                   </SelectTrigger>
                   <SelectContent>
                     {activities.map((w) => (
@@ -525,9 +511,9 @@ export function NewStaffClaimForm() {
 
               <div>
                 <Label>Manager / Partner</Label>
-                <Select value={form.managerId} onValueChange={setClaimManager} required={isArticleRole}>
+                <Select value={form.managerId || undefined} onValueChange={setClaimManager}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select approver" />
+                    <SelectValue placeholder="Optional" />
                   </SelectTrigger>
                   <SelectContent>
                     {approvers.map((a) => (
@@ -537,6 +523,15 @@ export function NewStaffClaimForm() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div>
+                <Label>Notes</Label>
+                <Textarea
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  rows={2}
+                />
               </div>
 
               <div>

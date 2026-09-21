@@ -326,16 +326,12 @@ export async function syncGoogleDriveConnection(connectionId: string): Promise<D
         );
 
         const engagementId = conn.defaultEngagementId;
-        if (!engagementId) {
-          skipped++;
-          if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
-          continue;
-        }
-
-        const engagement = await prisma.engagement.findFirst({
-          where: { id: engagementId, firmId: conn.firmId },
-          select: { clientId: true },
-        });
+        const engagement = engagementId
+          ? await prisma.engagement.findFirst({
+              where: { id: engagementId, firmId: conn.firmId },
+              select: { clientId: true },
+            })
+          : null;
 
         if (existing) {
           if (existing.storagePath && fs.existsSync(existing.storagePath)) {
@@ -353,6 +349,9 @@ export async function syncGoogleDriveConnection(connectionId: string): Promise<D
               syncedAt: new Date(),
               indexStatus: 'PENDING',
               isOcrProcessed: false,
+              ...(engagementId
+                ? { engagementId, clientId: engagement?.clientId ?? null, visibility: 'ENGAGEMENT' }
+                : {}),
             },
           });
           enqueueDocumentIndex(existing.id);
@@ -366,10 +365,10 @@ export async function syncGoogleDriveConnection(connectionId: string): Promise<D
               storagePath: localPath,
               source: 'GOOGLE_DRIVE',
               externalId: file.id,
-              visibility: 'ENGAGEMENT',
+              visibility: engagementId ? 'ENGAGEMENT' : 'FIRM',
               firmId: conn.firmId,
               clientId: engagement?.clientId ?? null,
-              engagementId,
+              engagementId: engagementId || null,
               uploadedById: conn.userId,
               driveModifiedAt: driveModified,
               syncedAt: new Date(),
