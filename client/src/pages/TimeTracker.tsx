@@ -32,8 +32,22 @@ interface TimeEntry {
   workType: string | null;
   description: string | null;
   isBillable: boolean;
+  clientName?: string | null;
+  compOff?: boolean;
   engagement: { title: string; client: { name: string } } | null;
+  supervisor?: { id: string; firstName: string; lastName: string } | null;
   user?: { firstName: string; lastName: string; initials: string };
+}
+
+interface GridClient {
+  name: string;
+  engagements: { id: string; title: string }[];
+}
+
+interface SupervisorOption {
+  id: string;
+  name: string;
+  role: string;
 }
 
 interface EngagementOption {
@@ -52,6 +66,16 @@ interface Task {
 }
 
 const WORK_TYPES_FALLBACK = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'];
+const HOUR_CHOICES = Array.from({ length: 24 }, (_, i) => (i + 1) * 0.5);
+
+function entryClientName(entry: TimeEntry): string {
+  return entry.clientName || entry.engagement?.client?.name || '—';
+}
+
+function entryManagerName(entry: TimeEntry): string {
+  if (!entry.supervisor) return '—';
+  return `${entry.supervisor.firstName} ${entry.supervisor.lastName}`.trim();
+}
 
 export default function TimeTracker() {
   const { user } = useAuth();
@@ -62,6 +86,8 @@ export default function TimeTracker() {
   const [tick, setTick] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [engagements, setEngagements] = useState<EngagementOption[]>([]);
+  const [gridClients, setGridClients] = useState<GridClient[]>([]);
+  const [supervisors, setSupervisors] = useState<SupervisorOption[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reminders, setReminders] = useState<{ type: string; message: string }[]>([]);
@@ -74,10 +100,13 @@ export default function TimeTracker() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     date: new Date().toISOString().slice(0, 10),
+    clientName: '',
     engagementId: '',
+    supervisorId: '',
     workType: 'Audit',
     hours: 1,
     isBillable: true,
+    compOff: false,
     description: '',
   });
 
@@ -94,7 +123,20 @@ export default function TimeTracker() {
     try {
       await Promise.all([
         loadStopwatch(),
-        api.get('/engagements?limit=100').then(r => setEngagements(r.data.engagements || [])).catch(() => null),
+        api.get<{ clients: GridClient[]; supervisors: SupervisorOption[] }>('/time-entries/meta/grid').then((r) => {
+          const clients = r.data.clients || [];
+          setGridClients(clients);
+          setSupervisors(r.data.supervisors || []);
+          setEngagements(
+            clients.flatMap((client) =>
+              client.engagements.map((engagement) => ({
+                id: engagement.id,
+                title: engagement.title,
+                client: { name: client.name },
+              }))
+            )
+          );
+        }).catch(() => null),
         api.get<{ workTypes: string[] }>('/time-entries/meta/vocab').then((r) => {
           if (r.data.workTypes?.length) {
             setWorkTypes(r.data.workTypes);
@@ -331,21 +373,43 @@ export default function TimeTracker() {
     }
   }
 
+  const clientEngagements = useMemo(() => {
+    const key = manualForm.clientName.trim().toLowerCase();
+    if (!key) return [];
+    return gridClients.find((client) => client.name.trim().toLowerCase() === key)?.engagements ?? [];
+  }, [gridClients, manualForm.clientName]);
+
   async function submitManual() {
-    if (!manualForm.engagementId) {
-      await appAlert({ title: 'Engagement required', message: 'Pick an engagement.' });
+    if (!manualForm.clientName.trim()) {
+      await appAlert({ title: 'Client required', message: 'Select a client.' });
+      return;
+    }
+    if (!manualForm.supervisorId) {
+      await appAlert({ title: 'Manager required', message: 'Select a manager or partner.' });
+      return;
+    }
+    if (!manualForm.hours || manualForm.hours < 0.25) {
+      await appAlert({ title: 'Hours required', message: 'Select the number of hours.' });
       return;
     }
     try {
       await api.post('/time-entries', {
-        ...manualForm,
         date: new Date(manualForm.date).toISOString(),
         hours: Number(manualForm.hours),
+        workType: manualForm.workType,
+        description: manualForm.description,
+        isBillable: manualForm.isBillable,
+        compOff: manualForm.compOff,
+        clientName: manualForm.clientName.trim(),
+        supervisorId: manualForm.supervisorId,
+        ...(manualForm.engagementId ? { engagementId: manualForm.engagementId } : {}),
       });
-      setManualForm({ ...manualForm, hours: 1, description: '' });
+      setManualForm({ ...manualForm, description: '' });
       await loadEntries();
     } catch (e: any) {
-      await appAlert({ title: 'Could not save', message: e?.response?.data?.error || 'Failed to save entry' });
+      const raw = e?.response?.data?.error;
+      const message = typeof raw === 'string' ? raw : 'Failed to save entry';
+      await appAlert({ title: 'Could not save', message });
     }
   }
 
@@ -486,7 +550,7 @@ export default function TimeTracker() {
                       {e.user ? `${e.user.firstName} ${e.user.lastName}` : user ? `${user.firstName} ${user.lastName}` : '—'}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="truncate font-medium">{e.engagement?.client?.name ?? '—'}</div>
+                      <div className="truncate font-medium">{entryClientName(e)}</div>
                       {e.engagement?.title ? (
                         <div className="truncate text-xs text-muted-foreground">{e.engagement.title}</div>
                       ) : null}
@@ -518,19 +582,80 @@ export default function TimeTracker() {
       {tab === 'manual' && (
         <div className="card p-6 space-y-4">
           <h3 className="font-semibold text-foreground flex items-center gap-2"><Plus size={18} /> Add time entry</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
-            <input type="date" aria-label="Date" className="input-field" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} />
-            <select className="input-field sm:col-span-2" aria-label="Client or engagement" value={manualForm.engagementId} onChange={e => setManualForm({ ...manualForm, engagementId: e.target.value })}>
-              <option value="">Client / Engagement…</option>
-              {engagements.map(e => <option key={e.id} value={e.id}>{e.client.name} — {e.title}</option>)}
-            </select>
-            <select className="input-field" aria-label="Work type" value={manualForm.workType} onChange={e => setManualForm({ ...manualForm, workType: e.target.value })}>
-              {workTypes.map(w => <option key={w}>{w}</option>)}
-            </select>
-            <input type="number" step={0.25} min={0.25} aria-label="Hours" className="input-field" value={manualForm.hours} onChange={e => setManualForm({ ...manualForm, hours: Number(e.target.value) })} />
-            <label className="flex items-center gap-2 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Date</span>
+              <input type="date" aria-label="Date" className="input-field mt-1" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Client</span>
+              <input
+                className="input-field mt-1"
+                aria-label="Client"
+                list="manual-time-clients"
+                value={manualForm.clientName}
+                onChange={(e) => setManualForm({ ...manualForm, clientName: e.target.value, engagementId: '' })}
+              />
+              <datalist id="manual-time-clients">
+                {gridClients.map((client) => (
+                  <option key={client.name} value={client.name} />
+                ))}
+              </datalist>
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Engagement</span>
+              <select
+                className="input-field mt-1"
+                aria-label="Engagement"
+                value={manualForm.engagementId}
+                onChange={(e) => setManualForm({ ...manualForm, engagementId: e.target.value })}
+              >
+                <option value="">—</option>
+                {clientEngagements.map((engagement) => (
+                  <option key={engagement.id} value={engagement.id}>{engagement.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Activity</span>
+              <select className="input-field mt-1" aria-label="Work type" value={manualForm.workType} onChange={e => setManualForm({ ...manualForm, workType: e.target.value })}>
+                {workTypes.map(w => <option key={w}>{w}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Manager / Partner</span>
+              <select
+                className="input-field mt-1"
+                aria-label="Manager or partner"
+                value={manualForm.supervisorId}
+                onChange={(e) => setManualForm({ ...manualForm, supervisorId: e.target.value })}
+              >
+                <option value="">—</option>
+                {supervisors.map((person) => (
+                  <option key={person.id} value={person.id}>{person.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted-foreground">Hours</span>
+              <select
+                className="input-field mt-1"
+                aria-label="Hours"
+                value={String(manualForm.hours)}
+                onChange={(e) => setManualForm({ ...manualForm, hours: Number(e.target.value) })}
+              >
+                {HOUR_CHOICES.map((hours) => (
+                  <option key={hours} value={hours}>{hours.toFixed(hours % 1 === 0 ? 0 : 1)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm mt-5">
               <input type="checkbox" checked={manualForm.isBillable} onChange={e => setManualForm({ ...manualForm, isBillable: e.target.checked })} />
               Billable
+            </label>
+            <label className="flex items-center gap-2 text-sm mt-5">
+              <input type="checkbox" checked={manualForm.compOff} onChange={e => setManualForm({ ...manualForm, compOff: e.target.checked })} />
+              Comp off
             </label>
           </div>
           <input className="input-field" aria-label="Notes or description" placeholder="Notes / description" value={manualForm.description} onChange={e => setManualForm({ ...manualForm, description: e.target.value })} />
@@ -540,15 +665,16 @@ export default function TimeTracker() {
             <h4 className="font-semibold text-foreground mb-2">Recent entries</h4>
             <table className="w-full text-sm">
               <thead><tr className="table-header text-left">
-                <th className="px-4 py-3">Date</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Engagement</th><th className="px-4 py-3">Work Type</th><th className="px-4 py-3">Hours</th><th className="px-4 py-3">Billable</th>
+                <th className="px-4 py-3">Date</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Engagement</th><th className="px-4 py-3">Work Type</th><th className="px-4 py-3">Manager / Partner</th><th className="px-4 py-3">Hours</th><th className="px-4 py-3">Billable</th>
               </tr></thead>
               <tbody>
                 {entries.map(e => (
                   <tr key={e.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-2.5">{new Date(e.date).toLocaleDateString('en-IN')}</td>
-                    <td className="px-4 py-2.5">{e.engagement?.client?.name ?? '—'}</td>
+                    <td className="px-4 py-2.5">{entryClientName(e)}</td>
                     <td className="px-4 py-2.5 truncate max-w-xs">{e.engagement?.title ?? '—'}</td>
                     <td className="px-4 py-2.5">{e.workType || '—'}</td>
+                    <td className="px-4 py-2.5">{entryManagerName(e)}</td>
                     <td className="px-4 py-2.5">{Number(e.hours).toFixed(2)}</td>
                     <td className="px-4 py-2.5">{e.isBillable ? '✓' : '—'}</td>
                   </tr>

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
-import { listLookupValues, LOOKUP_ACTIVITY } from '../lib/hrLookups.js';
+import { listLookupValues, LOOKUP_ACTIVITY, LOOKUP_CLIENT } from '../lib/hrLookups.js';
 
 const router = Router();
 router.use(authenticate);
@@ -18,7 +18,10 @@ const timeEntrySchema = z.object({
   description: z.string().optional(),
   notes: z.string().optional(),
   isBillable: z.boolean().optional(),
-  engagementId: z.string().uuid(),
+  engagementId: z.string().uuid().optional(),
+  clientName: z.string().trim().min(1).max(200),
+  supervisorId: z.string().uuid(),
+  compOff: z.boolean().optional(),
 });
 
 const timeEntryUpdateSchema = z.object({
@@ -39,14 +42,45 @@ function requireFirmId(req: AuthRequest, res: Response): string | null {
   return firmId;
 }
 
+const entryInclude = {
+  engagement: { select: { title: true, client: { select: { name: true } } } },
+  user: { select: { firstName: true, lastName: true, initials: true } },
+  supervisor: { select: { id: true, firstName: true, lastName: true } },
+} as const;
+
+const SUPERVISOR_ROLES = ['Partner', 'Manager'] as const;
+
+async function firmClientNames(firmId: string): Promise<string[]> {
+  const [names, engagements] = await Promise.all([
+    listLookupValues(firmId, LOOKUP_CLIENT),
+    prisma.engagement.findMany({
+      where: { firmId },
+      select: { client: { select: { name: true } } },
+    }),
+  ]);
+  const known = new Set(names.map((name) => name.trim().toLowerCase()));
+  const all = [...names];
+  for (const engagement of engagements) {
+    const raw = engagement.client.name.trim();
+    const key = raw.toLowerCase();
+    if (raw && !known.has(key)) {
+      known.add(key);
+      all.push(raw);
+    }
+  }
+  all.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  return all;
+}
+
 // GET /api/time-entries?engagementId=xxx&userId=xxx|all
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const firmId = requireFirmId(req, res);
     if (!firmId) return;
     const { engagementId, userId, from, to } = req.query;
-    const where: Record<string, unknown> = { engagement: { firmId } };
-    if (engagementId) where.engagementId = String(engagementId);
+    const where: Record<string, unknown> = engagementId
+      ? { engagementId: String(engagementId), engagement: { firmId } }
+      : { user: { firmId } };
 
     const isManagerPlus = ['Partner', 'Admin', 'Manager'].includes(req.user!.role);
     const requestedUserId = userId != null ? String(userId) : null;
@@ -77,10 +111,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       where,
       orderBy: { date: 'desc' },
       take: 500,
-      include: {
-        engagement: { select: { title: true, client: { select: { name: true } } } },
-        user: { select: { firstName: true, lastName: true, initials: true } },
-      },
+      include: entryInclude,
     });
     res.json(entries);
   } catch (err) {
@@ -124,6 +155,7 @@ router.get('/summary', async (req: AuthRequest, res: Response): Promise<void> =>
 
     const byEngagement: Record<string, number> = {};
     for (const row of byEngagementRows) {
+      if (!row.engagementId) continue;
       byEngagement[row.engagementId] = row._sum.hours ?? 0;
     }
     const byUser: Record<string, number> = {};
@@ -154,6 +186,59 @@ router.get('/meta/vocab', async (req: AuthRequest, res: Response): Promise<void>
   }
 });
 
+/** GET /api/time-entries/meta/grid — full client list, engagements, manager/partner picker. */
+router.get('/meta/grid', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const firmId = requireFirmId(req, res);
+    if (!firmId) return;
+
+    const [names, engagements, supervisors] = await Promise.all([
+      listLookupValues(firmId, LOOKUP_CLIENT),
+      prisma.engagement.findMany({
+        where: { firmId },
+        select: { id: true, title: true, client: { select: { name: true } } },
+        orderBy: { title: 'asc' },
+      }),
+      prisma.user.findMany({
+        where: { firmId, isActive: true, role: { in: [...SUPERVISOR_ROLES] } },
+        select: { id: true, firstName: true, lastName: true, role: true },
+        orderBy: [{ role: 'asc' }, { firstName: 'asc' }, { lastName: 'asc' }],
+      }),
+    ]);
+
+    const byClient = new Map<string, { id: string; title: string }[]>();
+    const known = new Set(names.map((name) => name.trim().toLowerCase()));
+    const clientNames = [...names];
+    for (const engagement of engagements) {
+      const raw = engagement.client.name.trim();
+      const key = raw.toLowerCase();
+      const list = byClient.get(key) || [];
+      list.push({ id: engagement.id, title: engagement.title });
+      byClient.set(key, list);
+      if (raw && !known.has(key)) {
+        known.add(key);
+        clientNames.push(raw);
+      }
+    }
+    clientNames.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+    res.json({
+      clients: clientNames.map((name) => ({
+        name,
+        engagements: byClient.get(name.trim().toLowerCase()) || [],
+      })),
+      supervisors: supervisors.map((person) => ({
+        id: person.id,
+        name: `${person.firstName} ${person.lastName}`.trim(),
+        role: person.role,
+      })),
+    });
+  } catch (err) {
+    logger.error('Time entry grid meta error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to load time grid' });
+  }
+});
+
 // POST /api/time-entries
 router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -161,13 +246,37 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     if (!firmId) return;
     const data = timeEntrySchema.parse(req.body);
 
-    const engagement = await prisma.engagement.findFirst({
-      where: { id: data.engagementId, firmId },
+    const allowedClients = await firmClientNames(firmId);
+    const canonical = allowedClients.find(
+      (name) => name.trim().toLowerCase() === data.clientName.trim().toLowerCase()
+    );
+    if (!canonical) {
+      res.status(400).json({ error: 'Select a client from the firm list' });
+      return;
+    }
+
+    const supervisor = await prisma.user.findFirst({
+      where: { id: data.supervisorId, firmId, isActive: true, role: { in: [...SUPERVISOR_ROLES] } },
       select: { id: true },
     });
-    if (!engagement) {
-      res.status(404).json({ error: 'Engagement not found' });
+    if (!supervisor) {
+      res.status(400).json({ error: 'Select a manager or partner' });
       return;
+    }
+
+    if (data.engagementId) {
+      const engagement = await prisma.engagement.findFirst({
+        where: { id: data.engagementId, firmId },
+        select: { id: true, client: { select: { name: true } } },
+      });
+      if (!engagement) {
+        res.status(404).json({ error: 'Engagement not found' });
+        return;
+      }
+      if (engagement.client.name.trim().toLowerCase() !== canonical.trim().toLowerCase()) {
+        res.status(400).json({ error: 'Engagement does not belong to that client' });
+        return;
+      }
     }
 
     const entry = await prisma.timeEntry.create({
@@ -179,13 +288,13 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         notes: data.notes,
         isBillable: data.isBillable ?? data.workType !== 'Internal',
         engagementId: data.engagementId,
+        clientName: canonical,
+        supervisorId: supervisor.id,
+        compOff: data.compOff ?? false,
         userId: req.user!.id,
         source: 'manual',
       },
-      include: {
-        engagement: { select: { title: true, client: { select: { name: true } } } },
-        user: { select: { firstName: true, lastName: true, initials: true } },
-      },
+      include: entryInclude,
     });
     res.status(201).json(entry);
   } catch (err) {
@@ -203,7 +312,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     const { date, hours, workType, description, notes, isBillable } = timeEntryUpdateSchema.parse(req.body);
 
     const existing = await prisma.timeEntry.findFirst({
-      where: { id: String(req.params.id), engagement: { firmId } },
+      where: { id: String(req.params.id), user: { firmId } },
       select: { id: true, userId: true },
     });
     if (!existing) {
@@ -225,10 +334,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
         ...(notes !== undefined && { notes }),
         ...(isBillable !== undefined && { isBillable }),
       },
-      include: {
-        engagement: { select: { title: true, client: { select: { name: true } } } },
-        user: { select: { firstName: true, lastName: true, initials: true } },
-      },
+      include: entryInclude,
     });
     res.json(entry);
   } catch (err) {
@@ -245,7 +351,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => 
     if (!firmId) return;
 
     const existing = await prisma.timeEntry.findFirst({
-      where: { id: String(req.params.id), engagement: { firmId } },
+      where: { id: String(req.params.id), user: { firmId } },
       select: { id: true, userId: true },
     });
     if (!existing) {

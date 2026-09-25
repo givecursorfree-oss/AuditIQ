@@ -5,6 +5,7 @@ import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { canAttestTimesheets } from '../lib/gradeCapabilities.js';
 import { formatStaffTitle } from '../lib/staffTitle.js';
+import { expandTimesheetDays, groupTimesheetDays, timesheetWorkbookBuffer } from '../lib/timesheetExcel.js';
 
 const router = Router();
 router.use(authenticate);
@@ -164,7 +165,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         if (!clockOutTime || iso > clockOutTime) clockOutTime = iso;
       }
 
-      const key = e.taskId || `eng:${e.engagementId}`;
+      const key = e.taskId || (e.engagementId ? `eng:${e.engagementId}` : `client:${e.clientName || ''}|${e.workType || ''}`);
       const mins = Math.round(e.hours * 60);
       const existing = taskMap.get(key);
       if (existing) {
@@ -173,8 +174,8 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         taskMap.set(key, {
           taskId: e.taskId || key,
           taskName: e.task?.title || e.workType || 'General work',
-          engagementName: e.engagement.title,
-          clientName: e.engagement.client.name,
+          engagementName: e.engagement?.title || '—',
+          clientName: e.clientName || e.engagement?.client.name || '—',
           durationMinutes: mins,
         });
       }
@@ -464,6 +465,78 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
   } catch (err) {
     logger.error('Timesheet export error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to export timesheets' });
+  }
+});
+
+/**
+ * GET /api/timesheets/firm/export.xlsx?from=&to=
+ * Wide workbook in the firm Time Sheet layout. HR only — they reconcile this file.
+ */
+router.get('/firm/export.xlsx', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user!.role !== 'HR') {
+      res.status(403).json({ error: 'Timesheet workbook export is limited to HR' });
+      return;
+    }
+    const firmId = req.user!.firmId;
+    if (!firmId) {
+      res.status(400).json({ error: 'Your account is not linked to a firm' });
+      return;
+    }
+    const fromQ = req.query.from ? String(req.query.from) : '';
+    const toQ = req.query.to ? String(req.query.to) : '';
+    if (!fromQ || !toQ) {
+      res.status(400).json({ error: 'from and to are both required (YYYY-MM-DD)' });
+      return;
+    }
+    let start: Date;
+    let end: Date;
+    try {
+      ({ start, end } = rangeBounds(fromQ, toQ));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+      return;
+    }
+
+    const entries = await prisma.timeEntry.findMany({
+      where: { user: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } }, date: { gte: start, lt: end } },
+      select: {
+        userId: true,
+        date: true,
+        hours: true,
+        workType: true,
+        description: true,
+        clientName: true,
+        compOff: true,
+        user: { select: { ...staffTitleSelect, email: true } },
+        engagement: { select: { client: { select: { name: true } } } },
+        supervisor: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const days = groupTimesheetDays(
+      entries.map((entry) => ({
+        userId: entry.userId,
+        dateKey: istDateKey(entry.date),
+        email: entry.user.email,
+        staffName: `${entry.user.firstName} ${entry.user.lastName}`.trim(),
+        designation: formatStaffTitle(entry.user),
+        clientName: entry.clientName || entry.engagement?.client.name || '',
+        activity: entry.workType || '',
+        manager: entry.supervisor ? `${entry.supervisor.firstName} ${entry.supervisor.lastName}`.trim() : '',
+        hours: entry.hours,
+        details: entry.description || '',
+        compOff: entry.compOff,
+      }))
+    );
+    const buffer = await timesheetWorkbookBuffer(expandTimesheetDays(days));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="timesheet-${fromQ}_to_${toQ}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    logger.error('Timesheet workbook export error', { error: (err as Error).message });
+    res.status(500).json({ error: 'Failed to export timesheet workbook' });
   }
 });
 

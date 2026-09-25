@@ -72,6 +72,7 @@ function defaultExportRange(anchor: string) {
 export default function Timesheets() {
   const { user } = useAuth();
   const canFirm = Boolean(user && FIRM_VIEW_ROLES.includes(user.role));
+  const isHr = user?.role === 'HR';
   const canAttest = Boolean(
     user && canAttestTimesheets(user.role, user.hierarchyLevel?.code)
   );
@@ -174,6 +175,30 @@ export default function Timesheets() {
     }
   }
 
+  async function exportTimesheetWorkbook() {
+    if (!isHr || exporting) return;
+    if (!exportFrom || !exportTo) {
+      await appAlert({ title: 'Select dates', message: 'Choose from and to dates for the export.' });
+      return;
+    }
+    if (exportFrom > exportTo) {
+      await appAlert({ title: 'Invalid range', message: 'From date must be on or before to date.' });
+      return;
+    }
+    setExporting(true);
+    try {
+      const response = await api.get<Blob>('/timesheets/firm/export.xlsx', {
+        params: { from: exportFrom, to: exportTo },
+        responseType: 'blob',
+      });
+      downloadBlob(`timesheet-${exportFrom}_to_${exportTo}.xlsx`, response.data);
+    } catch {
+      await appAlert({ title: 'Export failed', message: 'Could not export the timesheet workbook.' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <AppPageContainer>
       <PageHeader
@@ -202,8 +227,14 @@ export default function Timesheets() {
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => void exportTimesheetsRange()} disabled={exporting}>
               <Download size={16} className="mr-1" />
-              {exporting ? 'Exporting…' : 'Export'}
+              {exporting ? 'Exporting…' : 'Export CSV'}
             </Button>
+            {isHr && (
+              <Button type="button" size="sm" onClick={() => void exportTimesheetWorkbook()} disabled={exporting}>
+                <Download size={16} className="mr-1" />
+                {exporting ? 'Exporting…' : 'Export Excel'}
+              </Button>
+            )}
           </>
         )}
         <div className="flex flex-wrap gap-2">

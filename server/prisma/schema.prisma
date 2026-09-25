@@ -103,6 +103,7 @@ model User {
   signoffs          SignOff[]
   documents         Document[]
   timeEntries       TimeEntry[]
+  supervisedTimeEntries TimeEntry[]    @relation("TimeEntrySupervisor")
   timesheetDays     TimesheetDay[]     @relation("TimesheetDayStaff")
   timesheetReviews  TimesheetDay[]     @relation("TimesheetDayReviewer")
   notifications     Notification[]
@@ -744,10 +745,15 @@ model TimeEntry {
   endedAt     DateTime?
   createdAt   DateTime  @default(now())
 
-  engagementId String
-  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  /// Denormalized client (HR timesheet list). Set even when an engagement is chosen.
+  clientName   String?
+  compOff      Boolean   @default(false)
+  engagementId String?
+  engagement   Engagement? @relation(fields: [engagementId], references: [id])
   userId       String
   user         User       @relation(fields: [userId], references: [id])
+  supervisorId String?
+  supervisor   User?      @relation("TimeEntrySupervisor", fields: [supervisorId], references: [id], onDelete: SetNull)
   taskId       String?
   task         Task?      @relation(fields: [taskId], references: [id], onDelete: SetNull)
 

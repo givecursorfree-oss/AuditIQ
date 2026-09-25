@@ -131,7 +131,7 @@ router.get('/e-diary/export', async (req: AuthRequest, res: Response): Promise<v
     for (const e of entries) {
       const d = e.date.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
       lines.push(
-        `${d.padEnd(12)} | ${(e.engagement.client.name || '').slice(0, 25).padEnd(25)} | ${(e.workType || 'Audit').slice(0, 20).padEnd(20)} | ${String(e.hours).padStart(5)} | ${e.description || ''}`
+        `${d.padEnd(12)} | ${(e.clientName || e.engagement?.client.name || '').slice(0, 25).padEnd(25)} | ${(e.workType || 'Audit').slice(0, 20).padEnd(20)} | ${String(e.hours).padStart(5)} | ${e.description || ''}`
       );
     }
     if (entries.length === 0) lines.push('(No entries logged in this period)');
