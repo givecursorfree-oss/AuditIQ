@@ -161,6 +161,7 @@ model User {
   expenseClaimsAsPayer     ExpenseClaim[]     @relation("ExpenseClaimExpensePayer")
   expenseClaimsVisitedBy   ExpenseClaim[]     @relation("ExpenseClaimVisitedBy")
   expenseClaimParticipants ExpenseClaimParticipant[]
+  expenseClaimParticipantsManaged ExpenseClaimParticipant[] @relation("ExpenseClaimParticipantManager")
   expenseClaimManagerApprovals ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalManager")
   expenseClaimManagerReviews   ExpenseClaimManagerApproval[] @relation("ClaimManagerApprovalReviewer")
   claimBatchesCreated      ClaimBatch[]       @relation("ClaimBatchCreator")
@@ -1976,8 +1977,10 @@ model ExpenseClaimParticipant {
   client        Client?      @relation(fields: [clientId], references: [id])
   workType      String?
   workTypeOther String?
+  notes         String?      @db.Text
   amountShare   Decimal      @db.Decimal(12, 2)
   managerId     String?
+  manager       User?        @relation("ExpenseClaimParticipantManager", fields: [managerId], references: [id], onDelete: SetNull)
 
   @@index([claimId])
   @@index([userId])

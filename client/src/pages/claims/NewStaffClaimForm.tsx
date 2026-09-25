@@ -33,6 +33,7 @@ type ParticipantForm = {
   clientId: string;
   workType: string;
   managerId: string;
+  notes: string;
 };
 
 export function NewStaffClaimForm() {
@@ -40,7 +41,6 @@ export function NewStaffClaimForm() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const type = claimType === 'travel' ? 'travel' : 'food';
-  const isArticleRole = user?.role === 'Intern' || user?.role === 'Staff';
 
   const [engagements, setEngagements] = useState<EngOption[]>([]);
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
@@ -52,7 +52,6 @@ export function NewStaffClaimForm() {
     expenseDate: new Date().toISOString().slice(0, 10),
     travelTime: '',
     amount: '',
-    description: '',
     clientId: '',
     engagementId: '',
     workType: type === 'travel' ? 'Travel' : '',
@@ -74,6 +73,7 @@ export function NewStaffClaimForm() {
       clientId: '',
       workType: type === 'travel' ? 'Travel' : '',
       managerId: '',
+      notes: '',
     },
   ]);
   const [files, setFiles] = useState<FileList | null>(null);
@@ -128,6 +128,7 @@ export function NewStaffClaimForm() {
       clientId: form.clientId,
       workType: form.workType || 'Travel',
       managerId: form.managerId,
+      notes: '',
     }]);
   }, [type, form.visitedById, form.engagementId, form.clientId, form.workType, form.managerId]);
 
@@ -149,9 +150,10 @@ export function NewStaffClaimForm() {
       {
         userId: '',
         engagementId: '',
-        clientId: form.clientId,
-        workType: form.workType || (type === 'travel' ? 'Travel' : ''),
-        managerId: form.managerId,
+        clientId: '',
+        workType: '',
+        managerId: '',
+        notes: '',
       },
     ]);
   }
@@ -172,11 +174,6 @@ export function NewStaffClaimForm() {
           : '',
       }))
     );
-  }
-
-  function setClaimActivity(workType: string) {
-    setForm((f) => ({ ...f, workType }));
-    setParticipants((prev) => prev.map((p) => ({ ...p, workType })));
   }
 
   function setClaimManager(managerId: string) {
@@ -207,7 +204,7 @@ export function NewStaffClaimForm() {
         await appAlert({ title: 'Incomplete', message: 'Fill all required travel fields.' });
         return;
       }
-      if (!form.managerId && isArticleRole) {
+      if (!form.managerId) {
         await appAlert({ title: 'Manager required', message: 'Select Manager/Partner.' });
         return;
       }
@@ -220,18 +217,18 @@ export function NewStaffClaimForm() {
           clientId: form.clientId,
           workType: form.workType || 'Travel',
           managerId: form.managerId,
+          notes: '',
         }]
-      : participants.filter((p) => p.userId).map((p) => ({
-          ...p,
-          clientId: p.clientId || form.clientId,
-          workType: p.workType || form.workType,
-          managerId: p.managerId || form.managerId,
-        }))
+      : participants.filter((p) => p.userId)
     );
 
     if (type === 'food') {
       if (filled.length === 0) {
         await appAlert({ title: 'People required', message: 'Select at least one person covered.' });
+        return;
+      }
+      if (filled.some((p) => !p.managerId)) {
+        await appAlert({ title: 'Manager required', message: 'Select Manager/Partner for each person covered.' });
         return;
       }
     }
@@ -255,7 +252,7 @@ export function NewStaffClaimForm() {
         workType: first.workType || (type === 'travel' ? 'Travel' : undefined),
         managerId: first.managerId || form.managerId || undefined,
         expenseDate: form.expenseDate,
-        description: type === 'travel' ? undefined : form.description || undefined,
+        description: type === 'travel' ? undefined : first.notes || undefined,
         travelTime: type === 'travel' ? form.travelTime || undefined : undefined,
         jurisdiction: type === 'travel' ? form.jurisdiction : undefined,
         centreState: type === 'travel' ? form.centreState || undefined : undefined,
@@ -270,8 +267,9 @@ export function NewStaffClaimForm() {
           userId: p.userId,
           engagementId: p.engagementId || undefined,
           clientId: p.clientId || undefined,
-          workType: p.workType,
+          workType: p.workType || undefined,
           managerId: p.managerId || undefined,
+          notes: p.notes || undefined,
         })),
       });
       if (files?.length) {
@@ -320,28 +318,23 @@ export function NewStaffClaimForm() {
             )}
           </div>
 
-          <div>
-            <Label>Client Name</Label>
-            <Select
-              value={form.clientId || undefined}
-              onValueChange={setClaimClient}
-              required={type === 'travel'}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={type === 'food' ? 'Optional' : 'Select client'} />
-              </SelectTrigger>
-              <SelectContent>
-                {clients.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {type === 'travel' ? (
             <>
+              <div>
+                <Label>Client Name</Label>
+                <Select value={form.clientId || undefined} onValueChange={setClaimClient} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clients.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div>
                 <Label>Engagement</Label>
                 <Select
@@ -462,7 +455,7 @@ export function NewStaffClaimForm() {
               </div>
               <div>
                 <Label>Manager / Partner</Label>
-                <Select value={form.managerId} onValueChange={setClaimManager} required={isArticleRole}>
+                <Select value={form.managerId || undefined} onValueChange={setClaimManager} required>
                   <SelectTrigger>
                     <SelectValue placeholder="Select approver" />
                   </SelectTrigger>
@@ -494,47 +487,6 @@ export function NewStaffClaimForm() {
           ) : (
             <>
               <div>
-                <Label>Activity Classification</Label>
-                <Select value={form.workType || undefined} onValueChange={setClaimActivity}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activities.map((w) => (
-                      <SelectItem key={w} value={w}>
-                        {w}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Manager / Partner</Label>
-                <Select value={form.managerId || undefined} onValueChange={setClaimManager}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {approvers.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.firstName} {a.lastName} ({a.role})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Notes</Label>
-                <Textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={2}
-                />
-              </div>
-
-              <div>
                 <Label>Paid by</Label>
                 <Select value={form.expensePayerId} onValueChange={(v) => setForm({ ...form, expensePayerId: v })}>
                   <SelectTrigger>
@@ -565,13 +517,17 @@ export function NewStaffClaimForm() {
                     Add
                   </Button>
                 </div>
-                {participants.map((p, idx) => (
+                {participants.map((p, idx) => {
+                  const rowEngagements = p.clientId
+                    ? engagements.filter((e) => e.client.id === p.clientId)
+                    : engagements;
+                  return (
                   <div key={idx} className="grid gap-2 border rounded-lg p-3 sm:grid-cols-2">
                     <div>
                       <Label>Person</Label>
-                      <Select value={p.userId} onValueChange={(v) => updateParticipant(idx, { userId: v })}>
+                      <Select value={p.userId || undefined} onValueChange={(v) => updateParticipant(idx, { userId: v })}>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue placeholder="Select person" />
                         </SelectTrigger>
                         <SelectContent>
                           {staffList.map((s) => (
@@ -585,21 +541,20 @@ export function NewStaffClaimForm() {
                     <div>
                       <Label>Engagement</Label>
                       <Select
-                        value={p.engagementId}
+                        value={p.engagementId || undefined}
                         onValueChange={(v) => {
                           const eng = engagements.find((e) => e.id === v);
                           updateParticipant(idx, {
                             engagementId: v,
-                            clientId: eng?.client.id ?? (p.clientId || form.clientId),
+                            clientId: eng?.client.id ?? p.clientId,
                           });
-                          if (eng?.client.id) setForm((f) => ({ ...f, clientId: eng.client.id }));
                         }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Optional" />
                         </SelectTrigger>
                         <SelectContent>
-                          {engagementsForClient.map((e) => (
+                          {rowEngagements.map((e) => (
                             <SelectItem key={e.id} value={e.id}>
                               {e.client.name} — {e.title}
                             </SelectItem>
@@ -607,15 +562,85 @@ export function NewStaffClaimForm() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div>
+                      <Label>Client Name</Label>
+                      <Select
+                        value={p.clientId || undefined}
+                        onValueChange={(v) => {
+                          const eng = engagements.find((e) => e.id === p.engagementId);
+                          updateParticipant(idx, {
+                            clientId: v,
+                            engagementId: eng?.client.id === v ? p.engagementId : '',
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Optional" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {clients.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Activity Classification</Label>
+                      <Select
+                        value={p.workType || undefined}
+                        onValueChange={(v) => updateParticipant(idx, { workType: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Optional" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activities.map((w) => (
+                            <SelectItem key={w} value={w}>
+                              {w}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label>Manager / Partner</Label>
+                      <Select
+                        value={p.managerId || undefined}
+                        onValueChange={(v) => updateParticipant(idx, { managerId: v })}
+                        required
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select approver" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {approvers.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.firstName} {a.lastName} ({a.role})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label>Notes</Label>
+                      <Textarea
+                        value={p.notes}
+                        onChange={(e) => updateParticipant(idx, { notes: e.target.value })}
+                        rows={2}
+                      />
+                    </div>
                     {participants.length > 1 && (
-                      <div className="flex items-end">
+                      <div className="flex items-end sm:col-span-2">
                         <Button type="button" size="sm" variant="ghost" onClick={() => removeParticipant(idx)}>
                           Remove
                         </Button>
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}

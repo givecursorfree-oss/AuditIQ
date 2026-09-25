@@ -108,6 +108,8 @@ export interface ClaimParticipantRow {
   engagement?: ClaimEngagementRef | null;
   client?: { id: string; name: string } | null;
   workType?: string | null;
+  notes?: string | null;
+  manager?: { id: string; firstName: string; lastName: string } | null;
 }
 
 export interface ClaimManagerApprovalRow {

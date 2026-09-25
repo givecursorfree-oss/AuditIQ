@@ -7,7 +7,8 @@ export type ParticipantInput = {
   clientId?: string;
   workType?: string;
   workTypeOther?: string;
-  /** Explicit approver (Articles/Staff pick Manager or Partner on the claim form). */
+  notes?: string;
+  /** Approver picked for this person. That manager or partner approves this share. */
   managerId?: string;
 };
 
@@ -86,6 +87,7 @@ export async function createParticipantsAndApprovals(
       clientId: p.clientId,
       workType: p.workType,
       workTypeOther: p.workTypeOther,
+      notes: p.notes,
       amountShare: shares[i],
       managerId: resolveParticipantManagerId(
         reportsMap.get(p.userId),

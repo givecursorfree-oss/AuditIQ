@@ -147,15 +147,14 @@ async function main() {
     'Client',
     pick(allPerms, ['dashboard', 'documents', 'reports', 'messages'], ['view'])
   );
-  await setRolePermissions(
-    'HR',
-    pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages', 'clients'], [
-      'view',
-      'manage',
-      'export',
-      'apply',
-    ])
-  );
+  const hrPerms = pick(allPerms, ['dashboard', 'attendance', 'leave', 'employees', 'messages', 'clients'], [
+    'view',
+    'manage',
+    'export',
+    'apply',
+  ]);
+  const engagementView = allPerms.find((p) => p.module === 'engagements' && p.action === 'view');
+  await setRolePermissions('HR', engagementView ? [...hrPerms, engagementView.id] : hrPerms);
   await setRolePermissions(
     'Accounts',
     pick(allPerms, ['dashboard', 'invoices', 'attendance', 'messages', 'expenses'], ['view', 'create', 'edit', 'export', 'manage'])

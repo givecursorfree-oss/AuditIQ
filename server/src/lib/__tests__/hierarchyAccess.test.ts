@@ -11,6 +11,8 @@ describe('hierarchyAccess', () => {
     expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/engagements')).toBe(true);
     expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/tasks')).toBe(true);
     expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/time-entries')).toBe(true);
+    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/admin/roles')).toBe(true);
+    expect(apiPathAllowedForHierarchy('HR_MANAGER', '/api/admin/users')).toBe(true);
   });
 
   it('allows accounts manager billing and time tracker APIs', () => {

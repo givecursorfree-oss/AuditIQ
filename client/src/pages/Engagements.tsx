@@ -128,6 +128,7 @@ export default function Engagements() {
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {user?.role !== 'HR' && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button type="button" variant="outline" size="sm">
@@ -143,6 +144,7 @@ export default function Engagements() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
             {['Partner', 'Manager'].includes(user?.role || '') ? (
               <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
                 <Plus size={16} className="mr-1" /> New engagement

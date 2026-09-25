@@ -24,41 +24,136 @@ export interface EmailAttachment {
   contentType?: string;
 }
 
-let transporter: any | null = null;
+type SmtpTransport = {
+  sendMail: (mail: Record<string, unknown>) => Promise<{ messageId?: string }>;
+  verify: () => Promise<true>;
+};
 
-async function getTransporter() {
-  const env = getEnv();
-  if (!env.SMTP_HOST) {
-    throw new Error('SMTP is not configured');
+type NodemailerApi = {
+  createTransport: (opts: Record<string, unknown>) => SmtpTransport;
+  createTestAccount: () => Promise<{ user: string; pass: string }>;
+  getTestMessageUrl: (info: unknown) => string | false | undefined;
+};
+
+export type SmtpTransportOptions = {
+  host: string;
+  port: number;
+  secure: boolean;
+  requireTLS: boolean;
+  auth?: { user: string; pass: string };
+  connectionTimeout: number;
+  greetingTimeout: number;
+  socketTimeout: number;
+};
+
+/** Port 465 is implicit TLS. 587 (and anything else) uses STARTTLS. */
+export function buildSmtpTransportOptions(env: {
+  SMTP_HOST: string;
+  SMTP_PORT: number;
+  SMTP_USER?: string;
+  SMTP_PASSWORD?: string;
+}): SmtpTransportOptions {
+  const secure = env.SMTP_PORT === 465;
+  if (Boolean(env.SMTP_USER) !== Boolean(env.SMTP_PASSWORD)) {
+    throw new Error('SMTP_USER and SMTP_PASSWORD must both be set');
   }
+  return {
+    host: env.SMTP_HOST,
+    port: env.SMTP_PORT,
+    secure,
+    requireTLS: !secure,
+    auth:
+      env.SMTP_USER && env.SMTP_PASSWORD
+        ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD }
+        : undefined,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
+  };
+}
+
+let transporter: SmtpTransport | null = null;
+let nodemailerApi: NodemailerApi | null = null;
+/** True when SMTP_HOST is unset and development mail goes to the Ethereal catcher. */
+let devInbox = false;
+
+async function loadNodemailer(): Promise<NodemailerApi> {
+  if (nodemailerApi) return nodemailerApi;
+  const mod = (await import('nodemailer' as string)) as NodemailerApi & { default?: NodemailerApi };
+  const api = typeof mod.createTransport === 'function' ? mod : mod.default;
+  if (!api?.createTransport) {
+    throw new Error('nodemailer is not installed');
+  }
+  nodemailerApi = api;
+  return api;
+}
+
+async function getTransporter(): Promise<SmtpTransport> {
   if (transporter) return transporter;
+  const env = getEnv();
+  const nm = await loadNodemailer();
   try {
-    const nm: any = await import('nodemailer' as string);
-    if (!nm) {
-      throw new Error('nodemailer is not installed');
+    if (env.SMTP_HOST) {
+      transporter = nm.createTransport(
+        buildSmtpTransportOptions({
+          SMTP_HOST: env.SMTP_HOST,
+          SMTP_PORT: env.SMTP_PORT,
+          SMTP_USER: env.SMTP_USER,
+          SMTP_PASSWORD: env.SMTP_PASSWORD,
+        })
+      );
+      devInbox = false;
+      return transporter;
     }
+    if (env.NODE_ENV === 'production') {
+      throw new Error('SMTP is not configured');
+    }
+    // ponytail: Ethereal is a catch-all inbox, not delivery to the recipient. Upgrade path: set SMTP_HOST.
+    const account = await nm.createTestAccount();
     transporter = nm.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_PORT === 465,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD } : undefined,
+      host: 'smtp.ethereal.email',
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      auth: { user: account.user, pass: account.pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 20_000,
     });
+    devInbox = true;
+    logger.warn('SMTP_HOST is not set. Outbound mail is captured by the Ethereal test inbox.');
     return transporter;
   } catch (err) {
-    logger.error('Failed to create SMTP transporter', { error: (err as Error).message });
+    transporter = null;
+    const message = (err as Error).message;
+    if (message === 'SMTP is not configured' || message.startsWith('SMTP_USER')) throw err;
+    logger.error('Failed to create SMTP transporter', { error: message });
     throw new Error('Unable to initialize SMTP transport');
   }
+}
+
+export async function verifySmtp(): Promise<'ok' | 'dev' | 'missing'> {
+  const tx = await getTransporter();
+  await tx.verify();
+  if (devInbox) {
+    logger.warn('Set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD to deliver mail to real inboxes.');
+    return 'dev';
+  }
+  logger.info('SMTP connection verified');
+  return 'ok';
 }
 
 /**
  * Sends an email directly through SMTP. Every attempt is recorded as sent or
  * failed; this service deliberately does not create queued mail records.
  */
-export async function sendEmail(params: EmailParams): Promise<{ id: string; status: string }> {
+export async function sendEmail(
+  params: EmailParams
+): Promise<{ id: string; status: string; previewUrl?: string }> {
   try {
     const tx = await getTransporter();
     const env = getEnv();
-    await tx.sendMail({
+    const info = await tx.sendMail({
       from: env.SMTP_FROM,
       to: params.to,
       cc: params.cc,
@@ -66,8 +161,13 @@ export async function sendEmail(params: EmailParams): Promise<{ id: string; stat
       html: params.body,
       attachments: params.attachments,
     });
+    const preview = devInbox ? nodemailerApi?.getTestMessageUrl(info) : undefined;
+    const previewUrl = typeof preview === 'string' ? preview : undefined;
+    if (previewUrl) {
+      logger.info('Email captured by the test inbox', { to: params.to, subject: params.subject, previewUrl });
+    }
     const log = await createCommsLog(params, 'sent', undefined, new Date());
-    return { id: log.id, status: 'sent' };
+    return { id: log.id, status: 'sent', previewUrl };
   } catch (err) {
     const msg = (err as Error).message;
     logger.error('Email delivery failed', { error: msg, to: params.to });
@@ -266,7 +366,7 @@ export class EmailDeliveryError extends Error {
 const wrap = (firmName: string, body: string) => `
 <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#1f2937;line-height:1.55">
   <div style="background:#1e3a8a;color:#fff;padding:16px 24px;border-radius:6px 6px 0 0">
-    <h2 style="margin:0;font-size:18px;font-weight:600">${firmName}</h2>
+    <h2 style="margin:0;font-size:18px;font-weight:600">${esc(firmName)}</h2>
   </div>
   <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 6px 6px">${body}</div>
   <p style="text-align:center;color:#6b7280;font-size:12px;margin-top:16px">
@@ -274,7 +374,32 @@ const wrap = (firmName: string, body: string) => `
   </p>
 </div>`;
 
+function esc(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) =>
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  );
+}
+
 export const emailTemplates = {
+  passwordReset(p: { firmName: string; recipientName: string; resetUrl: string }) {
+    const body = `
+      <p>Dear ${esc(p.recipientName)},</p>
+      <p>We received a request to reset your AuditIQ password. This link expires in 1 hour.</p>
+      <p><a href="${esc(p.resetUrl)}">Reset password</a></p>
+      <p>If you did not request this, you can ignore this email. Your password will stay the same.</p>
+      <p>Warm regards,<br/>${esc(p.firmName)}</p>`;
+    return { subject: 'Reset your AuditIQ password', body: wrap(p.firmName, body) };
+  },
+
+  emailVerification(p: { firmName: string; recipientName: string; verifyUrl: string }) {
+    const body = `
+      <p>Dear ${esc(p.recipientName)},</p>
+      <p>Thank you for registering with ${esc(p.firmName)}. Verify your email to open the client portal. This link expires in 24 hours.</p>
+      <p><a href="${esc(p.verifyUrl)}">Verify email address</a></p>
+      <p>Warm regards,<br/>${esc(p.firmName)}</p>`;
+    return { subject: 'Verify your AuditIQ account', body: wrap(p.firmName, body) };
+  },
+
   welcome(p: { firmName: string; clientName: string; portalUrl: string; loginEmail: string; tempPassword: string; documentChecklist: string[] }) {
     const items = p.documentChecklist.map(d => `<li>${d}</li>`).join('');
     const body = `

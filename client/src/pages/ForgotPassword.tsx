@@ -7,6 +7,7 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -14,7 +15,8 @@ export default function ForgotPassword() {
     setError('');
     setLoading(true);
     try {
-      await api.post('/auth/forgot-password', { email: email.trim().toLowerCase() });
+      const res = await api.post('/auth/forgot-password', { email: email.trim().toLowerCase() });
+      setPreviewUrl(typeof res.data?.previewUrl === 'string' ? res.data.previewUrl : '');
       setSent(true);
     } catch {
       setError('Unable to process your request. Please try again or contact your firm administrator.');
@@ -29,9 +31,15 @@ export default function ForgotPassword() {
         title="Check your email"
         subtitle="If an account exists for that address, we sent password reset instructions."
       >
-        <p className="text-sm text-muted-foreground">
-          Did not receive it? Check spam or contact your CA firm administrator to reset your password.
-        </p>
+        {previewUrl ? (
+          <a href={previewUrl} target="_blank" rel="noreferrer" className="btn-primary inline-flex w-full justify-center py-3">
+            Open reset email
+          </a>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Did not receive it? Check spam or contact your CA firm administrator to reset your password.
+          </p>
+        )}
         <Link to="/login" className="btn-primary inline-flex mt-6 w-full justify-center py-3">
           Return to sign in
         </Link>

@@ -264,10 +264,18 @@ export default function ClaimDetailPage() {
           <PanelCard title="People">
             <ul className="text-sm space-y-1">
               {claim.participants!.map((p) => (
-                <li key={p.id} className="flex flex-wrap gap-2">
-                  <span>{staffName(p.user)}</span>
-                  <span className="text-muted-foreground">{p.engagement?.title ?? '—'}</span>
-                  <span className="tabular-nums">{formatInr(p.amountShare)}</span>
+                <li key={p.id} className="space-y-0.5">
+                  <div className="flex flex-wrap gap-2">
+                    <span>{staffName(p.user)}</span>
+                    <span className="text-muted-foreground">{p.engagement?.title ?? '—'}</span>
+                    <span className="tabular-nums">{formatInr(p.amountShare)}</span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {[p.client?.name, p.workType, p.manager ? staffName(p.manager) : null]
+                      .filter(Boolean)
+                      .join(' · ') || '—'}
+                  </p>
+                  {p.notes ? <p>{p.notes}</p> : null}
                 </li>
               ))}
             </ul>

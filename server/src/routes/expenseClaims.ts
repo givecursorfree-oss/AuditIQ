@@ -67,6 +67,7 @@ const claimInclude = {
       user: { select: { id: true, firstName: true, lastName: true } },
       engagement: { select: { id: true, title: true, serviceCode: true, financialYear: true, type: true } },
       client: { select: { id: true, name: true } },
+      manager: { select: { id: true, firstName: true, lastName: true } },
     },
   },
   managerApprovals: {
@@ -149,6 +150,7 @@ const participantSchema = z.object({
   clientId: z.string().optional(),
   workType: z.string().optional(),
   workTypeOther: z.string().optional(),
+  notes: z.string().optional(),
   managerId: z.string().optional(),
 });
 
@@ -182,8 +184,7 @@ function canSubmit(role: string) {
   return ['Intern', 'Staff', 'Partner', 'Admin', 'Manager'].includes(role);
 }
 
-async function getManagerApprovalForUser(claimId: string, userId: string, role: string) {
-  if (['Partner', 'Admin'].includes(role)) return null;
+async function getOwnPendingApproval(claimId: string, userId: string) {
   return prisma.expenseClaimManagerApproval.findFirst({
     where: { claimId, managerId: userId, status: 'pending' },
   });
@@ -231,6 +232,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       body.participants && body.participants.length > 0
         ? body.participants.map((p) => ({
             ...p,
+            notes: p.notes?.trim() || undefined,
             managerId: p.managerId ?? body.managerId,
           }))
         : [
@@ -244,15 +246,16 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             },
           ];
 
-    const isArticleRole = ['Intern', 'Staff'].includes(req.user!.role);
-    // Food: client / manager / engagement / notes are optional for all roles.
-    // Travel still requires its own fields above; Intern/Staff travel still needs manager.
-    if (isArticleRole && body.claimType === 'travel') {
-      const missingManager = participantRows.some((p) => !p.managerId);
-      if (missingManager) {
-        res.status(400).json({ error: 'Manager/Partner is required' });
-        return;
-      }
+    // Each person covered names their own Manager/Partner. That person approves their share.
+    const missingManager = participantRows.some((p) => !p.managerId);
+    if (missingManager) {
+      res.status(400).json({
+        error:
+          body.claimType === 'food'
+            ? 'Manager/Partner is required for each person covered'
+            : 'Manager/Partner is required',
+      });
+      return;
     }
 
     const firm = await prisma.firm.findFirst({
@@ -375,7 +378,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         clientId: headerClient,
         workType: headerWork,
         workTypeOther: body.workTypeOther ?? participantRows[0]?.workTypeOther,
-        description: body.description,
+        description: body.description ?? participantRows.find((p) => p.notes)?.notes,
         travelTime: body.travelTime,
         jurisdiction: body.jurisdiction,
         centreState: body.centreState,
@@ -557,15 +560,15 @@ router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => 
 router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
   const role = req.user!.role;
   const where =
-    role === 'Manager'
+    role === 'Admin'
       ? {
           firmId: req.user!.firmId!,
           claimStatus: { in: ['pending_approval', 'partially_approved'] },
-          managerApprovals: { some: { managerId: req.user!.id, status: 'pending' } },
         }
       : {
           firmId: req.user!.firmId!,
           claimStatus: { in: ['pending_approval', 'partially_approved'] },
+          managerApprovals: { some: { managerId: req.user!.id, status: 'pending' } },
         };
 
   const claims = await prisma.expenseClaim.findMany({
@@ -600,25 +603,20 @@ router.patch('/:id/approve', authorize('Partner', 'Admin', 'Manager'), async (re
     return;
   }
 
-  const role = req.user!.role;
-  if (role === 'Manager') {
-    const approval = await getManagerApprovalForUser(existing.id, req.user!.id, role);
-    if (!approval) {
-      res.status(403).json({ error: 'No pending approval for you' });
-      return;
-    }
+  const own = await getOwnPendingApproval(existing.id, req.user!.id);
+  if (own) {
     await prisma.expenseClaimManagerApproval.update({
-      where: { id: approval.id },
+      where: { id: own.id },
       data: {
         status: 'approved',
-        approvedAmount: approval.teamAmount,
+        approvedAmount: own.teamAmount,
         reviewedById: req.user!.id,
         reviewedAt: new Date(),
       },
     });
     await recomputeClaimStatus(existing.id);
     await logClaimAudit(existing.id, 'approved', req.user!.id, { managerId: req.user!.id });
-  } else {
+  } else if (req.user!.role === 'Admin') {
     const approvalCount = await prisma.expenseClaimManagerApproval.count({ where: { claimId: existing.id } });
     if (approvalCount === 0) {
       await finalizeClaimWithoutManagers(existing.id, req.user!.id, {
@@ -646,6 +644,9 @@ router.patch('/:id/approve', authorize('Partner', 'Admin', 'Manager'), async (re
       await recomputeClaimStatus(existing.id);
     }
     await logClaimAudit(existing.id, 'approved', req.user!.id, { override: true });
+  } else {
+    res.status(403).json({ error: 'No pending approval for you' });
+    return;
   }
 
   const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
@@ -660,15 +661,10 @@ router.patch('/:id/reject', authorize('Partner', 'Admin', 'Manager'), async (req
     return;
   }
 
-  const role = req.user!.role;
-  if (role === 'Manager') {
-    const approval = await getManagerApprovalForUser(existing.id, req.user!.id, role);
-    if (!approval) {
-      res.status(403).json({ error: 'No pending approval for you' });
-      return;
-    }
+  const own = await getOwnPendingApproval(existing.id, req.user!.id);
+  if (own) {
     await prisma.expenseClaimManagerApproval.update({
-      where: { id: approval.id },
+      where: { id: own.id },
       data: {
         status: 'rejected',
         rejectReasonInternal: body.reason,
@@ -677,7 +673,7 @@ router.patch('/:id/reject', authorize('Partner', 'Admin', 'Manager'), async (req
       },
     });
     await recomputeClaimStatus(existing.id);
-  } else {
+  } else if (req.user!.role === 'Admin') {
     await prisma.expenseClaim.update({
       where: { id: existing.id },
       data: {
@@ -691,6 +687,9 @@ router.patch('/:id/reject', authorize('Partner', 'Admin', 'Manager'), async (req
       where: { claimId: existing.id },
       data: { status: 'rejected', rejectReasonInternal: body.reason },
     });
+  } else {
+    res.status(403).json({ error: 'No pending approval for you' });
+    return;
   }
   await logClaimAudit(existing.id, 'rejected', req.user!.id, { reason: body.reason });
   const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
@@ -709,20 +708,15 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
     return;
   }
 
-  const role = req.user!.role;
-  if (role === 'Manager') {
-    const approval = await getManagerApprovalForUser(existing.id, req.user!.id, role);
-    if (!approval) {
-      res.status(403).json({ error: 'No pending approval for you' });
-      return;
-    }
-    const partialErr = validatePartialAmount(Number(approval.teamAmount), body.approvedAmount);
+  const own = await getOwnPendingApproval(existing.id, req.user!.id);
+  if (own) {
+    const partialErr = validatePartialAmount(Number(own.teamAmount), body.approvedAmount);
     if (partialErr) {
       res.status(400).json({ error: partialErr });
       return;
     }
     await prisma.expenseClaimManagerApproval.update({
-      where: { id: approval.id },
+      where: { id: own.id },
       data: {
         status: 'partially_approved',
         approvedAmount: body.approvedAmount,
@@ -737,7 +731,7 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
       approved: body.approvedAmount,
       reason: body.reason,
     });
-  } else {
+  } else if (req.user!.role === 'Admin') {
     const partialErr = validatePartialAmount(Number(existing.amount), body.approvedAmount);
     if (partialErr) {
       res.status(400).json({ error: partialErr });
@@ -779,6 +773,9 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
     });
     const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
     res.json(claim);
+    return;
+  } else {
+    res.status(403).json({ error: 'No pending approval for you' });
     return;
   }
 

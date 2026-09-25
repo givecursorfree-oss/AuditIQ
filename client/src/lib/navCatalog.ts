@@ -35,7 +35,7 @@ export const NAV_CATALOG: NavCatalogItem[] = [
   { id: 'dashboard', path: '/', label: 'Dashboard', group: 'Main', permission: { module: 'dashboard', action: 'view' } },
   { id: 'compliance-calendar', path: '/compliance-calendar', label: 'Compliance Calendar', group: 'Main', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'engagements', action: 'view' }, sidebarHidden: true },
   { id: 'services', path: '/services', label: 'Service Catalog', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff'], hierarchyExclude: true, permission: { module: 'engagements', action: 'view' }, sidebarHidden: true },
-  { id: 'engagements', path: '/engagements', label: 'Engagements', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'engagements', action: 'view' } },
+  { id: 'engagements', path: '/engagements', label: 'Engagements', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'engagements', action: 'view' } },
   { id: 'engagement-portfolio', path: '/engagements/portfolio', label: 'Portfolio View', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'engagements', action: 'view' } },
 
   { id: 'requests', path: '/requests', label: 'Client Requests', group: 'Clients', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'clients', action: 'view' } },
@@ -75,7 +75,7 @@ export const NAV_CATALOG: NavCatalogItem[] = [
 ];
 
 export const ROUTE_GUARDS: { pathPrefix: string; permission: NavPermission; roles?: string[] }[] = [
-  { pathPrefix: '/engagements/', permission: { module: 'engagements', action: 'view' }, roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'] },
+  { pathPrefix: '/engagements/', permission: { module: 'engagements', action: 'view' }, roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'] },
   { pathPrefix: '/requests/', permission: { module: 'clients', action: 'view' }, roles: ['Partner', 'Admin', 'Manager'] },
   { pathPrefix: '/observations', permission: { module: 'reports', action: 'view' }, roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'] },
   { pathPrefix: '/form3cd', permission: { module: 'reports', action: 'view' }, roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'] },

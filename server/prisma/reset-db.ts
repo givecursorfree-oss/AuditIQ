@@ -133,10 +133,13 @@ async function main() {
       description: 'HR Manager — attendance and leave administration',
       isSystem: true,
       permissions: {
-        create: getPermIds(
-          ['dashboard', 'attendance', 'leave', 'employees', 'messages'],
-          ['view', 'manage', 'export', 'apply']
-        ).map((pid) => ({ permissionId: pid })),
+        create: [
+          ...getPermIds(
+            ['dashboard', 'attendance', 'leave', 'employees', 'messages'],
+            ['view', 'manage', 'export', 'apply']
+          ),
+          ...getPermIds(['engagements'], ['view']),
+        ].map((pid) => ({ permissionId: pid })),
       },
     },
   });

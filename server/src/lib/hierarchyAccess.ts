@@ -11,6 +11,8 @@ export const HIERARCHY_API_PREFIXES: Record<string, string[]> = {
     '/api/articleship',
     '/api/hr-masters',
     '/api/clients',
+    '/api/admin/roles',
+    '/api/admin/users',
     '/api/engagements',
     '/api/engagement-stages',
     '/api/timesheets',

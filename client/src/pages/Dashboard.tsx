@@ -220,7 +220,10 @@ export default function Dashboard() {
         return { ...stat, attentionCount: badges.workflowAttention, navHref: '/engagements' };
       }
       if (stat.title === 'In Reviews') {
-        return { ...stat, attentionCount: badges.approvals, navHref: '/engagements' };
+        return { ...stat, attentionCount: badges.approvals, navHref: '/engagements?status=Under Review' };
+      }
+      if (stat.title === 'Completed Tasks') {
+        return { ...stat, navHref: '/engagements?status=Closed' };
       }
       if (stat.title === 'Overdue Deadlines') {
         return {

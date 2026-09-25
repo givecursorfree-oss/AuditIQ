@@ -437,10 +437,10 @@ export function ClaimsApprovalInbox() {
         const isGroup = count > 1;
         const rIdx = receiptIndex[c.id] ?? 0;
         const receipt = c.receipts[rIdx];
-        const myApproval = c.managerApprovals?.find((a) => a.status === 'pending');
-        const maxPartial = isPartnerOrAdmin
-          ? Number(c.amount)
-          : Number(myApproval?.teamAmount ?? c.amount);
+        const myApproval = c.managerApprovals?.find(
+          (a) => a.manager.id === user?.id && a.status === 'pending'
+        );
+        const maxPartial = myApproval ? Number(myApproval.teamAmount) : Number(c.amount);
         const isBusy = busyId === c.id;
         const partialVal = parseFloat(partialAmount) || 0;
         const ocrPct = ocrMarkerPercent(c.ocrDetectedAmount, maxPartial);
@@ -576,9 +576,18 @@ export function ClaimsApprovalInbox() {
                   {expanded[c.id] && (
                     <ul className="mt-1 space-y-0.5 border-l border-border pl-2 text-[11px]">
                       {c.participants!.map((p) => (
-                        <li key={p.id} className="flex gap-2">
-                          <span className="w-24 truncate">{staffName(p.user)}</span>
-                          <span className="truncate text-muted-foreground">{p.engagement?.title ?? '—'}</span>
+                        <li key={p.id} className="space-y-0.5">
+                          <div className="flex gap-2">
+                            <span className="w-24 truncate">{staffName(p.user)}</span>
+                            <span className="truncate text-muted-foreground">{p.engagement?.title ?? '—'}</span>
+                            <span className="tabular-nums">{formatInr(p.amountShare)}</span>
+                          </div>
+                          <p className="text-muted-foreground">
+                            {[p.client?.name, p.workType, p.manager ? staffName(p.manager) : null]
+                              .filter(Boolean)
+                              .join(' · ') || '—'}
+                          </p>
+                          {p.notes ? <p>{p.notes}</p> : null}
                         </li>
                       ))}
                     </ul>

@@ -4,6 +4,12 @@ import logger from './logger.js';
 
 let dotenvLoaded = false;
 
+function emptyToUndefined(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
 function loadDotenv(): void {
   if (!dotenvLoaded) {
     dotenv.config();
@@ -50,11 +56,11 @@ const envSchema = z.object({
   // Hex string (64 chars), base64 (44 chars), or any string >=32 chars (will be hashed to 32 bytes)
   VAULT_ENCRYPTION_KEY: z.string().min(16).default('dev-vault-key-change-in-production-32bytes'),
 
-  // Email (SMTP) — optional; if missing, emails are logged but not sent
-  SMTP_HOST: z.string().optional(),
+  // Email (SMTP). Blank values from compose are treated as unset.
+  SMTP_HOST: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASSWORD: z.string().optional(),
+  SMTP_USER: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  SMTP_PASSWORD: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   SMTP_FROM: z.string().default('AuditIQ <no-reply@auditiq.local>'),
 
   // When true, skip client email verification (useful without SMTP). If unset,

@@ -420,6 +420,7 @@ app.get('/api/health', async (_req, res) => {
   } catch {
     checks.paddleOcr = 'unreachable';
   }
+  checks.smtp = env.SMTP_HOST ? 'configured' : 'not_configured';
   const healthy = checks.database === 'ok';
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
@@ -443,6 +444,9 @@ httpServer.listen(PORT, () => {
     env: process.env.NODE_ENV || 'development',
   });
   startScheduler();
+  void import('./lib/emailService.js')
+    .then(({ verifySmtp }) => verifySmtp())
+    .catch((err) => logger.error('SMTP verification failed', { error: (err as Error).message }));
   void warnIfSchemaOutOfDate();
   void backfillDocumentFirmIds();
   void initSemanticSearch();

@@ -6,7 +6,7 @@ import { AUDIT_MANAGER_DENIED_PATHS } from './gradeCapabilities';
 import type { User } from '@/types';
 
 const HIERARCHY_ALLOWED_PATHS: Record<string, string[]> = {
-  HR_MANAGER: ['/', '/attendance', '/leave-stipend', '/messages', '/employees', '/timesheets', '/time-tracker', '/clients'],
+  HR_MANAGER: ['/', '/attendance', '/leave-stipend', '/messages', '/employees', '/timesheets', '/time-tracker', '/clients', '/engagements'],
   ACCOUNTS_MANAGER: ['/', '/billing', '/time-tracker', '/attendance', '/messages', '/claims'],
   SENIOR_OFFICE_ADMIN: ['/', '/documents', '/messages', '/clients', '/attendance'],
   OFFICE_EXECUTIVE: ['/', '/documents', '/messages', '/attendance'],

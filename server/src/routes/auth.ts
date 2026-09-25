@@ -258,14 +258,16 @@ router.post('/register-client', async (req: Request, res: Response): Promise<voi
 
     if (requireVerification && verificationToken) {
       const verifyUrl = `${getEnv().CLIENT_URL}/verify-email?token=${verificationToken}`;
-      const { sendEmail } = await import('../lib/emailService.js');
+      const { sendEmail, emailTemplates } = await import('../lib/emailService.js');
+      const mail = emailTemplates.emailVerification({
+        firmName: result.firmName,
+        recipientName: data.firstName,
+        verifyUrl,
+      });
       await sendEmail({
         to: email,
-        subject: 'Verify your AuditIQ account',
-        body: `<p>Dear ${data.firstName},</p>
-          <p>Thank you for registering with ${result.firmName}. Please verify your email to access your client portal.</p>
-          <p><a href="${verifyUrl}">Verify Email Address</a></p>
-          <p>This link expires in 24 hours.</p>`,
+        subject: mail.subject,
+        body: mail.body,
         clientId: result.client.id,
         templateKey: 'email-verification',
       });
@@ -459,7 +461,10 @@ const forgotPasswordSchema = z.object({
 router.post('/forgot-password', async (req: Request, res: Response): Promise<void> => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
-    const user = await prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
+    const user = await prisma.user.findUnique({
+      where: { email: normalizeEmail(email) },
+      include: { firm: { select: { name: true } } },
+    });
     if (user?.isActive) {
       const resetToken = generateToken(32);
       await prisma.user.update({
@@ -471,17 +476,12 @@ router.post('/forgot-password', async (req: Request, res: Response): Promise<voi
       });
 
       const resetUrl = `${getEnv().CLIENT_URL}/reset-password?token=${resetToken}`;
-      const { sendEmail } = await import('../lib/emailService.js');
-      await sendEmail({
-        to: user.email,
-        subject: 'Reset your AuditIQ password',
-        body: `<p>Dear ${user.firstName},</p>
-          <p>We received a request to reset your AuditIQ password. Click the link below to set a new password:</p>
-          <p><a href="${resetUrl}">Reset Password</a></p>
-          <p>This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>`,
-        templateKey: 'password-reset',
+      const { sendEmail, emailTemplates } = await import('../lib/emailService.js');
+      const mail = emailTemplates.passwordReset({
+        firmName: user.firm?.name || 'AuditIQ',
+        recipientName: user.firstName,
+        resetUrl,
       });
-
       await prisma.auditLog.create({
         data: {
           action: 'PASSWORD_RESET_REQUESTED',
@@ -491,7 +491,19 @@ router.post('/forgot-password', async (req: Request, res: Response): Promise<voi
           ipAddress: clientIp(req),
         },
       });
+      const sent = await sendEmail({
+        to: user.email,
+        subject: mail.subject,
+        body: mail.body,
+        templateKey: 'password-reset',
+      });
+      res.json({
+        message: 'If an account exists for this email, you will receive password reset instructions shortly.',
+        ...(sent.previewUrl ? { previewUrl: sent.previewUrl } : {}),
+      });
+      return;
     }
+
     res.json({
       message: 'If an account exists for this email, you will receive password reset instructions shortly.',
     });
