@@ -14,9 +14,25 @@ router.use(authenticate);
 
 // ─── ROLES ───
 
+const EMPLOYEE_ROLE_NAMES = ['Staff', 'Intern', 'Manager', 'HR', 'Accounts', 'Partner', 'Admin'] as const;
+
+/** Role rows the Add employee list needs. Missing rows leave the dropdown empty. */
+async function ensureEmployeeRoles(): Promise<void> {
+  await Promise.all(
+    EMPLOYEE_ROLE_NAMES.map((name) =>
+      prisma.role.upsert({
+        where: { name },
+        create: { name, isSystem: name !== 'Intern', isActive: true },
+        update: {},
+      })
+    )
+  );
+}
+
 // GET /api/admin/roles — List all roles with permission counts
 router.get('/roles', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    await ensureEmployeeRoles();
     const roles = await prisma.role.findMany({
       include: {
         permissions: {
@@ -43,11 +59,8 @@ router.get('/roles', authorize('Partner', 'Admin', 'HR'), async (req: AuthReques
       createdAt: r.createdAt,
     }));
 
-    if (req.user!.role === 'HR') {
-      res.json(result.filter((r) => !['Partner', 'Admin'].includes(r.name)));
-      return;
-    }
-    res.json(result);
+    const hidden = req.user!.role === 'HR' ? ['Partner', 'Admin', 'Client'] : [];
+    res.json(result.filter((r) => r.isActive && !hidden.includes(r.name)));
   } catch (err) {
     logger.error('Fetch roles error:', err);
     res.status(500).json({ error: 'Failed to fetch roles' });

@@ -8,7 +8,6 @@ import PageHeader from '@/components/layout/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { canAttestTimesheets } from '@/lib/gradeCapabilities';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { DownloadSimple as Download } from '@phosphor-icons/react';
 import { downloadBlob } from '@/lib/downloadCsv';
@@ -51,13 +50,6 @@ interface FirmRow {
   } | null;
 }
 
-interface PendingDay {
-  id: string;
-  date: string;
-  status: string;
-  user: { id: string; firstName: string; lastName: string };
-}
-
 const FIRM_VIEW_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
 
 function defaultExportRange(anchor: string) {
@@ -73,17 +65,13 @@ export default function Timesheets() {
   const { user } = useAuth();
   const canFirm = Boolean(user && FIRM_VIEW_ROLES.includes(user.role));
   const isHr = user?.role === 'HR';
-  const canAttest = Boolean(
-    user && canAttestTimesheets(user.role, user.hierarchyLevel?.code)
-  );
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [exportFrom, setExportFrom] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).from);
   const [exportTo, setExportTo] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).to);
   const [staffId, setStaffId] = useState(user?.id || '');
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [firmRows, setFirmRows] = useState<FirmRow[]>([]);
-  const [pending, setPending] = useState<PendingDay[]>([]);
-  const [mode, setMode] = useState<'firm' | 'detail' | 'review'>(canFirm ? 'firm' : 'detail');
+  const [mode, setMode] = useState<'firm' | 'detail'>(canFirm ? 'firm' : 'detail');
   const [exporting, setExporting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -104,7 +92,7 @@ export default function Timesheets() {
   }, [user, date, canFirm]);
 
   useEffect(() => {
-    if (!user || mode === 'firm' || mode === 'review') return;
+    if (!user || mode === 'firm') return;
     const id = staffId || user.id;
     setLoadError(null);
     void api
@@ -116,38 +104,15 @@ export default function Timesheets() {
       });
   }, [user, date, staffId, mode]);
 
-  useEffect(() => {
-    if (!user || !canAttest || mode !== 'review') return;
-    setLoadError(null);
-    void api
-      .get<PendingDay[]>('/timesheets/pending-review')
-      .then((r) => setPending(r.data || []))
-      .catch(() => {
-        setPending([]);
-        setLoadError('Failed to load.');
-      });
-  }, [user, canAttest, mode]);
-
   async function submitDay() {
     try {
       await api.post('/timesheets/submit', { date });
-      await appAlert({ title: 'Submitted', message: 'Day sent for Manager / Senior Executive attestation.' });
+      await appAlert({ title: 'Submitted', message: 'Timesheet submitted.' });
       const r = await api.get<Timesheet>(`/timesheets?staffId=${user!.id}&date=${date}`);
       setSheet(r.data);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
       await appAlert({ title: 'Could not submit', message: err?.response?.data?.error || 'Failed' });
-    }
-  }
-
-  async function reviewDay(id: string, status: 'Approved' | 'Rejected') {
-    try {
-      await api.patch(`/timesheets/day/${id}`, { status });
-      setPending((p) => p.filter((x) => x.id !== id));
-      await appAlert({ title: 'Done', message: status === 'Approved' ? 'Timesheet attested.' : 'Timesheet rejected.' });
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } } };
-      await appAlert({ title: 'Action failed', message: err?.response?.data?.error || 'Failed' });
     }
   }
 
@@ -203,11 +168,7 @@ export default function Timesheets() {
     <AppPageContainer>
       <PageHeader
         title="Timesheets"
-        description={
-          canFirm
-            ? 'Firm attendance + hours; submit days for attestation before WIP/billing'
-            : 'Daily hours — submit for Manager / Senior Executive approval'
-        }
+        description={canFirm ? 'Firm attendance and hours' : 'Daily hours'}
       />
       {loadError && <p className="text-sm text-destructive mb-4">{loadError}</p>}
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -246,49 +207,10 @@ export default function Timesheets() {
           <Button type="button" variant={mode === 'detail' ? 'default' : 'outline'} size="sm" onClick={() => setMode('detail')}>
             One person
           </Button>
-          {canAttest && (
-            <Button type="button" variant={mode === 'review' ? 'default' : 'outline'} size="sm" onClick={() => setMode('review')}>
-              Pending attestation
-            </Button>
-          )}
         </div>
       </div>
 
-      {mode === 'review' && canAttest ? (
-        <PanelCard title="Submitted days awaiting attestation">
-          {pending.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No timesheets waiting.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground text-left">
-                  <th className="py-2">Staff</th>
-                  <th className="py-2">Date</th>
-                  <th className="py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pending.map((row) => (
-                  <tr key={row.id} className="border-b border-border/50">
-                    <td className="py-2">
-                      {row.user.firstName} {row.user.lastName}
-                    </td>
-                    <td className="py-2">{new Date(row.date).toLocaleDateString('en-IN')}</td>
-                    <td className="py-2 space-x-2">
-                      <Button type="button" size="sm" variant="success" onClick={() => void reviewDay(row.id, 'Approved')}>
-                        Approve
-                      </Button>
-                      <Button type="button" size="sm" variant="destructive" onClick={() => void reviewDay(row.id, 'Rejected')}>
-                        Reject
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </PanelCard>
-      ) : mode === 'firm' && canFirm ? (
+      {mode === 'firm' && canFirm ? (
         <PanelCard title={`Team — ${date}`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -298,7 +220,6 @@ export default function Timesheets() {
                   <th className="py-2 pr-3">Check-in</th>
                   <th className="py-2 pr-3">Place</th>
                   <th className="py-2 pr-3">Hours</th>
-                  <th className="py-2">Attestation</th>
                 </tr>
               </thead>
               <tbody>
@@ -334,9 +255,6 @@ export default function Timesheets() {
                       {row.attendance?.clientName ? ` · ${row.attendance.clientName}` : ''}
                     </td>
                     <td className="py-2 pr-3">{row.totalHours}</td>
-                    <td className="py-2">
-                      <ApprovalStatusBadge status={row.attestationStatus || 'Draft'} />
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -375,7 +293,7 @@ export default function Timesheets() {
                 {staffId === user?.id &&
                   !['Submitted', 'Approved'].includes(sheet.attestation?.status || '') && (
                     <Button type="button" size="sm" onClick={() => void submitDay()}>
-                      Submit day for approval
+                      Submit day
                     </Button>
                   )}
               </div>

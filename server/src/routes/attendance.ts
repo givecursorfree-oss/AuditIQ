@@ -25,6 +25,8 @@ import {
   userIsArticleAssistant,
 } from '../lib/articleAttendanceCompute.js';
 import { clientIp } from '../lib/clientIp.js';
+import { sendEmail } from '../lib/emailService.js';
+import { leaveRecipientsFor } from '../lib/leaveNotify.js';
 
 // ICAI articleship leave limits (from articleship.ts but duplicated here to
 // avoid a circular runtime dep — values rarely change)
@@ -861,6 +863,44 @@ router.get('/leaves', async (req: AuthRequest, res: Response): Promise<void> => 
   }
 });
 
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+async function notifyLeaveSubmitted(
+  userId: string,
+  leave: { fromDate: Date; toDate: Date; days: number; type: string; reason: string | null }
+): Promise<void> {
+  const applicant = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      firstName: true,
+      lastName: true,
+      email: true,
+      designation: true,
+      hierarchyLevel: { select: { code: true, title: true } },
+      articleship: { select: { id: true } },
+    },
+  });
+  if (!applicant) return;
+  const recipients = leaveRecipientsFor({
+    hierarchyCode: applicant.hierarchyLevel?.code,
+    hierarchyTitle: applicant.hierarchyLevel?.title,
+    designation: applicant.designation,
+    hasArticleship: Boolean(applicant.articleship),
+  });
+  if (!recipients) return;
+  const name = `${applicant.firstName} ${applicant.lastName}`.trim();
+  const title = applicant.hierarchyLevel?.title || applicant.designation || '';
+  const when = leave.fromDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+  const until = leave.toDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+  await sendEmail({
+    to: recipients.join(', '),
+    subject: `Leave application — ${name}`,
+    body: `<p>${escapeHtml(name)}${title ? ` (${escapeHtml(title)})` : ''} submitted a ${escapeHtml(leave.type)} leave application.</p><p>${escapeHtml(when)} to ${escapeHtml(until)} · ${leave.days} day(s)</p>${leave.reason ? `<p>${escapeHtml(leave.reason)}</p>` : ''}<p>${escapeHtml(applicant.email)}</p>`,
+  });
+}
+
 // POST /api/attendance/leaves — supports ICAI categories
 const leaveCreateSchema = z.object({
   startDate: z.string(),
@@ -897,6 +937,9 @@ router.post('/leaves', async (req: AuthRequest, res: Response): Promise<void> =>
         examLevel: body.examLevel,
         reason: body.reason,
       },
+    });
+    await notifyLeaveSubmitted(req.user!.id, leave).catch((err: unknown) => {
+      logger.error('Leave notification email failed', { error: (err as Error).message, leaveId: leave.id });
     });
     res.status(201).json(leave);
   } catch (err) {
