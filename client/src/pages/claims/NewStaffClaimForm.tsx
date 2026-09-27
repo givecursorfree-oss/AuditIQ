@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
@@ -52,15 +52,10 @@ export function NewStaffClaimForm() {
     expenseDate: new Date().toISOString().slice(0, 10),
     travelTime: '',
     amount: '',
-    clientId: '',
-    engagementId: '',
-    workType: type === 'travel' ? 'Travel' : '',
-    managerId: '',
     jurisdiction: '',
     centreState: '',
     location: '',
     mapLink: '',
-    visitedById: '',
     period: '',
     issue: '',
     replyFromDepartment: '',
@@ -116,27 +111,8 @@ export function NewStaffClaimForm() {
     setForm((f) => ({
       ...f,
       expensePayerId: f.expensePayerId || user.id,
-      visitedById: f.visitedById || (type === 'travel' ? user.id : f.visitedById),
     }));
-  }, [user?.id, type]);
-
-  useEffect(() => {
-    if (type !== 'travel' || !form.visitedById) return;
-    setParticipants([{
-      userId: form.visitedById,
-      engagementId: form.engagementId,
-      clientId: form.clientId,
-      workType: form.workType || 'Travel',
-      managerId: form.managerId,
-      notes: '',
-    }]);
-  }, [type, form.visitedById, form.engagementId, form.clientId, form.workType, form.managerId]);
-
-  const engagementsForClient = useMemo(() => {
-    const clientId = form.clientId || participants[0]?.clientId;
-    if (!clientId) return engagements;
-    return engagements.filter((e) => e.client.id === clientId);
-  }, [engagements, form.clientId, participants]);
+  }, [user?.id]);
 
   const proofRequired = type === 'food' || form.travelMode === 'cab';
 
@@ -151,7 +127,7 @@ export function NewStaffClaimForm() {
         userId: '',
         engagementId: '',
         clientId: '',
-        workType: '',
+        workType: type === 'travel' ? 'Travel' : '',
         managerId: '',
         notes: '',
       },
@@ -163,74 +139,34 @@ export function NewStaffClaimForm() {
     setParticipants((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function setClaimClient(clientId: string) {
-    setForm((f) => ({ ...f, clientId, engagementId: '' }));
-    setParticipants((prev) =>
-      prev.map((p) => ({
-        ...p,
-        clientId,
-        engagementId: p.engagementId && engagements.find((e) => e.id === p.engagementId)?.client.id === clientId
-          ? p.engagementId
-          : '',
-      }))
-    );
-  }
-
-  function setClaimManager(managerId: string) {
-    setForm((f) => ({ ...f, managerId }));
-    setParticipants((prev) => prev.map((p) => ({ ...p, managerId })));
-  }
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (proofRequired && !files?.length) {
       await appAlert({ title: 'Receipt required', message: 'Upload at least one image or PDF.' });
       return;
     }
-    if (type === 'travel') {
-      if (!form.clientId) {
-        await appAlert({ title: 'Client required', message: 'Select Client Name.' });
-        return;
-      }
-      if (
-        !form.travelTime.trim() ||
+    if (
+      type === 'travel' &&
+      (!form.travelTime.trim() ||
         !form.jurisdiction.trim() ||
         !form.location.trim() ||
-        !form.visitedById ||
         !form.period.trim() ||
         !form.issue.trim() ||
-        !form.travelMode
-      ) {
-        await appAlert({ title: 'Incomplete', message: 'Fill all required travel fields.' });
-        return;
-      }
-      if (!form.managerId) {
-        await appAlert({ title: 'Manager required', message: 'Select Manager/Partner.' });
-        return;
-      }
+        !form.travelMode)
+    ) {
+      await appAlert({ title: 'Incomplete', message: 'Fill all required travel fields.' });
+      return;
     }
 
-    const filled = (type === 'travel'
-      ? [{
-          userId: form.visitedById,
-          engagementId: form.engagementId,
-          clientId: form.clientId,
-          workType: form.workType || 'Travel',
-          managerId: form.managerId,
-          notes: '',
-        }]
-      : participants.filter((p) => p.userId)
-    );
+    const filled = participants.filter((p) => p.userId);
 
-    if (type === 'food') {
-      if (filled.length === 0) {
-        await appAlert({ title: 'People required', message: 'Select at least one person covered.' });
-        return;
-      }
-      if (filled.some((p) => !p.managerId)) {
-        await appAlert({ title: 'Manager required', message: 'Select Manager/Partner for each person covered.' });
-        return;
-      }
+    if (filled.length === 0) {
+      await appAlert({ title: 'People required', message: 'Select at least one person covered.' });
+      return;
+    }
+    if (filled.some((p) => !p.managerId)) {
+      await appAlert({ title: 'Manager required', message: 'Select Manager/Partner for each person covered.' });
+      return;
     }
 
     const amount = parseFloat(form.amount);
@@ -247,18 +183,17 @@ export function NewStaffClaimForm() {
         claimType: type,
         amount: parseFloat(form.amount),
         expensePayerId: form.expensePayerId || undefined,
-        engagementId: first.engagementId || form.engagementId || undefined,
-        clientId: first.clientId || form.clientId || undefined,
+        engagementId: first.engagementId || undefined,
+        clientId: first.clientId || undefined,
         workType: first.workType || (type === 'travel' ? 'Travel' : undefined),
-        managerId: first.managerId || form.managerId || undefined,
+        managerId: first.managerId || undefined,
         expenseDate: form.expenseDate,
-        description: type === 'travel' ? undefined : first.notes || undefined,
+        description: first.notes || undefined,
         travelTime: type === 'travel' ? form.travelTime || undefined : undefined,
         jurisdiction: type === 'travel' ? form.jurisdiction : undefined,
         centreState: type === 'travel' ? form.centreState || undefined : undefined,
         location: type === 'travel' ? form.location : undefined,
         mapLink: type === 'travel' ? form.mapLink || undefined : undefined,
-        visitedById: type === 'travel' ? form.visitedById : undefined,
         period: type === 'travel' ? form.period : undefined,
         issue: type === 'travel' ? form.issue : undefined,
         replyFromDepartment: type === 'travel' ? form.replyFromDepartment || undefined : undefined,
@@ -311,7 +246,7 @@ export function NewStaffClaimForm() {
               onChange={(e) => setForm({ ...form, amount: e.target.value })}
               required
             />
-            {type === 'food' && count > 1 && form.amount && (
+            {count > 1 && form.amount && (
               <p className="text-xs mt-1">
                 {formatInr(form.amount)} · {count} people · {formatInr(share)}/person
               </p>
@@ -320,42 +255,6 @@ export function NewStaffClaimForm() {
 
           {type === 'travel' ? (
             <>
-              <div>
-                <Label>Client Name</Label>
-                <Select value={form.clientId || undefined} onValueChange={setClaimClient} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clients.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Engagement</Label>
-                <Select
-                  value={form.engagementId}
-                  onValueChange={(v) => {
-                    const eng = engagements.find((e) => e.id === v);
-                    setForm((f) => ({ ...f, engagementId: v, clientId: eng?.client.id ?? f.clientId }));
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Optional" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {engagementsForClient.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.client.name} — {e.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label>Date</Label>
@@ -401,25 +300,6 @@ export function NewStaffClaimForm() {
                 <Input value={form.mapLink} onChange={(e) => setForm({ ...form, mapLink: e.target.value })} />
               </div>
               <div>
-                <Label>Visited By</Label>
-                <Select
-                  value={form.visitedById}
-                  onValueChange={(v) => setForm({ ...form, visitedById: v })}
-                  required
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select staff" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staffList.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.firstName} {s.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
                 <Label>Period</Label>
                 <Input value={form.period} onChange={(e) => setForm({ ...form, period: e.target.value })} required />
               </div>
@@ -448,21 +328,6 @@ export function NewStaffClaimForm() {
                     {Object.entries(TRAVEL_MODE_LABELS).map(([k, label]) => (
                       <SelectItem key={k} value={k}>
                         {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Manager / Partner</Label>
-                <Select value={form.managerId || undefined} onValueChange={setClaimManager} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select approver" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {approvers.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.firstName} {a.lastName} ({a.role})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -510,7 +375,9 @@ export function NewStaffClaimForm() {
                   required
                 />
               </div>
-              <div className="space-y-3">
+            </>
+          )}
+          <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label>People covered</Label>
                   <Button type="button" size="sm" variant="outline" onClick={addParticipant}>
@@ -641,9 +508,7 @@ export function NewStaffClaimForm() {
                   </div>
                   );
                 })}
-              </div>
-            </>
-          )}
+          </div>
 
           <div>
             <Label>Receipt / proof</Label>

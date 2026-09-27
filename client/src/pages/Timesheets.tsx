@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { DownloadSimple as Download } from '@phosphor-icons/react';
 import { downloadBlob } from '@/lib/downloadCsv';
+import { entryDateWindow, isEntryDateAllowed, istDateKey } from '@/lib/attendanceDates';
 
 interface Timesheet {
   date: string;
@@ -65,9 +66,11 @@ export default function Timesheets() {
   const { user } = useAuth();
   const canFirm = Boolean(user && FIRM_VIEW_ROLES.includes(user.role));
   const isHr = user?.role === 'HR';
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [exportFrom, setExportFrom] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).from);
-  const [exportTo, setExportTo] = useState(() => defaultExportRange(new Date().toISOString().slice(0, 10)).to);
+  const today = istDateKey();
+  const entryWindow = entryDateWindow();
+  const [date, setDate] = useState(today);
+  const [exportFrom, setExportFrom] = useState(() => defaultExportRange(istDateKey()).from);
+  const [exportTo, setExportTo] = useState(() => defaultExportRange(istDateKey()).to);
   const [staffId, setStaffId] = useState(user?.id || '');
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [firmRows, setFirmRows] = useState<FirmRow[]>([]);
@@ -174,7 +177,17 @@ export default function Timesheets() {
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="max-w-xs">
           <Label>Date</Label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            type="date"
+            min={canFirm ? undefined : entryWindow.min}
+            max={canFirm ? undefined : entryWindow.max}
+            value={date}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (!canFirm && next && !isEntryDateAllowed(next)) return;
+              setDate(next);
+            }}
+          />
         </div>
         {canFirm && (
           <>
@@ -291,6 +304,7 @@ export default function Timesheets() {
               <div className="mb-3 flex flex-wrap items-center gap-3">
                 <ApprovalStatusBadge status={sheet.attestation?.status || 'Draft'} />
                 {staffId === user?.id &&
+                  isEntryDateAllowed(date) &&
                   !['Submitted', 'Approved'].includes(sheet.attestation?.status || '') && (
                     <Button type="button" size="sm" onClick={() => void submitDay()}>
                       Submit day

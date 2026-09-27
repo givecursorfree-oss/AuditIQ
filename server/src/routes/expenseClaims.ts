@@ -206,24 +206,14 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
     if (body.claimType === 'travel') {
       const missing: string[] = [];
-      if (!body.clientId?.trim()) missing.push('client');
       if (!body.travelTime?.trim()) missing.push('travelTime');
       if (!body.jurisdiction?.trim()) missing.push('jurisdiction');
       if (!body.location?.trim()) missing.push('location');
-      if (!body.visitedById?.trim()) missing.push('visitedBy');
       if (!body.period?.trim()) missing.push('period');
       if (!body.issue?.trim()) missing.push('issue');
       if (!body.travelMode) missing.push('travelMode');
       if (missing.length) {
         res.status(400).json({ error: `Travel claim requires: ${missing.join(', ')}` });
-        return;
-      }
-      const visitor = await prisma.user.findFirst({
-        where: { id: body.visitedById!, firmId: req.user!.firmId!, isActive: true },
-        select: { id: true },
-      });
-      if (!visitor) {
-        res.status(400).json({ error: 'Visited By must be a firm user' });
         return;
       }
     }
@@ -246,15 +236,12 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
             },
           ];
 
+    const visitedById = body.claimType === 'travel' ? body.visitedById?.trim() || undefined : undefined;
+
     // Each person covered names their own Manager/Partner. That person approves their share.
     const missingManager = participantRows.some((p) => !p.managerId);
     if (missingManager) {
-      res.status(400).json({
-        error:
-          body.claimType === 'food'
-            ? 'Manager/Partner is required for each person covered'
-            : 'Manager/Partner is required',
-      });
+      res.status(400).json({ error: 'Manager/Partner is required for each person covered' });
       return;
     }
 
@@ -384,7 +371,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
         centreState: body.centreState,
         location: body.location,
         mapLink: body.mapLink,
-        visitedById: body.visitedById,
+        visitedById,
         period: body.period,
         issue: body.issue,
         replyFromDepartment: body.replyFromDepartment,

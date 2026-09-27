@@ -13,6 +13,7 @@ import { ErrorBanner } from '@/components/layout/ErrorBanner';
 import { notifyStopwatchChanged, STOPWATCH_CHANGED } from '@/lib/stopwatchEvents';
 import { isEditableKeyboardTarget } from '@/lib/keyboard';
 import { useAuth } from '@/context/AuthContext';
+import { entryDateWindow, isEntryDateAllowed, istDateKey } from '@/lib/attendanceDates';
 
 interface Stopwatch {
   id: string;
@@ -99,7 +100,7 @@ export default function TimeTracker() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: istDateKey(),
     clientName: '',
     engagementId: '',
     supervisorId: '',
@@ -392,6 +393,10 @@ export default function TimeTracker() {
       await appAlert({ title: 'Hours required', message: 'Select the number of hours.' });
       return;
     }
+    if (!isEntryDateAllowed(manualForm.date)) {
+      await appAlert({ title: 'Date not allowed', message: 'Time can be entered for today and yesterday only.' });
+      return;
+    }
     try {
       await api.post('/time-entries', {
         date: new Date(manualForm.date).toISOString(),
@@ -585,7 +590,19 @@ export default function TimeTracker() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <label className="block">
               <span className="text-xs text-muted-foreground">Date</span>
-              <input type="date" aria-label="Date" className="input-field mt-1" value={manualForm.date} onChange={e => setManualForm({ ...manualForm, date: e.target.value })} />
+              <input
+                type="date"
+                aria-label="Date"
+                className="input-field mt-1"
+                min={entryDateWindow().min}
+                max={entryDateWindow().max}
+                value={manualForm.date}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (next && !isEntryDateAllowed(next)) return;
+                  setManualForm({ ...manualForm, date: next });
+                }}
+              />
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Client</span>

@@ -28,3 +28,26 @@ export function attendanceDayFilter(d = new Date()) {
 export function attendanceDayStart(d = new Date()): Date {
   return getAttendanceDayRange(d).start;
 }
+
+function shiftDateKey(key: string, days: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** Today and the previous IST calendar day. */
+export function entryDateWindow(now = new Date()): { min: string; max: string } {
+  const max = getAttendanceDateKey(now);
+  return { min: shiftDateKey(max, -1), max };
+}
+
+/** Date-only YYYY-MM-DD, or an instant, must fall on today or yesterday in IST. */
+export function isEntryDateAllowed(raw: string, now = new Date()): boolean {
+  let key = raw;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return false;
+    key = getAttendanceDateKey(parsed);
+  }
+  const { min, max } = entryDateWindow(now);
+  return key >= min && key <= max;
+}

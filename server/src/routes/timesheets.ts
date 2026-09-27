@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { isEntryDateAllowed } from '../lib/attendanceDates.js';
 import prisma from '../lib/prisma.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
@@ -544,6 +545,10 @@ router.get('/firm/export.xlsx', async (req: AuthRequest, res: Response): Promise
 router.post('/submit', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const body = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).parse(req.body);
+    if (!isEntryDateAllowed(body.date)) {
+      res.status(400).json({ error: 'Timesheets can be submitted for today and yesterday only' });
+      return;
+    }
     const dayKey = dateOnly(body.date);
     const { start, end } = dayBounds(body.date);
     const hours = await prisma.timeEntry.aggregate({

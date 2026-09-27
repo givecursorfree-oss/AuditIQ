@@ -159,6 +159,7 @@ client/doctor.config.json
 !client/public/illustrations/empty/*.png
 
 .vercel
+smtp.env
 .env*
 !.env.example
 !.env.*.example

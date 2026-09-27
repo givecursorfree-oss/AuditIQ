@@ -203,24 +203,63 @@ export function ocrAmountMismatch(claimed: string | number, ocr: string | number
   return Math.abs(claimAmount(claimed) - claimAmount(ocr)) > 1;
 }
 
-export function claimPolicyFlagLines(
+const LATE_SITTING_MINUTES = 19 * 60;
+
+export type ClaimEvidenceTone = 'success' | 'warning' | 'muted' | 'error';
+
+export type ClaimEvidenceLine = {
+  label: 'App log-off' | 'Thumbprint out';
+  value: string;
+  mark: '' | '✓' | '⚠';
+  tone: ClaimEvidenceTone;
+};
+
+function clockMinutes(raw: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(raw.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function formatClock(minutes: number): string {
+  const hours24 = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const suffix = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 % 12 || 12;
+  return `${hours12}:${String(mins).padStart(2, '0')} ${suffix}`;
+}
+
+function evidenceLine(
+  label: ClaimEvidenceLine['label'],
+  raw: string | null | undefined,
+  missing: string
+): ClaimEvidenceLine {
+  if (raw == null || raw.trim() === '') {
+    return { label, value: missing, mark: '', tone: 'muted' };
+  }
+  const minutes = clockMinutes(raw);
+  if (minutes == null) {
+    return { label, value: 'Unable to read', mark: '', tone: 'error' };
+  }
+  const afterSeven = minutes > LATE_SITTING_MINUTES;
+  return {
+    label,
+    value: formatClock(minutes),
+    mark: afterSeven ? '✓' : '⚠',
+    tone: afterSeven ? 'success' : 'warning',
+  };
+}
+
+/** Two evidence rows for the manager. They do not approve or reject the claim. */
+export function claimEvidenceLines(
   flags: StaffClaimRow['policyFlags'] | null | undefined
-): string[] {
-  if (!flags) return [];
-  const lines: string[] = [];
-  if (flags.lateSittingException) {
-    lines.push(flags.lateSittingReason ? `Late sitting: ${flags.lateSittingReason}` : 'Late sitting exception');
-  }
-  if (flags.logoffMismatch) {
-    lines.push(flags.logoffMismatchReason ? `Logoff: ${flags.logoffMismatchReason}` : 'Logoff mismatch');
-  }
-  if (flags.computerLogoffTime) {
-    lines.push(`Computer logoff: ${flags.computerLogoffTime}`);
-  }
-  if (flags.fingerprintLogoffTime) {
-    lines.push(`Biometric logoff: ${flags.fingerprintLogoffTime}`);
-  }
-  return lines;
+): [ClaimEvidenceLine, ClaimEvidenceLine] {
+  return [
+    evidenceLine('App log-off', flags?.computerLogoffTime, 'Not recorded'),
+    evidenceLine('Thumbprint out', flags?.fingerprintLogoffTime, 'Not available'),
+  ];
 }
 
 export function claimStatusBadgeVariant(

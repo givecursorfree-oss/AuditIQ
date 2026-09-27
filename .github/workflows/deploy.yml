@@ -71,5 +71,6 @@ jobs:
             git pull --ff-only origin main
             docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 pull || true
             docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --build --remove-orphans
+            docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 up -d --no-deps --force-recreate server
             docker compose -f docker-compose.kvm2.yml --env-file .env.kvm2 exec -T server npx prisma migrate deploy
             docker image prune -f

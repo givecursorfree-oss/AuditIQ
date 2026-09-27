@@ -4,6 +4,7 @@ import { prisma } from '../index.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { listLookupValues, LOOKUP_ACTIVITY, LOOKUP_CLIENT } from '../lib/hrLookups.js';
+import { getAttendanceDateKey, isEntryDateAllowed } from '../lib/attendanceDates.js';
 
 const router = Router();
 router.use(authenticate);
@@ -245,6 +246,10 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const firmId = requireFirmId(req, res);
     if (!firmId) return;
     const data = timeEntrySchema.parse(req.body);
+    if (!isEntryDateAllowed(data.date)) {
+      res.status(400).json({ error: 'Time can be entered for today and yesterday only' });
+      return;
+    }
 
     const allowedClients = await firmClientNames(firmId);
     const canonical = allowedClients.find(
@@ -313,7 +318,7 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const existing = await prisma.timeEntry.findFirst({
       where: { id: String(req.params.id), user: { firmId } },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, date: true },
     });
     if (!existing) {
       res.status(404).json({ error: 'Time entry not found' });
@@ -321,6 +326,10 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     }
     if (existing.userId !== req.user!.id && !['Partner', 'Admin', 'Manager'].includes(req.user!.role)) {
       res.status(403).json({ error: 'You can only edit your own time entries' });
+      return;
+    }
+    if (!isEntryDateAllowed(getAttendanceDateKey(existing.date)) || (date && !isEntryDateAllowed(date))) {
+      res.status(400).json({ error: 'Time can be entered for today and yesterday only' });
       return;
     }
 
