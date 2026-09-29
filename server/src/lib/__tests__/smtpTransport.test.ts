@@ -50,6 +50,7 @@ describe('password reset mail', () => {
     expect(mail.subject).toBe('Reset your AuditIQ password');
     expect(mail.body).toContain('Asha &lt;script&gt;');
     expect(mail.body).toContain('http://localhost:5173/reset-password?token=abc');
+    expect(mail.body).toContain('>Reset password<');
     expect(mail.body).not.toContain('<script>');
   });
 });

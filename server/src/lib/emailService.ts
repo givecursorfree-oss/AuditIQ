@@ -6,6 +6,7 @@ import {
   messageIdDomainFromAddress,
   normalizeMessageId,
 } from './dataRequestMail.js';
+import { mailCtaButton, staffAppUrl } from './mailCta.js';
 
 // Immediate sends go through SMTP. Future sends are persisted in EmailOutbox
 // and delivered by the scheduler with retry/backoff.
@@ -483,7 +484,7 @@ export const emailTemplates = {
     const body = `
       <p>Dear ${esc(p.recipientName)},</p>
       <p>We received a request to reset your AuditIQ password. This link expires in 1 hour.</p>
-      <p><a href="${esc(p.resetUrl)}">Reset password</a></p>
+      <p style="margin:20px 0 8px">${mailCtaButton(p.resetUrl, 'Reset password', '#2563eb')}</p>
       <p>If you did not request this, you can ignore this email. Your password will stay the same.</p>
       <p>Warm regards,<br/>${esc(p.firmName)}</p>`;
     return { subject: 'Reset your AuditIQ password', body: wrap(p.firmName, body) };
@@ -493,7 +494,7 @@ export const emailTemplates = {
     const body = `
       <p>Dear ${esc(p.recipientName)},</p>
       <p>Thank you for registering with ${esc(p.firmName)}. Verify your email to open the client portal. This link expires in 24 hours.</p>
-      <p><a href="${esc(p.verifyUrl)}">Verify email address</a></p>
+      <p style="margin:20px 0 8px">${mailCtaButton(p.verifyUrl, 'Verify email address', '#2563eb')}</p>
       <p>Warm regards,<br/>${esc(p.firmName)}</p>`;
     return { subject: 'Verify your AuditIQ account', body: wrap(p.firmName, body) };
   },
@@ -517,17 +518,19 @@ export const emailTemplates = {
     return { subject: `Welcome to ${p.firmName} — Your portal access`, body: wrap(p.firmName, body) };
   },
 
-  documentFollowup(p: { firmName: string; clientName: string; documents: string[]; engagementTitle: string; attempt: number }) {
+  documentFollowup(p: { firmName: string; clientName: string; documents: string[]; engagementTitle: string; attempt: number; portalUrl?: string }) {
     const items = p.documents.map(d => `<li>${d}</li>`).join('');
     const heading = p.attempt === 1
       ? 'Friendly reminder — documents pending'
       : `Reminder #${p.attempt} — documents still pending`;
+    const portal = p.portalUrl || `${getEnv().CLIENT_URL.replace(/\/$/, '')}/client/dashboard`;
     const body = `
       <p>Dear ${p.clientName},</p>
       <p>This is a polite ${p.attempt > 1 ? `${p.attempt === 2 ? 'second' : 'third'} ` : ''}reminder regarding the documents we requested for
       <strong>${p.engagementTitle}</strong>. We are still awaiting:</p>
       <ul>${items}</ul>
       <p>Please upload these via your client portal at your earliest convenience so that we can proceed with the work.</p>
+      <p style="margin:20px 0 8px">${mailCtaButton(portal, 'Open client portal', '#2563eb')}</p>
       <p>If you have any questions or need help, just reply to this email and we'll be happy to assist.</p>
       <p>Warm regards,<br/>${p.firmName}</p>`;
     return { subject: `${heading} — ${p.engagementTitle}`, body: wrap(p.firmName, body) };
@@ -567,12 +570,14 @@ export const emailTemplates = {
     daysSince: number;
     engagementId: string;
   }) {
+    const pending = staffAppUrl('/billing/pending');
+    const eng = staffAppUrl(`/engagements/${p.engagementId}`);
     const body = `
       <p>Dear ${p.managerName},</p>
       <p><strong>${p.clientName}</strong> — engagement <strong>${p.engagementTitle}</strong> was filed
       ${p.daysSince} day${p.daysSince === 1 ? '' : 's'} ago and is still not billed.</p>
       <p>Please follow up: raise the invoice and move the engagement to the Billing stage.</p>
-      <p><a href="/billing/pending">Open pending billing</a> · <a href="/engagements/${p.engagementId}">View engagement</a></p>`;
+      <p style="margin:20px 0 8px">${mailCtaButton(pending, 'Open pending billing', '#2563eb')}${mailCtaButton(eng, 'View engagement', '#0f766e')}</p>`;
     return {
       subject: `Action required: bill ${p.clientName} — ${p.engagementTitle}`,
       body: wrap('AuditIQ', body),

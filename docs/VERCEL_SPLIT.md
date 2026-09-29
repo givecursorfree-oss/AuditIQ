@@ -43,6 +43,7 @@ CLIENT_URL=https://auditiq.mkdandeker.com
 DOMAIN=api.mkdandeker.com
 COOKIE_DOMAIN=.mkdandeker.com
 GOOGLE_REDIRECT_URI=https://api.mkdandeker.com/api/integrations/google-drive/callback
+API_PUBLIC_URL=https://api.mkdandeker.com
 # + your real MYSQL_ROOT_PASSWORD, JWT_SECRET, VAULT_ENCRYPTION_KEY, TYPESENSE_API_KEY
 ```
 

@@ -10,7 +10,7 @@ import {
 } from '../lib/templateRenderer.js';
 import { scheduleEmail, sendEmail } from '../lib/emailService.js';
 import { isDataRequestCategory } from '../lib/dataRequestMail.js';
-import { buildDataRequestTeamCc } from '../lib/dataRequestSend.js';
+import { buildDataRequestTeamCc, withDataRequestMailButtons } from '../lib/dataRequestSend.js';
 
 const router = Router();
 
@@ -290,7 +290,10 @@ router.post(
         to: client.contactEmail,
         cc: teamCc.cc,
         subject: filledSubject,
-        body: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${htmlBody}</div>`,
+        body: withDataRequestMailButtons(
+          `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${htmlBody}</div>`,
+          { category: tpl.category, engagementId: body.engagementId }
+        ),
         clientId: client.id,
         engagementId: body.engagementId,
         templateKey: tpl.category,

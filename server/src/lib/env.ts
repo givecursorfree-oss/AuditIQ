@@ -124,6 +124,12 @@ const envSchema = z.object({
   GOOGLE_REDIRECT_URI: z
     .preprocess((v) => (v === '' || v == null ? undefined : v), z.string().url().optional()),
 
+  /**
+   * Public API origin for emailed action links (leave Approve/Reject).
+   * e.g. https://api.mkdandeker.com — required when API ≠ CLIENT_URL host.
+   */
+  API_PUBLIC_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+
   // Production hardening (default off — enable only for dev/bootstrap)
   ALLOW_STAFF_REGISTRATION: z.preprocess(
     (v) => (v === undefined || v === '' ? 'false' : v),

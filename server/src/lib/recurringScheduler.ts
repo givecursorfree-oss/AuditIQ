@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import logger from './logger.js';
 import { SERVICE_CATALOG } from './workflowCatalog.js';
 import { scheduleEmail } from './emailService.js';
-import { buildDataRequestTeamCc } from './dataRequestSend.js';
+import { buildDataRequestTeamCc, withDataRequestMailButtons } from './dataRequestSend.js';
 import {
   buildDefaultTemplateVars,
   renderTemplate,
@@ -302,7 +302,10 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
         to: parent.client.contactEmail,
         cc: teamCc.cc,
         subject,
-        body: `<div style="font-family:Arial,sans-serif;line-height:1.5">${body}</div>`,
+        body: withDataRequestMailButtons(
+          `<div style="font-family:Arial,sans-serif;line-height:1.5">${body}</div>`,
+          { category: template.category, engagementId: child.id }
+        ),
         clientId: parent.clientId,
         engagementId: child.id,
         templateKey: template.category,

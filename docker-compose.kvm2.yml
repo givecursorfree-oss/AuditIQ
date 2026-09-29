@@ -63,6 +63,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-https://api.mkdandeker.com}
     volumes:
       - server_logs:/app/logs
       - document_uploads:/app/uploads

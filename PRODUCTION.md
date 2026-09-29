@@ -45,6 +45,7 @@ bash scripts/vps-api-only.sh
 | `SMTP_USER` | Dedicated notification mailbox or SMTP username |
 | `SMTP_PASSWORD` | SMTP password or provider app password |
 | `SMTP_FROM` | Verified sender address on the firm domain |
+| `API_PUBLIC_URL` | Public API origin for leave Approve/Reject email buttons, e.g. `https://api.mkdandeker.com` (compose defaults this if unset) |
 
 ### Full stack (16 GB+) — copy `.env.example` → `.env`
 

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { getEnv } from './env.js';
+import { apiPublicOrigin, mailCtaRow } from './mailCta.js';
 
 export type LeaveMailAction = 'open' | 'approve' | 'reject';
 
@@ -13,17 +14,7 @@ type LeaveMailPayload = {
   action: LeaveMailAction;
 };
 
-export function apiPublicOrigin(): string {
-  const redirect = getEnv().GOOGLE_REDIRECT_URI;
-  if (redirect) {
-    try {
-      return new URL(redirect).origin;
-    } catch {
-      /* fall through */
-    }
-  }
-  return `http://localhost:${getEnv().PORT}`;
-}
+export { apiPublicOrigin };
 
 export function signLeaveMailToken(input: {
   leaveId: string;
@@ -80,12 +71,14 @@ export function leaveMailActionButtonsHtml(input: {
   includeDecide?: boolean;
 }): string {
   const open = leaveMailActionUrl({ ...input, action: 'open' });
-  const btn = (href: string, label: string, bg: string) =>
-    `<a href="${href}" style="display:inline-block;margin:0 8px 8px 0;padding:10px 18px;background:${bg};color:#fff;text-decoration:none;border-radius:4px;font-family:sans-serif;font-size:14px;font-weight:600">${label}</a>`;
   if (input.includeDecide === false) {
-    return `<p style="margin:20px 0 8px">${btn(open, 'Open', '#2563eb')}</p>`;
+    return mailCtaRow([{ href: open, label: 'Open', bg: '#2563eb' }]);
   }
   const approve = leaveMailActionUrl({ ...input, action: 'approve' });
   const reject = leaveMailActionUrl({ ...input, action: 'reject' });
-  return `<p style="margin:20px 0 8px">${btn(open, 'Open', '#2563eb')}${btn(approve, 'Approve', '#16a34a')}${btn(reject, 'Reject', '#dc2626')}</p>`;
+  return mailCtaRow([
+    { href: open, label: 'Open', bg: '#2563eb' },
+    { href: approve, label: 'Approve', bg: '#16a34a' },
+    { href: reject, label: 'Reject', bg: '#dc2626' },
+  ]);
 }
