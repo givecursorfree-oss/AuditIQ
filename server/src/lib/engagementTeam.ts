@@ -10,7 +10,40 @@ const userSelect = {
   initials: true,
   role: true,
   designation: true,
+  email: true,
 } as const;
+
+/** All engagement team mailbox addresses + user ids (partner, managers, staff/article). */
+export async function getEngagementTeamEmails(
+  engagementId: string
+): Promise<{ emails: string[]; userIds: string[] }> {
+  const team = await getEngagementTeam(engagementId);
+  if (!team) return { emails: [], userIds: [] };
+
+  const users = [
+    team.primary.partner,
+    ...team.managers,
+    team.primary.manager,
+    ...team.staff,
+    team.primary.article,
+  ].filter((u): u is NonNullable<typeof u> => Boolean(u));
+
+  const emails: string[] = [];
+  const userIds: string[] = [];
+  const seenUser = new Set<string>();
+  const seenEmail = new Set<string>();
+  for (const u of users) {
+    if (seenUser.has(u.id)) continue;
+    seenUser.add(u.id);
+    userIds.push(u.id);
+    const email = u.email?.trim();
+    if (email && !seenEmail.has(email.toLowerCase())) {
+      seenEmail.add(email.toLowerCase());
+      emails.push(email);
+    }
+  }
+  return { emails, userIds };
+}
 
 export async function getEngagementTeam(engagementId: string) {
   const eng = await prisma.engagement.findUnique({

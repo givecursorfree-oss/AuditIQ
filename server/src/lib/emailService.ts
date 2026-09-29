@@ -1,9 +1,15 @@
 import prisma from './prisma.js';
 import { getEnv } from './env.js';
 import logger from './logger.js';
+import {
+  buildStableMessageId,
+  messageIdDomainFromAddress,
+  normalizeMessageId,
+} from './dataRequestMail.js';
 
 // Immediate sends go through SMTP. Future sends are persisted in EmailOutbox
 // and delivered by the scheduler with retry/backoff.
+// Gmail SMTP (smtp.gmail.com + SMTP_USER) also stores a copy in that mailbox's Sent folder.
 
 export interface EmailParams {
   to: string;
@@ -15,6 +21,12 @@ export interface EmailParams {
   templateKey?: string;
   metadata?: Record<string, unknown>;
   attachments?: EmailAttachment[];
+  /** RFC Message-ID; generated when omitted. */
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string;
+  /** Engagement team user ids for reply-trail mapping. */
+  teamUserIds?: string[];
 }
 
 export interface EmailAttachment {
@@ -146,13 +158,26 @@ export async function verifySmtp(): Promise<'ok' | 'dev' | 'missing'> {
 /**
  * Sends an email directly through SMTP. Every attempt is recorded as sent or
  * failed; this service deliberately does not create queued mail records.
+ * Authenticated Gmail SMTP keeps the message in the mailbox Sent folder.
  */
 export async function sendEmail(
   params: EmailParams
-): Promise<{ id: string; status: string; previewUrl?: string }> {
+): Promise<{ id: string; status: string; previewUrl?: string; messageId?: string }> {
+  const env = getEnv();
+  const messageId =
+    normalizeMessageId(params.messageId) ||
+    buildStableMessageId(messageIdDomainFromAddress(env.SMTP_FROM || env.SMTP_USER));
+  const gmailSentCopy = (env.SMTP_HOST || '').toLowerCase().includes('gmail.com');
+  const metaBase: Record<string, unknown> = {
+    ...(params.metadata || {}),
+    messageId,
+    ...(params.teamUserIds?.length ? { teamUserIds: params.teamUserIds } : {}),
+    ...(gmailSentCopy ? { gmailSentCopy: true } : {}),
+  };
+  const paramsWithMeta: EmailParams = { ...params, messageId, metadata: metaBase };
+
   try {
     const tx = await getTransporter();
-    const env = getEnv();
     const info = await tx.sendMail({
       from: env.SMTP_FROM,
       to: params.to,
@@ -160,20 +185,86 @@ export async function sendEmail(
       subject: params.subject,
       html: params.body,
       attachments: params.attachments,
+      messageId,
+      inReplyTo: params.inReplyTo,
+      references: params.references,
     });
+    const resolvedId = normalizeMessageId(info.messageId) || messageId;
+    metaBase.messageId = resolvedId;
     const preview = devInbox ? nodemailerApi?.getTestMessageUrl(info) : undefined;
     const previewUrl = typeof preview === 'string' ? preview : undefined;
     if (previewUrl) {
       logger.info('Email captured by the test inbox', { to: params.to, subject: params.subject, previewUrl });
     }
-    const log = await createCommsLog(params, 'sent', undefined, new Date());
-    return { id: log.id, status: 'sent', previewUrl };
+    const log = await createCommsLog(
+      { ...paramsWithMeta, messageId: resolvedId, metadata: metaBase },
+      'sent',
+      undefined,
+      new Date()
+    );
+    await recordOutboundThreadMessage({
+      messageId: resolvedId,
+      subject: params.subject,
+      fromAddress: env.SMTP_FROM,
+      toAddress: params.to,
+      ccAddress: params.cc,
+      bodyHtml: params.body,
+      clientId: params.clientId,
+      engagementId: params.engagementId,
+      commsLogId: log.id,
+      teamUserIds: params.teamUserIds,
+    }).catch((err) =>
+      logger.warn('Outbound thread record failed', { error: (err as Error).message, messageId: resolvedId })
+    );
+    return { id: log.id, status: 'sent', previewUrl, messageId: resolvedId };
   } catch (err) {
     const msg = (err as Error).message;
     logger.error('Email delivery failed', { error: msg, to: params.to });
-    const log = await createCommsLog(params, 'failed', msg);
+    const log = await createCommsLog(paramsWithMeta, 'failed', msg);
     throw new EmailDeliveryError(msg, log.id);
   }
+}
+
+export async function recordOutboundThreadMessage(input: {
+  messageId: string;
+  subject: string;
+  fromAddress: string;
+  toAddress: string;
+  ccAddress?: string;
+  bodyHtml?: string;
+  clientId?: string;
+  engagementId?: string;
+  commsLogId?: string;
+  teamUserIds?: string[];
+}) {
+  const messageId = normalizeMessageId(input.messageId);
+  if (!messageId) return null;
+  return prisma.emailThreadMessage.upsert({
+    where: { messageId },
+    create: {
+      messageId,
+      direction: 'outbound',
+      threadRootId: messageId,
+      subject: input.subject,
+      fromAddress: input.fromAddress,
+      toAddress: input.toAddress,
+      ccAddress: input.ccAddress,
+      bodyHtml: input.bodyHtml,
+      clientId: input.clientId,
+      engagementId: input.engagementId,
+      commsLogId: input.commsLogId,
+      teamUserIds: input.teamUserIds?.length ? JSON.stringify(input.teamUserIds) : undefined,
+    },
+    update: {
+      subject: input.subject,
+      ccAddress: input.ccAddress,
+      bodyHtml: input.bodyHtml,
+      clientId: input.clientId,
+      engagementId: input.engagementId,
+      commsLogId: input.commsLogId,
+      teamUserIds: input.teamUserIds?.length ? JSON.stringify(input.teamUserIds) : undefined,
+    },
+  });
 }
 
 export async function scheduleEmail(
@@ -200,7 +291,10 @@ export async function scheduleEmail(
       subject: params.subject,
       body: params.body,
       templateKey: params.templateKey || 'other',
-      metadata: params.metadata ? JSON.stringify(params.metadata) : undefined,
+      metadata: JSON.stringify({
+        ...(params.metadata || {}),
+        ...(params.teamUserIds?.length ? { teamUserIds: params.teamUserIds } : {}),
+      }),
       attachments: params.attachments ? JSON.stringify(params.attachments) : undefined,
       scheduledAt,
     },
@@ -295,6 +389,9 @@ export async function processEmailOutbox(
 
     const metadata = parseJsonObject(outbox.metadata);
     try {
+      const teamUserIds = Array.isArray(metadata.teamUserIds)
+        ? metadata.teamUserIds.filter((x): x is string => typeof x === 'string')
+        : undefined;
       await sendEmail({
         to: outbox.toAddress,
         cc: outbox.ccAddress ?? undefined,
@@ -305,6 +402,7 @@ export async function processEmailOutbox(
         templateKey: outbox.templateKey,
         metadata: { ...metadata, outboxId: outbox.id },
         attachments: parseAttachments(outbox.attachments),
+        teamUserIds,
       });
       await prisma.emailOutbox.update({
         where: { id: outbox.id },

@@ -2,6 +2,7 @@ import prisma from './prisma.js';
 import logger from './logger.js';
 import { SERVICE_CATALOG } from './workflowCatalog.js';
 import { scheduleEmail } from './emailService.js';
+import { buildDataRequestTeamCc } from './dataRequestSend.js';
 import {
   buildDefaultTemplateVars,
   renderTemplate,
@@ -290,14 +291,23 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
       });
       const subject = renderTemplate(template.subject, vars);
       const body = renderTemplate(template.body, vars).replace(/\n/g, '<br/>');
+      const teamCc = await buildDataRequestTeamCc({
+        category: template.category,
+        // Team roster lives on the parent; child period is created without members.
+        engagementId: parent.id,
+        toAddress: parent.client.contactEmail,
+      });
 
       await scheduleEmail({
         to: parent.client.contactEmail,
+        cc: teamCc.cc,
         subject,
         body: `<div style="font-family:Arial,sans-serif;line-height:1.5">${body}</div>`,
         clientId: parent.clientId,
         engagementId: child.id,
         templateKey: template.category,
+        teamUserIds: teamCc.teamUserIds,
+        metadata: teamCc.teamUserIds ? { teamUserIds: teamCc.teamUserIds } : undefined,
       }, new Date(), { allowImmediate: true });
       emailsScheduled++;
     }

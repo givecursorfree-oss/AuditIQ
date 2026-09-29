@@ -108,6 +108,8 @@ export default function LeaveStipend() {
     reason: '',
   });
 
+  const [focusLeaveId, setFocusLeaveId] = useState<string | null>(null);
+
   const visibleTabs = useMemo(() => {
     const tabs: { k: LeaveTab; l: string }[] = [];
     if (canApply) tabs.push({ k: 'apply', l: 'Apply for leave' });
@@ -171,7 +173,13 @@ export default function LeaveStipend() {
 
   useEffect(() => {
     const raw = searchParams.get('tab');
+    const leaveId = searchParams.get('leaveId');
     const q = ((raw === 'manage' ? 'inbox' : raw) as LeaveTab | null);
+    if (leaveId && canManage) {
+      setTab('inbox');
+      setFocusLeaveId(leaveId);
+      return;
+    }
     if (q && visibleTabs.some((t) => t.k === q)) {
       setTab(q);
       return;
@@ -181,6 +189,44 @@ export default function LeaveStipend() {
     else if (canManage) setTab('inbox');
     else if (visibleTabs[0]) setTab(visibleTabs[0].k);
   }, [searchParams, visibleTabs, isAdmin, canApply, canManage]);
+
+  useEffect(() => {
+    const done = searchParams.get('mailDone');
+    const err = searchParams.get('mailError');
+    if (!done && !err) return;
+    const messages: Record<string, { title: string; message: string }> = {
+      approved: { title: 'Leave sanctioned', message: 'The leave application was approved.' },
+      'manager-approved': { title: 'Leave approved', message: 'Forwarded for final sanction.' },
+      rejected: { title: 'Leave rejected', message: 'The leave application was rejected.' },
+      'no-permission': { title: 'Not allowed', message: 'Your account cannot approve or reject leave.' },
+      'cannot-approve': { title: 'Cannot approve', message: 'This leave is not in a state you can approve.' },
+      'action-failed': { title: 'Action failed', message: 'Could not update this leave. Open Leave Management to try again.' },
+    };
+    const key = done || err || '';
+    const copy = messages[key] || { title: 'Leave', message: 'Opened from email.' };
+    void appAlert(copy).then(() => {
+      const next = new URLSearchParams(searchParams);
+      next.delete('mailDone');
+      next.delete('mailError');
+      setSearchParams(next, { replace: true });
+    });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!focusLeaveId || tab !== 'inbox') return;
+    const el = document.getElementById(`leave-${focusLeaveId}`);
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [focusLeaveId, tab, inbox, leaves]);
+
+  const inboxRows = useMemo(() => {
+    const base = inbox.length
+      ? inbox
+      : leaves.filter((l) => l.status === 'Pending' || l.status === 'Manager Approved');
+    if (!focusLeaveId) return base;
+    if (base.some((l) => l.id === focusLeaveId)) return base;
+    const focused = leaves.find((l) => l.id === focusLeaveId);
+    return focused ? [focused, ...base] : base;
+  }, [inbox, leaves, focusLeaveId]);
 
   const selectTab = (k: LeaveTab) => {
     setTab(k);
@@ -471,8 +517,12 @@ export default function LeaveStipend() {
               </tr>
             </thead>
             <tbody>
-              {(inbox.length ? inbox : leaves.filter((l) => l.status === 'Pending' || l.status === 'Manager Approved')).map((l) => (
-                <tr key={l.id} className="border-t border-border">
+              {inboxRows.map((l) => (
+                <tr
+                  key={l.id}
+                  id={`leave-${l.id}`}
+                  className={`border-t border-border ${focusLeaveId === l.id ? 'bg-primary/5' : ''}`}
+                >
                   <td className="px-4 py-2">{l.user.firstName} {l.user.lastName}</td>
                   <td>{l.type}{l.examLevel ? ` (${l.examLevel})` : ''}</td>
                   <td>{new Date(l.fromDate).toLocaleDateString('en-IN')}</td>

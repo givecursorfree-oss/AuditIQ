@@ -6,7 +6,14 @@ import logger from '../lib/logger.js';
 import {
   attendanceDayFilter,
   attendanceDayStart,
+  getAttendanceDateKey,
+  pickOpenAttendanceSession,
+  pickResumableAttendanceSession,
 } from '../lib/attendanceDates.js';
+import {
+  loadMeTodayAttendance,
+  loadTodayAndYesterdayAttendance,
+} from '../lib/attendanceSession.js';
 import { ensureTimerClockIn, syncAttendanceActivity } from '../lib/staffWorkStatus.js';
 import { taskDerivedHoursForDay } from '../lib/taskAttendanceSync.js';
 import { GeofenceError, GpsAccuracyError, resolveOfficeCheckIn } from '../lib/geofence.js';
@@ -27,6 +34,9 @@ import {
 import { clientIp } from '../lib/clientIp.js';
 import { sendEmail } from '../lib/emailService.js';
 import { leaveRecipientsFor } from '../lib/leaveNotify.js';
+import { leaveMailActionButtonsHtml } from '../lib/leaveMailAction.js';
+import { applyLeaveDecision, canManagerApproveLeave } from '../lib/leaveDecision.js';
+import { normalizeEmail } from '../lib/emailNormalize.js';
 
 // ICAI articleship leave limits (from articleship.ts but duplicated here to
 // avoid a circular runtime dep — values rarely change)
@@ -121,44 +131,20 @@ function geofenceOrValidation(err: unknown, res: Response): boolean {
 const router = Router();
 router.use(authenticate);
 
-// GET /api/attendance/me/today — current user's record for today (confirmation UI)
+// GET /api/attendance/me/today — today's row, or yesterday's still-open overnight session
 router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const record = await prisma.attendance.findFirst({
-      where: { userId: req.user!.id, date: attendanceDayFilter() },
-      select: {
-        id: true,
-        checkIn: true,
-        checkOut: true,
-        status: true,
-        date: true,
-        method: true,
-        location: true,
-        lateBand: true,
-        clientName: true,
-        bioPresent: true,
-        forgiven: true,
-        totalActiveSeconds: true,
-        gpsLat: true,
-        gpsLng: true,
-        gpsAccuracy: true,
-        ipAddress: true,
-      },
-    });
-    if (!record) {
+    const picked = await loadMeTodayAttendance(req.user!.id);
+    if (!picked) {
       res.json(null);
       return;
     }
+    const { record, overnight } = picked;
     const hoursWorked =
       record.checkIn && record.checkOut
         ? +((record.checkOut.getTime() - record.checkIn.getTime()) / 3_600_000).toFixed(2)
         : null;
-    const dateKey = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date());
+    const dateKey = getAttendanceDateKey(record.date);
     const taskDerivedHours = await taskDerivedHoursForDay(req.user!.id, dateKey);
     const isArticle = await userIsArticleAssistant(req.user!.id);
     res.json({
@@ -167,6 +153,7 @@ router.get('/me/today', async (req: AuthRequest, res: Response): Promise<void> =
       taskDerivedHours,
       totalActiveHours: +(record.totalActiveSeconds / 3600).toFixed(2),
       isArticle,
+      overnightContinuation: overnight,
     });
   } catch (err) {
     logger.error('Today attendance error', { error: (err as Error).message });
@@ -433,9 +420,13 @@ router.get('/report', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req
 // POST /api/attendance/check-in
 router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const existing = await prisma.attendance.findFirst({
-      where: { userId: req.user!.id, date: attendanceDayFilter() },
-    });
+    const { today: existing, yesterday } = await loadTodayAndYesterdayAttendance(req.user!.id);
+    if (yesterday?.checkIn && !yesterday.checkOut) {
+      res.status(400).json({
+        error: 'Yesterday’s day is still open past midnight. Use End day to mark Out Time first.',
+      });
+      return;
+    }
     if (existing?.checkIn) {
       if (existing.checkOut) {
         res.status(400).json({
@@ -566,17 +557,24 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
   }
 });
 
-// POST /api/attendance/check-out
+// POST /api/attendance/check-out — today, or yesterday if still open past midnight
 router.post('/check-out', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const attendance = await prisma.attendance.findFirst({
-      where: { userId: req.user!.id, date: attendanceDayFilter() },
-    });
-    if (!attendance) { res.status(404).json({ error: 'No check-in found for today' }); return; }
-    if (attendance.checkOut) { res.status(400).json({ error: 'Already checked out' }); return; }
+    const { today, yesterday } = await loadTodayAndYesterdayAttendance(req.user!.id);
+    const open = pickOpenAttendanceSession(today, yesterday);
+    if (!open) {
+      if (today?.checkIn && today.checkOut) {
+        res.status(400).json({ error: 'Already checked out' });
+        return;
+      }
+      res.status(404).json({
+        error: 'No open check-in found. Check in first, or end yesterday’s day if it is still open.',
+      });
+      return;
+    }
 
+    const attendance = open.record;
     const checkOut = new Date();
-    // Calculate hours in-memory (no totalHours column)
     const hoursWorked = attendance.checkIn
       ? +((checkOut.getTime() - attendance.checkIn.getTime()) / (1000 * 60 * 60)).toFixed(2)
       : 0;
@@ -585,32 +583,32 @@ router.post('/check-out', async (req: AuthRequest, res: Response): Promise<void>
       where: { id: attendance.id },
       data: { checkOut },
     });
-    res.json({ ...updated, hoursWorked });
+    res.json({ ...updated, hoursWorked, overnightContinuation: open.overnight });
   } catch (err) {
     logger.error('Check-out error:', err);
     res.status(500).json({ error: 'Failed to check out' });
   }
 });
 
-/** Clears today's check-out so staff can keep working after an accidental early end. */
+/** Clears check-out so staff can keep working (today, or overnight session ended past midnight). */
 router.post('/resume', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const attendance = await prisma.attendance.findFirst({
-      where: { userId: req.user!.id, date: attendanceDayFilter() },
-    });
-    if (!attendance?.checkIn) {
-      res.status(404).json({ error: 'No check-in found for today' });
+    const { today, yesterday } = await loadTodayAndYesterdayAttendance(req.user!.id);
+    const picked = pickResumableAttendanceSession(today, yesterday);
+    if (!picked?.record.checkIn) {
+      res.status(404).json({ error: 'No check-in found to resume' });
       return;
     }
+    const attendance = picked.record;
     if (!attendance.checkOut) {
-      res.json({ ...attendance, alreadyOpen: true });
+      res.json({ ...attendance, alreadyOpen: true, overnightContinuation: picked.overnight });
       return;
     }
     const updated = await prisma.attendance.update({
       where: { id: attendance.id },
       data: { checkOut: null },
     });
-    res.json({ ...updated, resumed: true });
+    res.json({ ...updated, resumed: true, overnightContinuation: picked.overnight });
   } catch (err) {
     logger.error('Resume attendance error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to resume day' });
@@ -801,15 +799,6 @@ function canViewFirmLeaves(role: string): boolean {
   return (FIRM_LEAVE_ROLES as readonly string[]).includes(role);
 }
 
-function canManagerApproveLeave(role: string): boolean {
-  return ['Manager', 'Partner', 'Admin', 'HR'].includes(role);
-}
-
-function canFinalApproveLeave(role: string): boolean {
-  // HR can complete sanction (leave:manage) — same as Admin for CA-firm ops
-  return ['Partner', 'Admin', 'HR'].includes(role);
-}
-
 // GET /api/attendance/leaves/inbox?status=Pending — approver queue
 router.get('/leaves/inbox', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -869,7 +858,7 @@ function escapeHtml(value: string): string {
 
 async function notifyLeaveSubmitted(
   userId: string,
-  leave: { fromDate: Date; toDate: Date; days: number; type: string; reason: string | null }
+  leave: { id: string; fromDate: Date; toDate: Date; days: number; type: string; reason: string | null }
 ): Promise<void> {
   const applicant = await prisma.user.findUnique({
     where: { id: userId },
@@ -878,27 +867,53 @@ async function notifyLeaveSubmitted(
       lastName: true,
       email: true,
       designation: true,
+      firmId: true,
       hierarchyLevel: { select: { code: true, title: true } },
       articleship: { select: { id: true } },
     },
   });
-  if (!applicant) return;
+  if (!applicant?.firmId) return;
   const recipients = leaveRecipientsFor({
     hierarchyCode: applicant.hierarchyLevel?.code,
     hierarchyTitle: applicant.hierarchyLevel?.title,
     designation: applicant.designation,
     hasArticleship: Boolean(applicant.articleship),
   });
-  if (!recipients) return;
+  if (!recipients?.length) return;
+
   const name = `${applicant.firstName} ${applicant.lastName}`.trim();
   const title = applicant.hierarchyLevel?.title || applicant.designation || '';
   const when = leave.fromDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
   const until = leave.toDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
-  await sendEmail({
-    to: recipients.join(', '),
-    subject: `Leave application — ${name}`,
-    body: `<p>${escapeHtml(name)}${title ? ` (${escapeHtml(title)})` : ''} submitted a ${escapeHtml(leave.type)} leave application.</p><p>${escapeHtml(when)} to ${escapeHtml(until)} · ${leave.days} day(s)</p>${leave.reason ? `<p>${escapeHtml(leave.reason)}</p>` : ''}<p>${escapeHtml(applicant.email)}</p>`,
+  const bodyCore = `<p>${escapeHtml(name)}${title ? ` (${escapeHtml(title)})` : ''} submitted a ${escapeHtml(leave.type)} leave application.</p><p>${escapeHtml(when)} to ${escapeHtml(until)} · ${leave.days} day(s)</p>${leave.reason ? `<p>${escapeHtml(leave.reason)}</p>` : ''}<p><a href="mailto:${escapeHtml(applicant.email)}">${escapeHtml(applicant.email)}</a></p>`;
+
+  const recipientUsers = await prisma.user.findMany({
+    where: {
+      firmId: applicant.firmId,
+      isActive: true,
+      email: { in: recipients.map((email) => normalizeEmail(email)) },
+    },
+    select: { id: true, email: true, role: true },
   });
+  const byEmail = new Map(recipientUsers.map((u) => [normalizeEmail(u.email), u]));
+
+  await Promise.all(
+    recipients.map(async (email) => {
+      const actor = byEmail.get(normalizeEmail(email));
+      const actionHtml = actor
+        ? leaveMailActionButtonsHtml({
+            leaveId: leave.id,
+            userId: actor.id,
+            includeDecide: canManagerApproveLeave(actor.role),
+          })
+        : '';
+      await sendEmail({
+        to: email,
+        subject: `Leave application — ${name}`,
+        body: `${bodyCore}${actionHtml}`,
+      });
+    })
+  );
 }
 
 // POST /api/attendance/leaves — supports ICAI categories
@@ -964,101 +979,19 @@ router.patch('/leaves/:id', async (req: AuthRequest, res: Response): Promise<voi
       rejectionReason: z.string().optional(),
     }).parse(req.body);
 
-    const leave = await prisma.leaveRequest.findUnique({
-      where: { id: String(String(req.params.id)) },
+    const result = await applyLeaveDecision({
+      leaveId: String(req.params.id),
+      actorId: req.user!.id,
+      actorRole: req.user!.role,
+      actorFirmId: req.user!.firmId,
+      status: body.status,
+      rejectionReason: body.rejectionReason,
     });
-    if (!leave) { res.status(404).json({ error: 'Leave request not found' }); return; }
-    const applicant = await prisma.user.findUnique({
-      where: { id: leave.userId },
-      select: { id: true, firmId: true },
-    });
-    if (!applicant || applicant.firmId !== req.user!.firmId) {
-      res.status(404).json({ error: 'Leave request not found' });
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
       return;
     }
-    if (leave.userId === req.user!.id) {
-      res.status(403).json({ error: 'You cannot approve your own leave' });
-      return;
-    }
-
-    const role = req.user!.role;
-    const data: Record<string, unknown> = { approverId: req.user!.id };
-
-    if (body.status === 'Manager Approved') {
-      if (!canManagerApproveLeave(role)) {
-        res.status(403).json({ error: 'Only Manager, HR, or above can perform this action' });
-        return;
-      }
-      if (leave.status !== 'Pending') {
-        res.status(400).json({ error: `Cannot move from ${leave.status} to Manager Approved` });
-        return;
-      }
-      data.status = 'Manager Approved';
-      data.managerApprovedAt = new Date();
-      data.managerApprovedBy = req.user!.id;
-    } else if (body.status === 'Approved') {
-      if (!canFinalApproveLeave(role)) {
-        res.status(403).json({ error: 'Only Partner, Admin, or HR can grant final approval' });
-        return;
-      }
-      if (leave.status !== 'Manager Approved' && leave.status !== 'Pending') {
-        res.status(400).json({ error: `Cannot approve a leave that is ${leave.status}` });
-        return;
-      }
-      data.status = 'Approved';
-      data.partnerApprovedAt = new Date();
-      data.partnerApprovedBy = req.user!.id;
-
-      // Update articleship leave counters for Article staff
-      {
-        const counterUpdate: Record<string, unknown> = {};
-        if (leave.type === 'Exam') counterUpdate.examLeaveUsed = { increment: leave.days };
-        else if (leave.type === 'Casual') counterUpdate.casualLeaveUsed = { increment: leave.days };
-        else if (leave.type === 'Sick') counterUpdate.sickLeaveUsed = { increment: leave.days };
-
-        if (Object.keys(counterUpdate).length > 0) {
-          await prisma.articleshipRecord
-            .update({ where: { userId: leave.userId }, data: counterUpdate })
-            .catch(() => null); // No articleship record (non-article staff) — silently skip
-        }
-      }
-    } else {
-      // Rejected
-      if (!canManagerApproveLeave(role)) {
-        res.status(403).json({ error: 'Only Manager, HR, or above can reject' });
-        return;
-      }
-      data.status = 'Rejected';
-      data.rejectedAt = new Date();
-      data.rejectedBy = req.user!.id;
-      data.rejectionReason = body.rejectionReason;
-    }
-
-    const updated = await prisma.leaveRequest.update({ where: { id: leave.id }, data });
-
-    // Notify the applicant
-    const notifTitle =
-      updated.status === 'Approved'
-        ? 'Leave sanctioned'
-        : updated.status === 'Rejected'
-          ? 'Leave rejected'
-          : 'Leave updated';
-    const notifMessage =
-      updated.status === 'Approved'
-        ? `Your ${leave.type} leave (${leave.days} day${leave.days > 1 ? 's' : ''}) has been sanctioned.`
-        : updated.status === 'Rejected'
-          ? `Your ${leave.type} leave (${leave.days} day${leave.days > 1 ? 's' : ''}) was rejected.`
-          : `Your ${leave.type} leave (${leave.days} day${leave.days > 1 ? 's' : ''}) was updated to ${updated.status}.`;
-
-    await prisma.notification.create({
-      data: {
-        userId: leave.userId,
-        title: notifTitle,
-        message: notifMessage,
-        type: updated.status === 'Approved' ? 'success' : updated.status === 'Rejected' ? 'danger' : 'info',
-      },
-    });
-
+    const updated = await prisma.leaveRequest.findUnique({ where: { id: result.leave.id } });
     res.json(updated);
   } catch (err) {
     if (err instanceof z.ZodError) {

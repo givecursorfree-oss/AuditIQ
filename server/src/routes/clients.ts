@@ -58,10 +58,14 @@ const clientSchema = z.object({
 // GET /api/clients
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { search, category, page = '1', limit = '20' } = req.query;
+    const { search, category, page = '1', limit = '20', archived } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: Record<string, unknown> = { firmId: req.user!.firmId! };
+    if (archived === 'true') where.archivedAt = { not: null };
+    else if (archived === 'all') {
+      /* include both */
+    } else where.archivedAt = null;
     if (search) {
       where.OR = [
         { name: { contains: String(search) } },
@@ -95,13 +99,13 @@ router.get(
       const [clients, unassignedEngagements, staff] = await Promise.all([
         // Ceiling for concurrent overview loads (CA firms rarely exceed this active set).
         prisma.client.findMany({
-          where: { firmId, isActive: true },
+          where: { firmId, isActive: true, archivedAt: null },
           orderBy: { name: 'asc' },
           take: 2000,
           include: {
             portalUsers: { select: { id: true, email: true, fullName: true, userId: true } },
             engagements: {
-              where: { status: { notIn: ['Closed', 'Archived'] } },
+              where: { status: { notIn: ['Closed', 'Archived'] }, archivedAt: null },
               orderBy: { updatedAt: 'desc' },
               take: 3,
               select: {
@@ -343,8 +347,22 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 router.post('/', authorize('Partner', 'Admin', 'Manager', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = clientSchema.parse(req.body);
+    const source = req.user!.role === 'HR' ? 'APP' : 'APP';
     const client = await prisma.client.create({
-      data: { ...data, firmId: req.user!.firmId! },
+      data: {
+        ...data,
+        firmId: req.user!.firmId!,
+        recordSource: source,
+        createdById: req.user!.id,
+      },
+    });
+    const { writeAuditLog } = await import('../lib/writeAuditLog.js');
+    await writeAuditLog({
+      userId: req.user!.id,
+      action: 'CREATE',
+      entity: 'Client',
+      entityId: client.id,
+      details: { source, name: client.name },
     });
     res.status(201).json(client);
   } catch (err) {
@@ -386,5 +404,59 @@ router.delete('/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthReque
     res.status(500).json({ error: 'Failed to delete client' });
   }
 });
+
+// POST /api/clients/:id/archive
+router.post(
+  '/:id/archive',
+  authorize('Partner', 'Admin', 'Manager', 'HR'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { archiveClient } = await import('../lib/clientEngagementArchive.js');
+      const { clientIp } = await import('../lib/clientIp.js');
+      const result = await archiveClient({
+        clientId: String(req.params.id),
+        firmId: req.user!.firmId!,
+        actorId: req.user!.id,
+        actorRole: req.user!.role,
+        ipAddress: clientIp(req),
+      });
+      if ('error' in result) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('Archive client error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to archive client' });
+    }
+  }
+);
+
+// POST /api/clients/:id/restore
+router.post(
+  '/:id/restore',
+  authorize('Partner', 'Admin', 'Manager', 'HR'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { restoreClient } = await import('../lib/clientEngagementArchive.js');
+      const { clientIp } = await import('../lib/clientIp.js');
+      const result = await restoreClient({
+        clientId: String(req.params.id),
+        firmId: req.user!.firmId!,
+        actorId: req.user!.id,
+        actorRole: req.user!.role,
+        ipAddress: clientIp(req),
+      });
+      if ('error' in result) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('Restore client error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to restore client' });
+    }
+  }
+);
 
 export default router;

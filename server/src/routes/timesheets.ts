@@ -11,7 +11,7 @@ import { expandTimesheetDays, groupTimesheetDays, timesheetWorkbookBuffer } from
 const router = Router();
 router.use(authenticate);
 
-const FIRM_TIMESHEET_ROLES = ['Partner', 'Admin', 'Manager', 'HR'] as const;
+const FIRM_TIMESHEET_ROLES = ['HR'] as const;
 
 /** Users who appear on firm timesheets / attendance (exclude Client portal accounts). */
 const FIRM_MEMBER_ROLES = ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'] as const;

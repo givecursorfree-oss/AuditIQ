@@ -23,6 +23,11 @@ export async function runScheduler(): Promise<void> {
     if (outbox.processed > 0) {
       logger.info('Scheduler: processed email outbox', outbox);
     }
+    const { pollImapInboxForReplies } = await import('./imapInboxPoller.js');
+    const imap = await pollImapInboxForReplies();
+    if (imap.stored > 0 || imap.scanned > 0) {
+      logger.info('Scheduler: IMAP reply poll', imap);
+    }
     await flagMissingChecklistItems();
     await sendDocumentFollowups();
     await sendDeadlineReminders();

@@ -11,6 +11,33 @@ router.use(authenticate);
 
 const FALLBACK_WORK_TYPES = ['Audit', 'GST Filing', 'IT Filing', 'Consultation', 'Internal', 'Other'] as const;
 const NON_BILLABLE_CATEGORIES = ['Internal Meeting', 'Office Admin', 'Exam Leave', 'Training', 'Sick Leave'] as const;
+const SUPERVISOR_ROLES = ['Partner', 'Manager'] as const;
+
+function timesheetDayKeyFromRaw(raw: string): { key: string; dayKey: Date } {
+  const key = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getAttendanceDateKey(new Date(raw));
+  return { key, dayKey: new Date(`${key}T00:00:00.000Z`) };
+}
+
+/** Manual grid entries lock the day as Submitted — no later edit/delete. */
+async function markDaySubmitted(userId: string, dateRaw: string): Promise<void> {
+  const { dayKey } = timesheetDayKeyFromRaw(dateRaw);
+  await prisma.timesheetDay.upsert({
+    where: { userId_date: { userId, date: dayKey } },
+    create: {
+      userId,
+      date: dayKey,
+      status: 'Submitted',
+      submittedAt: new Date(),
+    },
+    update: {
+      status: 'Submitted',
+      submittedAt: new Date(),
+      reviewedById: null,
+      reviewedAt: null,
+      reviewNote: null,
+    },
+  });
+}
 
 const timeEntrySchema = z.object({
   date: z.string(),
@@ -48,8 +75,6 @@ const entryInclude = {
   user: { select: { firstName: true, lastName: true, initials: true } },
   supervisor: { select: { id: true, firstName: true, lastName: true } },
 } as const;
-
-const SUPERVISOR_ROLES = ['Partner', 'Manager'] as const;
 
 async function firmClientNames(firmId: string): Promise<string[]> {
   const [names, engagements] = await Promise.all([
@@ -301,6 +326,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       },
       include: entryInclude,
     });
+    await markDaySubmitted(req.user!.id, data.date);
     res.status(201).json(entry);
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: err.errors }); return; }
@@ -318,10 +344,14 @@ router.patch('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 
     const existing = await prisma.timeEntry.findFirst({
       where: { id: String(req.params.id), user: { firmId } },
-      select: { id: true, userId: true, date: true },
+      select: { id: true, userId: true, date: true, source: true },
     });
     if (!existing) {
       res.status(404).json({ error: 'Time entry not found' });
+      return;
+    }
+    if (existing.source === 'manual') {
+      res.status(403).json({ error: 'Manual time entries are submitted and cannot be edited' });
       return;
     }
     if (existing.userId !== req.user!.id && !['Partner', 'Admin', 'Manager'].includes(req.user!.role)) {
@@ -361,10 +391,14 @@ router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => 
 
     const existing = await prisma.timeEntry.findFirst({
       where: { id: String(req.params.id), user: { firmId } },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, source: true },
     });
     if (!existing) {
       res.status(404).json({ error: 'Time entry not found' });
+      return;
+    }
+    if (existing.source === 'manual') {
+      res.status(403).json({ error: 'Manual time entries are submitted and cannot be deleted' });
       return;
     }
     if (existing.userId !== req.user!.id && !['Partner', 'Admin'].includes(req.user!.role)) {

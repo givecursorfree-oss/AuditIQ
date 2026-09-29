@@ -142,10 +142,13 @@ export default function Engagements() {
                 {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
                   <DropdownMenuItem onSelect={() => navigate('/compliance-calendar')}>Compliance</DropdownMenuItem>
                 )}
+                {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
+                  <DropdownMenuItem onSelect={() => navigate('/engagements/import')}>Bulk import</DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             )}
-            {['Partner', 'Manager'].includes(user?.role || '') ? (
+            {['Partner', 'Admin', 'Manager'].includes(user?.role || '') ? (
               <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
                 <Plus size={16} className="mr-1" /> New engagement
               </Button>
@@ -467,6 +470,8 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
     startDate: '',
     billingType: 'Fixed',
     billingAmount: '',
+    partnerInChargeId: '',
+    managerId: '',
   });
   const [recurring, setRecurring] = useState({
     enabled: false,
@@ -478,6 +483,8 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
     autoSendDataRequestLetter: true,
   });
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+  const [partners, setPartners] = useState<{ id: string; label: string }[]>([]);
+  const [managers, setManagers] = useState<{ id: string; label: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [addingClient, setAddingClient] = useState(false);
@@ -486,6 +493,24 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
 
   useEffect(() => {
     api.get('/clients').then(({ data }) => setClients(data.clients || [])).catch(() => {});
+    api
+      .get<{
+        staff?: { id: string; firstName: string; lastName: string; role: string; email?: string }[];
+      }>('/clients/overview')
+      .then(({ data }) => {
+        const list = data.staff || [];
+        const label = (u: { firstName: string; lastName: string; email?: string }) =>
+          `${u.firstName} ${u.lastName}${u.email ? ` (${u.email})` : ''}`;
+        setPartners(
+          list.filter((u) => ['Partner', 'Admin'].includes(u.role)).map((u) => ({ id: u.id, label: label(u) }))
+        );
+        setManagers(
+          list
+            .filter((u) => ['Manager', 'Partner', 'Admin'].includes(u.role))
+            .map((u) => ({ id: u.id, label: label(u) }))
+        );
+      })
+      .catch(() => {});
   }, []);
 
   const handleCreateClient = async () => {
@@ -528,6 +553,10 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.partnerInChargeId || !form.managerId) {
+      setError('Partner and Manager are required');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -626,6 +655,40 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="eng-create-partner" className="block text-sm font-medium text-foreground-muted mb-1.5">Partner</label>
+              <select
+                id="eng-create-partner"
+                aria-label="Partner"
+                required
+                value={form.partnerInChargeId}
+                onChange={(e) => setForm({ ...form, partnerInChargeId: e.target.value })}
+                className="input-field"
+              >
+                <option value="">Select partner</option>
+                {partners.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="eng-create-manager" className="block text-sm font-medium text-foreground-muted mb-1.5">Manager</label>
+              <select
+                id="eng-create-manager"
+                aria-label="Manager"
+                required
+                value={form.managerId}
+                onChange={(e) => setForm({ ...form, managerId: e.target.value })}
+                className="input-field"
+              >
+                <option value="">Select manager</option>
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

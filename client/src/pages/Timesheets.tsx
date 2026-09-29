@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import api from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { appAlert } from '@/context/AppDialogContext';
@@ -51,8 +52,6 @@ interface FirmRow {
   } | null;
 }
 
-const FIRM_VIEW_ROLES = ['Partner', 'Admin', 'Manager', 'HR'];
-
 function defaultExportRange(anchor: string) {
   const [y, m] = anchor.slice(0, 7).split('-').map(Number);
   const last = new Date(y, m, 0).getDate();
@@ -64,8 +63,8 @@ function defaultExportRange(anchor: string) {
 
 export default function Timesheets() {
   const { user } = useAuth();
-  const canFirm = Boolean(user && FIRM_VIEW_ROLES.includes(user.role));
   const isHr = user?.role === 'HR';
+  const canFirm = isHr;
   const today = istDateKey();
   const entryWindow = entryDateWindow();
   const [date, setDate] = useState(today);
@@ -74,7 +73,7 @@ export default function Timesheets() {
   const [staffId, setStaffId] = useState(user?.id || '');
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [firmRows, setFirmRows] = useState<FirmRow[]>([]);
-  const [mode, setMode] = useState<'firm' | 'detail'>(canFirm ? 'firm' : 'detail');
+  const [mode, setMode] = useState<'firm' | 'detail'>('firm');
   const [exporting, setExporting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -106,6 +105,10 @@ export default function Timesheets() {
         setLoadError('Failed to load.');
       });
   }, [user, date, staffId, mode]);
+
+  if (user && !isHr) {
+    return <Navigate to="/" replace />;
+  }
 
   async function submitDay() {
     try {

@@ -167,6 +167,14 @@ model User {
   claimBatchesCreated      ClaimBatch[]       @relation("ClaimBatchCreator")
   claimBatchesPartnerApproved ClaimBatch[]    @relation("ClaimBatchPartner")
   claimAuditEvents         ClaimAuditEvent[]  @relation("ClaimAuditActor")
+  clientsCreated           Client[]           @relation("ClientCreatedBy")
+  clientsImported          Client[]           @relation("ClientImportedBy")
+  clientsArchived          Client[]           @relation("ClientArchivedBy")
+  clientsRestored          Client[]           @relation("ClientRestoredBy")
+  engagementsCreated       Engagement[]       @relation("EngagementCreatedBy")
+  engagementsImported      Engagement[]       @relation("EngagementImportedBy")
+  engagementsArchived      Engagement[]       @relation("EngagementArchivedBy")
+  engagementsRestored      Engagement[]       @relation("EngagementRestoredBy")
 
   @@index([firmId])
   @@index([roleId])
@@ -231,11 +239,24 @@ model Client {
   onboardedAt         DateTime?
   folderPath          String? // Auto-created folder path /ClientName/Year/...
   recurringAutomationDisabled Boolean @default(false)
+  // Provenance / archive (Client & Engagement Management – Imports)
+  recordSource   String    @default("UNKNOWN") // UNKNOWN | APP | HR_IMPORT | ENGAGEMENT_IMPORT | SYSTEM
+  createdById    String?
+  importedById   String?
+  importedAt     DateTime?
+  archivedAt     DateTime?
+  archivedById   String?
+  restoredAt     DateTime?
+  restoredById   String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
   firmId        String
   firm          Firm                 @relation(fields: [firmId], references: [id])
+  createdBy     User?                @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  importedBy    User?                @relation("ClientImportedBy", fields: [importedById], references: [id], onDelete: SetNull)
+  archivedBy    User?                @relation("ClientArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  restoredBy    User?                @relation("ClientRestoredBy", fields: [restoredById], references: [id], onDelete: SetNull)
   engagements   Engagement[]
   contacts      ClientContact[]
   directors     ClientDirector[]
@@ -254,9 +275,16 @@ model Client {
   governmentNotices  GovernmentNotice[]
   expenseClaims      ExpenseClaim[]
   expenseClaimParticipants ExpenseClaimParticipant[]
+  emailThreadMessages EmailThreadMessage[]
 
   @@index([firmId])
   @@index([status])
+  @@index([recordSource])
+  @@index([archivedAt])
+  @@index([createdById])
+  @@index([importedById])
+  @@index([archivedById])
+  @@index([restoredById])
 }
 
 model Engagement {
@@ -308,6 +336,14 @@ model Engagement {
   teamLastChangedById String?
   teamLastChangedAt   DateTime?
   teamLastChangedBy   User?    @relation("EngagementTeamChanger", fields: [teamLastChangedById], references: [id])
+  // Provenance / archive restore metadata
+  recordSource   String    @default("UNKNOWN") // UNKNOWN | APP | HR_IMPORT | ENGAGEMENT_IMPORT | SYSTEM
+  createdById    String?
+  importedById   String?
+  importedAt     DateTime?
+  archivedById   String?
+  restoredAt     DateTime?
+  restoredById   String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -315,6 +351,10 @@ model Engagement {
   client   Client @relation(fields: [clientId], references: [id])
   firmId   String
   firm     Firm   @relation(fields: [firmId], references: [id])
+  createdBy  User? @relation("EngagementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  importedBy User? @relation("EngagementImportedBy", fields: [importedById], references: [id], onDelete: SetNull)
+  archivedBy User? @relation("EngagementArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  restoredBy User? @relation("EngagementRestoredBy", fields: [restoredById], references: [id], onDelete: SetNull)
 
   members          EngagementMember[]
   workpapers       Workpaper[]
@@ -342,6 +382,7 @@ model Engagement {
   deptVisitClaims  DeptVisitClaim[]
   expenseClaims    ExpenseClaim[]
   expenseClaimParticipants ExpenseClaimParticipant[]
+  emailThreadMessages EmailThreadMessage[]
 
   @@index([clientId])
   @@index([firmId])
@@ -357,6 +398,11 @@ model Engagement {
   @@index([parentEngagementId])
   @@index([clientRequestId])
   @@index([teamLastChangedById])
+  @@index([recordSource])
+  @@index([createdById])
+  @@index([importedById])
+  @@index([archivedById])
+  @@index([restoredById])
 }
 
 // ─── MKD: Client service requests (before engagement activation) ───
@@ -1771,6 +1817,38 @@ model CommsLog {
   @@index([engagementId])
   @@index([status])
   @@index([templateKey])
+}
+
+// ─── Outbound + inbound email thread (data-request trail) ───
+
+model EmailThreadMessage {
+  id            String   @id @default(uuid())
+  messageId     String   @unique // RFC Message-ID with angle brackets
+  inReplyTo     String?
+  referencesHdr String?  @db.Text
+  direction     String // outbound | inbound
+  threadRootId  String? // root outbound messageId
+  subject       String
+  fromAddress   String
+  toAddress     String
+  ccAddress     String?
+  bodyText      String?  @db.LongText
+  bodyHtml      String?  @db.LongText
+  clientId      String?
+  engagementId  String?
+  commsLogId    String?
+  teamUserIds   String?  @db.Text // JSON string[]
+  imapUid       String? // idempotent IMAP ingest key (mailbox:uid)
+  createdAt     DateTime @default(now())
+
+  client     Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  engagement Engagement? @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+
+  @@index([threadRootId])
+  @@index([engagementId])
+  @@index([clientId])
+  @@index([direction])
+  @@index([imapUid])
 }
 
 // ─── Outbound email outbox ───

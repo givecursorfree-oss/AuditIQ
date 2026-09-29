@@ -49,7 +49,7 @@ export const NAV_CATALOG: NavCatalogItem[] = [
   { id: 'approvals', path: '/approvals', label: 'Approvals', group: 'Audit Work', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'approvals', action: 'view' } },
 
   { id: 'time-tracker', path: '/time-tracker', label: 'Time tracker', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts', 'HR'], permission: { module: 'attendance', action: 'view' } },
-  { id: 'timesheets', path: '/timesheets', label: 'Timesheets', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'attendance', action: 'view' } },
+  { id: 'timesheets', path: '/timesheets', label: 'Timesheets', group: 'Team', roles: ['HR'], permission: { module: 'attendance', action: 'view' } },
   { id: 'claims-pending', path: '/claims/pending', label: 'Attendance claim approvals', group: 'Team', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'approvals', action: 'view' }, sidebarHidden: true },
   { id: 'claims', path: '/claims', label: 'Claims', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts'], permission: { module: 'expenses', action: 'view' } },
   { id: 'claim-batches', path: '/claims/batches', label: 'Claim Batches', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Accounts'], permission: { module: 'expenses', action: 'view' }, sidebarHidden: true },

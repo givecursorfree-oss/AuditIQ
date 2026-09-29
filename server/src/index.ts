@@ -14,9 +14,11 @@ import { requestLogger } from './middleware/requestLogger.js';
 import authRoutes from './routes/auth.js';
 import clientRoutes from './routes/clients.js';
 import engagementRoutes from './routes/engagements.js';
+import engagementImportRoutes from './routes/engagementImport.js';
 import workpaperRoutes from './routes/workpapers.js';
 import documentRoutes from './routes/documents.js';
 import attendanceRoutes from './routes/attendance.js';
+import leaveMailActionRoutes from './routes/leaveMailAction.js';
 import reportRoutes from './routes/reports.js';
 import dashboardRoutes from './routes/dashboard.js';
 import notificationRoutes from './routes/notifications.js';
@@ -325,7 +327,9 @@ app.use(
   authLimiter,
 );
 app.use('/api/auth', authRoutes);
+app.use('/api/leave-mail', leaveMailActionRoutes);
 app.use('/api/clients', staffApi(clientRoutes));
+app.use('/api/engagements/import', staffApi(engagementImportRoutes));
 app.use('/api/engagements', staffApi(engagementRoutes));
 app.use('/api/workpapers', staffApi(workpaperRoutes));
 app.use('/api/documents', staffApi(documentRoutes));

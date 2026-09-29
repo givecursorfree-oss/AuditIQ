@@ -189,6 +189,8 @@ export async function importCrmClientsFromRows(
           gstin: row.gstin || null,
           contactEmail: row.contactEmail || null,
           contactPhone: row.contactPhone || null,
+          recordSource: 'HR_IMPORT',
+          importedAt: new Date(),
         },
       });
       created++;

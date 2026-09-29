@@ -34,6 +34,7 @@ const Login = lazyRetry(() => import('./pages/Login'));
 const Register = lazyRetry(() => import('./pages/Register'));
 const Dashboard = lazyRetry(() => import('./pages/Dashboard'));
 const Engagements = lazyRetry(() => import('./pages/Engagements'));
+const EngagementImport = lazyRetry(() => import('./pages/EngagementImport'));
 const EngagementPortfolio = lazyRetry(() => import('./pages/EngagementPortfolio'));
 const Workpapers = lazyRetry(() => import('./pages/Workpapers'));
 const Documents = lazyRetry(() => import('./pages/Documents'));
@@ -202,6 +203,7 @@ export default function App() {
                   <Route index element={<ClientRedirect />} />
                   <Route path="/documents" element={<Documents />} />
                   <Route path="/engagements" element={<Engagements />} />
+                  <Route path="/engagements/import" element={<EngagementImport />} />
                   <Route path="/engagements/portfolio" element={<EngagementPortfolio />} />
                   <Route path="/engagements/:id/letter" element={<EngagementLetterPage />} />
                   <Route path="/engagements/:id" element={<EngagementDetail />} />

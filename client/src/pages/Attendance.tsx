@@ -276,10 +276,12 @@ export default function AttendancePage() {
   };
 
   const handleCheckOut = async () => {
+    const overnight = Boolean(todayRecord?.overnightContinuation);
     const ok = await appConfirm({
       title: 'End day?',
-      message:
-        'Closes attendance for today. App logout does not end the day. Use Resume day if this was a mistake.',
+      message: overnight
+        ? 'Marks Out Time on yesterday’s open session (work past midnight). App logout does not end the day.'
+        : 'Closes attendance for today. App logout does not end the day. Use Resume day if this was a mistake.',
       confirmLabel: 'End day',
       cancelLabel: 'Keep working',
     });
@@ -302,8 +304,9 @@ export default function AttendancePage() {
     }
   };
 
-  // ponytail: yesterday-open prompt deferred (no lightweight prior-day API)
+  // Overnight open sessions (past IST midnight) still show End day for Out Time.
   const dayState = attendanceDayState(todayRecord);
+  const overnightOpen = Boolean(todayRecord?.overnightContinuation && dayState === 'open');
 
   useEffect(() => {
     if (dayState !== 'open' || !todayRecord?.checkIn) {
@@ -433,10 +436,20 @@ export default function AttendancePage() {
           >
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-muted-foreground">{todayLabel || '\u00a0'}</p>
-                {dayState === 'none' && <Badge variant="outline">Not checked in</Badge>}
-                {dayState === 'open' && <Badge variant="default">Working</Badge>}
-                {dayState === 'closed' && <Badge variant="secondary">Day ended</Badge>}
+                <p className="text-sm text-muted-foreground">
+                  {overnightOpen && todayRecord?.date
+                    ? `Open since ${new Date(todayRecord.date).toLocaleDateString('en-IN', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                      })}`
+                    : todayLabel || '\u00a0'}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {dayState === 'none' && <Badge variant="outline">Not checked in</Badge>}
+                  {dayState === 'open' && <Badge variant="default">{overnightOpen ? 'Working past midnight' : 'Working'}</Badge>}
+                  {dayState === 'closed' && <Badge variant="secondary">Day ended</Badge>}
+                </div>
               </div>
 
               {todayRecord && (

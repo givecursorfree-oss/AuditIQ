@@ -9,6 +9,8 @@ import {
   renderTemplate,
 } from '../lib/templateRenderer.js';
 import { scheduleEmail, sendEmail } from '../lib/emailService.js';
+import { isDataRequestCategory } from '../lib/dataRequestMail.js';
+import { buildDataRequestTeamCc } from '../lib/dataRequestSend.js';
 
 const router = Router();
 
@@ -27,6 +29,24 @@ const sendSchema = z.object({
   variables: z.record(z.string()).optional(),
   scheduledAt: z.coerce.date().optional(),
 });
+
+async function canSendDataRequestAsArticle(
+  userId: string,
+  role: string,
+  engagementId: string,
+  firmId: string
+): Promise<boolean> {
+  if (!['Staff', 'Intern'].includes(role)) return false;
+  const eng = await prisma.engagement.findFirst({
+    where: { id: engagementId, firmId },
+    select: {
+      articleAssistantId: true,
+      members: { where: { userId, teamRole: 'Staff' }, select: { id: true } },
+    },
+  });
+  if (!eng) return false;
+  return eng.articleAssistantId === userId || eng.members.length > 0;
+}
 
 // GET /api/templates
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -190,9 +210,10 @@ router.delete(
 );
 
 // POST /api/templates/:id/send
+// Partner/Admin/Manager: any template. Staff/Intern: data-request categories on their engagement only.
 router.post(
   '/:id/send',
-  authorize('Partner', 'Admin', 'Manager'),
+  authorize('Partner', 'Admin', 'Manager', 'Staff', 'Intern'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const body = sendSchema.parse(req.body);
@@ -202,6 +223,29 @@ router.post(
       if (!tpl) {
         res.status(404).json({ error: 'Template not found' });
         return;
+      }
+
+      const role = req.user!.role;
+      const isManagerOrAbove = ['Partner', 'Admin', 'Manager'].includes(role);
+      if (!isManagerOrAbove) {
+        if (!isDataRequestCategory(tpl.category)) {
+          res.status(403).json({ error: 'Staff may only send data-request letters' });
+          return;
+        }
+        if (!body.engagementId) {
+          res.status(400).json({ error: 'engagementId is required' });
+          return;
+        }
+        const allowed = await canSendDataRequestAsArticle(
+          req.user!.id,
+          role,
+          body.engagementId,
+          req.user!.firmId!
+        );
+        if (!allowed) {
+          res.status(403).json({ error: 'Not on this engagement team' });
+          return;
+        }
       }
 
       const client = await prisma.client.findFirst({
@@ -217,6 +261,17 @@ router.post(
         return;
       }
 
+      if (body.engagementId) {
+        const eng = await prisma.engagement.findFirst({
+          where: { id: body.engagementId, clientId: client.id, firmId: req.user!.firmId! },
+          select: { id: true },
+        });
+        if (!eng) {
+          res.status(400).json({ error: 'Engagement does not belong to this client' });
+          return;
+        }
+      }
+
       const vars = {
         ...buildDefaultTemplateVars({ client, firm: client.firm }),
         ...(body.variables ?? {}),
@@ -225,13 +280,22 @@ router.post(
       const filledContent = renderTemplate(tpl.body, vars);
       const htmlBody = filledContent.split('\n').map((l) => `<p style="margin:0 0 8px">${l || '&nbsp;'}</p>`).join('');
 
+      const teamCc = await buildDataRequestTeamCc({
+        category: tpl.category,
+        engagementId: body.engagementId,
+        toAddress: client.contactEmail,
+      });
+
       const emailParams = {
         to: client.contactEmail,
+        cc: teamCc.cc,
         subject: filledSubject,
         body: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${htmlBody}</div>`,
         clientId: client.id,
         engagementId: body.engagementId,
         templateKey: tpl.category,
+        teamUserIds: teamCc.teamUserIds,
+        metadata: teamCc.teamUserIds ? { teamUserIds: teamCc.teamUserIds } : undefined,
       };
 
       if (body.scheduledAt) {
@@ -249,7 +313,7 @@ router.post(
         });
         try {
           await scheduleEmail(
-            { ...emailParams, metadata: { templateSendId: send.id } },
+            { ...emailParams, metadata: { ...emailParams.metadata, templateSendId: send.id } },
             body.scheduledAt
           );
         } catch (err) {

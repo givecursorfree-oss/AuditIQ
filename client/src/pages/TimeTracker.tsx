@@ -33,6 +33,7 @@ interface TimeEntry {
   workType: string | null;
   description: string | null;
   isBillable: boolean;
+  source?: string;
   clientName?: string | null;
   compOff?: boolean;
   engagement: { title: string; client: { name: string } } | null;
@@ -411,6 +412,10 @@ export default function TimeTracker() {
       });
       setManualForm({ ...manualForm, description: '' });
       await loadEntries();
+      await appAlert({
+        title: 'Submitted',
+        message: 'Time entry saved and submitted. It cannot be edited.',
+      });
     } catch (e: any) {
       const raw = e?.response?.data?.error;
       const message = typeof raw === 'string' ? raw : 'Failed to save entry';
@@ -442,9 +447,11 @@ export default function TimeTracker() {
             <Button type="button" size="sm" variant="outline" onClick={() => navigate('/attendance')}>
               Attendance
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => navigate('/timesheets')}>
-              Timesheets
-            </Button>
+            {user?.role === 'HR' ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => navigate('/timesheets')}>
+                Timesheets
+              </Button>
+            ) : null}
             {reminders.length > 0 ? (
               <Button type="button" size="sm" variant="outline" className="text-warning border-warning/30" onClick={() => setTab('today')}>
                 <BellRinging size={16} className="mr-1" />
@@ -682,7 +689,7 @@ export default function TimeTracker() {
             <h4 className="font-semibold text-foreground mb-2">Recent entries</h4>
             <table className="w-full text-sm">
               <thead><tr className="table-header text-left">
-                <th className="px-4 py-3">Date</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Engagement</th><th className="px-4 py-3">Work Type</th><th className="px-4 py-3">Manager / Partner</th><th className="px-4 py-3">Hours</th><th className="px-4 py-3">Billable</th>
+                <th className="px-4 py-3">Date</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Engagement</th><th className="px-4 py-3">Work Type</th><th className="px-4 py-3">Manager / Partner</th><th className="px-4 py-3">Hours</th><th className="px-4 py-3">Billable</th><th className="px-4 py-3">Status</th>
               </tr></thead>
               <tbody>
                 {entries.map(e => (
@@ -694,6 +701,7 @@ export default function TimeTracker() {
                     <td className="px-4 py-2.5">{entryManagerName(e)}</td>
                     <td className="px-4 py-2.5">{Number(e.hours).toFixed(2)}</td>
                     <td className="px-4 py-2.5">{e.isBillable ? '✓' : '—'}</td>
+                    <td className="px-4 py-2.5">{e.source === 'manual' ? 'Submitted' : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -35,9 +35,9 @@ const engagementSchema = z.object({
   billingAmount: z.number().optional(),
   notes: z.string().optional(),
   memberIds: z.array(z.string().uuid()).optional(),
-  partnerInChargeId: z.string().optional(),
-  managerId: z.string().optional(),
-  articleAssistantId: z.string().optional(),
+  partnerInChargeId: z.string().uuid(),
+  managerId: z.string().uuid(),
+  articleAssistantId: z.string().uuid().optional(),
   serviceCode: z.string().optional(),
   workflowDomain: z.enum(['DT', 'IDT', 'AUDIT']).optional(),
   isRecurring: z.boolean().optional(),
@@ -57,6 +57,7 @@ const querySchema = z.object({
   status: z.string().optional(),
   type: z.string().optional(),
   search: z.string().optional(),
+  archived: z.enum(['true', 'false', 'all']).optional(),
   page: z.string().regex(/^\d+$/).default('1'),
   limit: z.string().regex(/^\d+$/).default('20'),
 });
@@ -70,6 +71,10 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
     const user = req.user!;
     const accessWhere = await engagementAccessWhereForUser(user.id);
     const where: Record<string, unknown> = { ...accessWhere };
+    if (query.archived === 'true') where.archivedAt = { not: null };
+    else if (query.archived === 'all') {
+      /* include archived + active */
+    } else where.archivedAt = null;
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
     if (query.search) {
@@ -349,7 +354,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // POST /api/engagements
-router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const data = engagementSchema.parse(req.body);
     const { memberIds, startDate, deadline, serviceCode, workflowDomain, isRecurring, recurringSchedule, ...rest } = data;
@@ -368,11 +373,32 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
     }
 
     const client = await prisma.client.findFirst({
-      where: { id: rest.clientId, firmId },
+      where: { id: rest.clientId, firmId, archivedAt: null },
       select: { id: true },
     });
     if (!client) {
-      res.status(400).json({ error: 'Client not found in your firm' });
+      res.status(400).json({ error: 'Client not found in your firm (or is archived)' });
+      return;
+    }
+
+    const assigneeIds = [rest.partnerInChargeId, rest.managerId, rest.articleAssistantId].filter(
+      Boolean
+    ) as string[];
+    const assigneeUsers = await prisma.user.findMany({
+      where: { id: { in: assigneeIds }, firmId, isActive: true },
+      select: { id: true, role: true, hierarchyLevel: { select: { code: true } } },
+    });
+    if (assigneeUsers.length !== assigneeIds.length) {
+      res.status(400).json({ error: 'Partner and Manager must be active users in your firm' });
+      return;
+    }
+    const slotCheck = validateResourceAssignees(assigneeUsers, {
+      partnerInChargeId: rest.partnerInChargeId,
+      managerId: rest.managerId,
+      articleAssistantId: rest.articleAssistantId,
+    });
+    if (!slotCheck.valid) {
+      res.status(400).json({ error: slotCheck.error });
       return;
     }
 
@@ -409,6 +435,8 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
         startDate: startDate ? new Date(startDate) : undefined,
         deadline: deadline ? new Date(deadline) : undefined,
         firmId,
+        recordSource: 'APP',
+        createdById: req.user!.id,
         members: memberIds?.length ? {
           create: memberIds.map(userId => ({ userId, role: 'Preparer' })),
         } : undefined,
@@ -417,6 +445,23 @@ router.post('/', authorize('Partner', 'Manager'), async (req: AuthRequest, res: 
         client: { select: { id: true, name: true } },
         members: { include: { user: { select: { id: true, firstName: true, lastName: true, initials: true } } } },
       },
+    });
+
+    await setEngagementTeam(
+      engagement.id,
+      [rest.managerId],
+      rest.articleAssistantId ? [rest.articleAssistantId] : [],
+      req.user!.id,
+      rest.partnerInChargeId
+    );
+
+    const { writeAuditLog } = await import('../lib/writeAuditLog.js');
+    await writeAuditLog({
+      userId: req.user!.id,
+      action: 'CREATE',
+      entity: 'Engagement',
+      entityId: engagement.id,
+      details: { source: 'APP', title: engagement.title },
     });
 
     if (serviceCode) {
@@ -1000,6 +1045,60 @@ router.patch(
       }
       logger.error('Toggle engagement recurring error', { error: (err as Error).message });
       res.status(500).json({ error: 'Failed to update recurring automation' });
+    }
+  }
+);
+
+// POST /api/engagements/:id/archive
+router.post(
+  '/:id/archive',
+  authorize('Partner', 'Admin', 'Manager', 'HR'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { archiveEngagement } = await import('../lib/clientEngagementArchive.js');
+      const { clientIp } = await import('../lib/clientIp.js');
+      const result = await archiveEngagement({
+        engagementId: String(req.params.id),
+        firmId: req.user!.firmId!,
+        actorId: req.user!.id,
+        actorRole: req.user!.role,
+        ipAddress: clientIp(req),
+      });
+      if ('error' in result) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('Archive engagement error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to archive engagement' });
+    }
+  }
+);
+
+// POST /api/engagements/:id/restore
+router.post(
+  '/:id/restore',
+  authorize('Partner', 'Admin', 'Manager', 'HR'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { restoreEngagement } = await import('../lib/clientEngagementArchive.js');
+      const { clientIp } = await import('../lib/clientIp.js');
+      const result = await restoreEngagement({
+        engagementId: String(req.params.id),
+        firmId: req.user!.firmId!,
+        actorId: req.user!.id,
+        actorRole: req.user!.role,
+        ipAddress: clientIp(req),
+      });
+      if ('error' in result) {
+        res.status(result.status).json({ error: result.error });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('Restore engagement error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to restore engagement' });
     }
   }
 );

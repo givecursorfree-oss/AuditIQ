@@ -5,7 +5,7 @@ import {
   Sparkle, Receipt, ShareNetwork, ChatCircle, GitBranch,
 } from '@phosphor-icons/react';
 import api from '../services/api';
-import { appAlert } from '../context/AppDialogContext';
+import { appAlert, appConfirm } from '../context/AppDialogContext';
 import { appToast } from '../context/AppToastContext';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
@@ -24,6 +24,7 @@ import EngagementTimeLog from '@/components/time/EngagementTimeLog';
 import EngagementTasksTab from '../components/engagement/EngagementTasksTab';
 import EngagementTeamMultiSelect from '../components/engagement/EngagementTeamMultiSelect';
 import EngagementPortalButtons from '../components/engagement/EngagementPortalButtons';
+import EngagementDataRequestMail from '../components/engagement/EngagementDataRequestMail';
 import { isTeamAssignmentBlocked, LETTER_GATE_MESSAGE, engagementHasTeam } from '@/lib/letterGatePolicy';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -140,6 +141,11 @@ export default function EngagementDetail() {
 
   const isPartner = user && ['Partner', 'Admin'].includes(user.role);
   const isManagerOrAbove = user && ['Partner', 'Admin', 'Manager'].includes(user.role);
+  const canArchiveEngagement = user && ['Partner', 'Admin', 'Manager', 'HR'].includes(user.role);
+  const canEmailDataRequest = !!(
+    isManagerOrAbove ||
+    (user && eng && eng.articleAssistantId === user.id)
+  );
   const hasExistingTeam = eng ? engagementHasTeam(eng) : false;
   const letterGateBlocked = eng ? isTeamAssignmentBlocked(eng.letterStatus, hasExistingTeam) : false;
   const assignmentDisabled = !isManagerOrAbove || letterGateBlocked;
@@ -355,7 +361,7 @@ export default function EngagementDetail() {
             </div>
           </div>
         ) : null}
-        {isManagerOrAbove ? (
+        {(isManagerOrAbove || canArchiveEngagement) ? (
           <div className="flex flex-wrap justify-end gap-2">
             {eng.isRecurring && eng.recurringAutomationActive !== null ? (
               <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5">
@@ -371,14 +377,44 @@ export default function EngagementDetail() {
                 />
               </div>
             ) : null}
-            <Button type="button" size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => void draftInvoiceFromEngagement()}>
-              <Receipt size={16} aria-hidden /> Draft invoice
-            </Button>
-            <Button variant="outline" size="sm" className="h-9 gap-1.5" asChild>
-              <Link to="/reports">
-                <ShareNetwork size={16} aria-hidden /> Reports
-              </Link>
-            </Button>
+            {isManagerOrAbove ? (
+              <>
+                <Button type="button" size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => void draftInvoiceFromEngagement()}>
+                  <Receipt size={16} aria-hidden /> Draft invoice
+                </Button>
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" asChild>
+                  <Link to="/reports">
+                    <ShareNetwork size={16} aria-hidden /> Reports
+                  </Link>
+                </Button>
+              </>
+            ) : null}
+            {canArchiveEngagement ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9"
+                onClick={() => void (async () => {
+                  const confirmed = await appConfirm({
+                    title: 'Archive engagement?',
+                    message: 'The engagement will move to archived and can be restored later.',
+                    confirmLabel: 'Archive',
+                  });
+                  if (!confirmed) return;
+                  try {
+                    await api.post(`/engagements/${eng.id}/archive`);
+                    appToast({ title: 'Archived', variant: 'success' });
+                    navigate('/engagements');
+                  } catch (e: unknown) {
+                    const err = e as { response?: { data?: { error?: string } } };
+                    await appAlert(err.response?.data?.error || 'Archive failed');
+                  }
+                })()}
+              >
+                Archive
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </header>
@@ -404,12 +440,19 @@ export default function EngagementDetail() {
         />
       ) : null}
 
-      {(hub?.team.partner || hub?.team.manager || hub?.team.staff) ? (
+      {(hub?.team.partner || hub?.team.manager || hub?.team.staff || canEmailDataRequest) ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Team</span>
           {hub?.team.partner ? <TeamChip roleLabel="Partner" user={hub.team.partner} /> : null}
           {hub?.team.manager ? <TeamChip roleLabel="Manager" user={hub.team.manager} /> : null}
           {hub?.team.staff ? <TeamChip roleLabel="Staff" user={hub.team.staff} /> : null}
+          {eng && id ? (
+            <EngagementDataRequestMail
+              engagementId={id}
+              clientId={eng.client.id}
+              canSend={canEmailDataRequest}
+            />
+          ) : null}
         </div>
       ) : null}
 

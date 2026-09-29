@@ -63,6 +63,14 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   SMTP_FROM: z.string().default('AuditIQ <no-reply@auditiq.local>'),
 
+  // IMAP (reply trail). Reuses SMTP_USER / SMTP_PASSWORD App Password on Gmail.
+  IMAP_HOST: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  IMAP_PORT: z.coerce.number().default(993),
+  IMAP_ENABLED: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
+
   // When true, skip client email verification (useful without SMTP). If unset,
   // verification is required only when SMTP_HOST is configured.
   SKIP_EMAIL_VERIFICATION: z

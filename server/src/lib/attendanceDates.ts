@@ -34,6 +34,75 @@ function shiftDateKey(key: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
+/** Instant shifted by N IST calendar days (noon anchor avoids DST edge cases). */
+export function shiftAttendanceInstant(days: number, now = new Date()): Date {
+  const key = shiftDateKey(getAttendanceDateKey(now), days);
+  return new Date(`${key}T12:00:00+05:30`);
+}
+
+export function attendanceDayFilterDaysAgo(days: number, now = new Date()) {
+  return attendanceDayFilter(shiftAttendanceInstant(-days, now));
+}
+
+/**
+ * Resolve which attendance row End day / Out should use.
+ * After IST midnight, prefer yesterday's still-open session so overnight work can check out.
+ */
+export function pickOpenAttendanceSession<T extends { checkIn: Date | null; checkOut: Date | null }>(
+  today: T | null | undefined,
+  yesterday: T | null | undefined
+): { record: T; overnight: boolean } | null {
+  if (yesterday?.checkIn && !yesterday.checkOut) {
+    return { record: yesterday, overnight: true };
+  }
+  if (today?.checkIn && !today.checkOut) {
+    return { record: today, overnight: false };
+  }
+  return null;
+}
+
+/**
+ * Session shown on Attendance "Today" panel.
+ * Overnight open yesterday wins so End day stays available past midnight.
+ */
+export function pickMeTodayAttendanceSession<T extends { checkIn: Date | null; checkOut: Date | null }>(
+  today: T | null | undefined,
+  yesterday: T | null | undefined
+): { record: T; overnight: boolean } | null {
+  const open = pickOpenAttendanceSession(today, yesterday);
+  if (open) return open;
+  if (today) return { record: today, overnight: false };
+  return null;
+}
+
+/**
+ * Resume after accidental End day: today if present, else yesterday closed after today's IST start
+ * (ended past midnight), else yesterday still open.
+ */
+export function pickResumableAttendanceSession<
+  T extends { checkIn: Date | null; checkOut: Date | null },
+>(
+  today: T | null | undefined,
+  yesterday: T | null | undefined,
+  now = new Date()
+): { record: T; overnight: boolean } | null {
+  if (today?.checkIn) {
+    return { record: today, overnight: false };
+  }
+  const todayStart = attendanceDayStart(now);
+  if (
+    yesterday?.checkIn &&
+    yesterday.checkOut &&
+    yesterday.checkOut.getTime() >= todayStart.getTime()
+  ) {
+    return { record: yesterday, overnight: true };
+  }
+  if (yesterday?.checkIn && !yesterday.checkOut) {
+    return { record: yesterday, overnight: true };
+  }
+  return null;
+}
+
 /** Today and the previous IST calendar day. */
 export function entryDateWindow(now = new Date()): { min: string; max: string } {
   const max = getAttendanceDateKey(now);

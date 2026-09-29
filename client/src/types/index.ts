@@ -277,6 +277,8 @@ export interface Attendance {
   gpsLng?: number | null;
   gpsAccuracy?: number | null;
   ipAddress?: string | null;
+  /** True when this open session started on the previous IST calendar day (past midnight). */
+  overnightContinuation?: boolean;
   user?: Pick<User, 'firstName' | 'lastName' | 'initials' | 'email' | 'role' | 'designation'> & {
     hierarchyLevel?: { title: string } | null;
   };

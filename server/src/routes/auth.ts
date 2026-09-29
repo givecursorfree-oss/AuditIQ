@@ -23,61 +23,11 @@ import {
 import { generateTotpSecret, verifyTotp, totpAuthUri } from '../lib/totp.js';
 import { encryptSecret, decryptSecret } from '../lib/vaultCrypto.js';
 import { isSessionAbsolutelyExpired } from '../lib/sessionPolicy.js';
+import { setTokensCookie } from '../lib/sessionCookies.js';
 
 const router = Router();
 
-const COOKIE_NAME = 'auditiq_token';
 const TWO_FA_ROLES = ['Partner', 'Admin'];
-
-function setTokensCookie(res: Response, accessToken: string, refreshToken?: string): void {
-  // Secure cookies only work over HTTPS. On HTTP (VPS IP before SSL), Secure
-  // cookies are dropped by the browser → login looks OK then /auth/me is 401.
-  const env = getEnv();
-  const clientUrl = env.CLIENT_URL;
-  const useSecure = clientUrl.startsWith('https://') || needsCrossSiteCookies(env);
-
-  let sameSite: 'strict' | 'lax' | 'none' = 'lax';
-  if (env.COOKIE_SAMESITE) {
-    sameSite = env.COOKIE_SAMESITE;
-  } else if (needsCrossSiteCookies(env)) {
-    // vercel.app ↔ api.mkdandeker.com is cross-site
-    sameSite = 'none';
-  } else {
-    try {
-      const host = new URL(clientUrl).hostname;
-      if (useSecure && host.endsWith('.vercel.app')) sameSite = 'none';
-    } catch {
-      if (useSecure) sameSite = 'none';
-    }
-  }
-  if (sameSite === 'none' && !useSecure) {
-    sameSite = 'lax'; // browsers reject SameSite=None without Secure
-  }
-
-  // Cross-site SPA cannot use a parent Domain on the API host cookie.
-  const domain =
-    sameSite === 'none' ? undefined : env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {};
-
-  const base = {
-    httpOnly: true as const,
-    secure: useSecure || sameSite === 'none',
-    sameSite,
-    ...domain,
-  };
-
-  res.cookie(COOKIE_NAME, accessToken, {
-    ...base,
-    path: '/',
-    maxAge: 15 * 60 * 1000,
-  });
-  if (refreshToken) {
-    res.cookie('auditiq_refresh', refreshToken, {
-      ...base,
-      path: '/api/auth/refresh',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-  }
-}
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -997,7 +947,7 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response): Pr
     path: '/',
     ...clearDomain,
   };
-  res.clearCookie(COOKIE_NAME, clearOpts);
+  res.clearCookie('auditiq_token', clearOpts);
   res.clearCookie('auditiq_refresh', { ...clearOpts, path: '/api/auth/refresh' });
   res.json({ message: 'Logged out' });
 });

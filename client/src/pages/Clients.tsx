@@ -124,6 +124,7 @@ export default function Clients() {
   const canImportHrList = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
   const canEditClient = ['Partner', 'Admin', 'Manager', 'HR'].includes(user?.role || '');
   const canAddDeleteClient = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+  const canArchiveClient = ['Partner', 'Admin', 'Manager', 'HR'].includes(user?.role || '');
   const [importing, setImporting] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [editingClient, setEditingClient] = useState<ClientRow | null>(null);
@@ -354,6 +355,26 @@ export default function Clients() {
     }
   }
 
+  async function archiveClient(c: ClientRow) {
+    const ok = await appConfirm({
+      title: 'Archive client?',
+      message: `Archive ${c.name}? Active engagements must be archived first.`,
+    });
+    if (!ok) return;
+    setMessage(null);
+    try {
+      await api.post(`/clients/${c.id}/archive`);
+      setMessage({ type: 'success', text: `${c.name} archived.` });
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setMessage({
+        type: 'error',
+        text: err?.response?.data?.error || 'Could not archive client.',
+      });
+    }
+  }
+
   const letterGateBlocked = selectedEngagement
     ? isTeamAssignmentBlocked(selectedEngagement.letterStatus, engagementHasTeam(selectedEngagement))
     : false;
@@ -500,6 +521,16 @@ export default function Clients() {
                             >
                               <Edit2 size={14} />
                               Edit
+                            </Button>
+                          )}
+                          {canArchiveClient && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => void archiveClient(c)}
+                            >
+                              Archive
                             </Button>
                           )}
                           {canAddDeleteClient && (
