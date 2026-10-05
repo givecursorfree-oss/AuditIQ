@@ -533,6 +533,7 @@ export default function EngagementDetail() {
           engagementId={id!}
           engagementDocuments={engagementDocuments}
           canManage={!!isManagerOrAbove}
+          canUpload={!!user && ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'].includes(user.role)}
           isPartner={!!isPartner}
           loading={documentsLoading}
           pendingRequestCount={pendingClientDocs}

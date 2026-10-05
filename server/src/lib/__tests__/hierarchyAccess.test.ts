@@ -19,6 +19,7 @@ describe('hierarchyAccess', () => {
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/invoices')).toBe(true);
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/time-entries')).toBe(true);
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/engagements')).toBe(true);
+    expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/expense-claims/abc')).toBe(true);
     expect(apiPathAllowedForHierarchy('ACCOUNTS_MANAGER', '/api/tasks')).toBe(true);
   });
 

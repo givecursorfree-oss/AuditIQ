@@ -149,9 +149,14 @@ export default function Engagements() {
             </DropdownMenu>
             )}
             {['Partner', 'Admin', 'Manager'].includes(user?.role || '') ? (
-              <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
-                <Plus size={16} className="mr-1" /> New engagement
-              </Button>
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/engagements/import')}>
+                  Import
+                </Button>
+                <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
+                  <Plus size={16} className="mr-1" /> New engagement
+                </Button>
+              </>
             ) : null}
           </div>
         }

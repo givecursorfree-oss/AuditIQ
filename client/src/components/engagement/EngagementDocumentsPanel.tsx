@@ -40,6 +40,8 @@ interface Props {
     downloadUrl: string;
   }>;
   canManage: boolean;
+  /** Staff on the engagement can upload; checklist edits stay Manager+. */
+  canUpload?: boolean;
   isPartner: boolean;
   loading?: boolean;
   pendingRequestCount?: number;
@@ -105,6 +107,7 @@ export default function EngagementDocumentsPanel({
   engagementId,
   engagementDocuments,
   canManage,
+  canUpload,
   isPartner,
   loading,
   pendingRequestCount = 0,
@@ -115,6 +118,7 @@ export default function EngagementDocumentsPanel({
   onReload,
 }: Props) {
   const [uploading, setUploading] = useState(false);
+  const allowUpload = canUpload ?? canManage;
 
   async function uploadFirmFile(file: File) {
     setUploading(true);
@@ -292,19 +296,21 @@ export default function EngagementDocumentsPanel({
         />
       </PanelCard>
 
-      {otherFiles.length > 0 && (
+      {(allowUpload || otherFiles.length > 0) && (
         <PanelCard
           title="Firm workpapers & uploads"
           action={
-            <Badge variant="secondary" className="font-normal">
-              {otherFiles.length}
-            </Badge>
+            otherFiles.length > 0 ? (
+              <Badge variant="secondary" className="font-normal">
+                {otherFiles.length}
+              </Badge>
+            ) : undefined
           }
         >
           <p className="text-xs text-muted-foreground mb-3">
             Internal files and staff uploads for this engagement.
           </p>
-          {canManage && (
+          {allowUpload && (
             <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm text-primary">
               <UploadSimple size={16} />
               {uploading ? 'Uploading…' : 'Upload firm document'}

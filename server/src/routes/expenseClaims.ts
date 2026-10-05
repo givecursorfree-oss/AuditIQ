@@ -60,13 +60,11 @@ const claimInclude = {
   expensePayer: { select: { id: true, firstName: true, lastName: true } },
   visitedBy: { select: { id: true, firstName: true, lastName: true } },
   client: { select: { id: true, name: true } },
-  engagement: { select: { id: true, title: true, serviceCode: true, financialYear: true, type: true } },
   receipts: { select: { id: true, fileName: true, mimeType: true, uploadedAt: true } },
   managerReviewedBy: { select: { firstName: true, lastName: true } },
   participants: {
     include: {
       user: { select: { id: true, firstName: true, lastName: true } },
-      engagement: { select: { id: true, title: true, serviceCode: true, financialYear: true, type: true } },
       client: { select: { id: true, name: true } },
       manager: { select: { id: true, firstName: true, lastName: true } },
     },
@@ -77,6 +75,42 @@ const claimInclude = {
     },
   },
 };
+
+const engagementPick = {
+  id: true,
+  title: true,
+  serviceCode: true,
+  financialYear: true,
+  type: true,
+} as const;
+
+/** Load engagement titles without a join, so a removed engagement does not fail the claim read. */
+async function hydrateEngagements<
+  T extends {
+    engagementId: string | null;
+    participants?: Array<{ engagementId: string | null }>;
+  },
+>(rows: T[]) {
+  const ids = [
+    ...new Set(
+      rows
+        .flatMap((row) => [row.engagementId, ...(row.participants ?? []).map((p) => p.engagementId)])
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const found = ids.length
+    ? await prisma.engagement.findMany({ where: { id: { in: ids } }, select: engagementPick })
+    : [];
+  const byId = new Map(found.map((row) => [row.id, row]));
+  return rows.map((row) => ({
+    ...row,
+    engagement: row.engagementId ? (byId.get(row.engagementId) ?? null) : null,
+    participants: (row.participants ?? []).map((p) => ({
+      ...p,
+      engagement: p.engagementId ? (byId.get(p.engagementId) ?? null) : null,
+    })),
+  }));
+}
 
 function receiptRequiredForClaim(claim: { claimType: string; travelMode?: string | null; receipts: unknown[] }) {
   if (claim.claimType === 'travel' && claim.travelMode === 'own_vehicle') return false;
@@ -425,7 +459,8 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     });
 
     const full = await prisma.expenseClaim.findUnique({ where: { id: claim.id }, include: claimInclude });
-    res.status(201).json(stripOcrForEmployee(full!, req.user!.role));
+    const [hydrated] = full ? await hydrateEngagements([full]) : [];
+    res.status(201).json(stripOcrForEmployee(hydrated!, req.user!.role));
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
@@ -551,7 +586,8 @@ router.get('/mine', async (req: AuthRequest, res: Response): Promise<void> => {
     include: claimInclude,
     orderBy: { createdAt: 'desc' },
   });
-  res.json({ claims: claims.map((c) => stripOcrForEmployee(c, req.user!.role)) });
+  const hydrated = await hydrateEngagements(claims);
+  res.json({ claims: hydrated.map((c) => stripOcrForEmployee(c, req.user!.role)) });
 });
 
 /** DELETE /api/expense-claims/:id — submitter rollback when no receipts (orphan after failed upload) */
@@ -595,7 +631,8 @@ router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: Aut
     include: claimInclude,
     orderBy: { submittedAt: 'asc' },
   });
-  const fresh = await Promise.all(claims.map((claim) => withFreshAppLogoff(claim)));
+  const hydrated = await hydrateEngagements(claims);
+  const fresh = await Promise.all(hydrated.map((claim) => withFreshAppLogoff(claim)));
   for (const claim of fresh) recheckBareIdentifierOcr(claim);
   res.json({ claims: fresh });
 });
@@ -610,7 +647,8 @@ router.get('/approved', authorize('Partner', 'Admin', 'Manager', 'Accounts'), as
     include: claimInclude,
     orderBy: { managerReviewedAt: 'asc' },
   });
-  const fresh = await Promise.all(claims.map((claim) => withFreshAppLogoff(claim)));
+  const hydrated = await hydrateEngagements(claims);
+  const fresh = await Promise.all(hydrated.map((claim) => withFreshAppLogoff(claim)));
   for (const claim of fresh) recheckBareIdentifierOcr(claim);
   res.json({ claims: fresh });
 });
@@ -673,7 +711,8 @@ router.patch('/:id/approve', authorize('Partner', 'Admin', 'Manager'), async (re
   }
 
   const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
-  res.json(claim);
+  const [hydrated] = claim ? await hydrateEngagements([claim]) : [];
+  res.json(hydrated ?? null);
 });
 
 router.patch('/:id/reject', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
@@ -716,7 +755,8 @@ router.patch('/:id/reject', authorize('Partner', 'Admin', 'Manager'), async (req
   }
   await logClaimAudit(existing.id, 'rejected', req.user!.id, { reason: body.reason });
   const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
-  res.json(claim);
+  const [hydrated] = claim ? await hydrateEngagements([claim]) : [];
+  res.json(hydrated ?? null);
 });
 
 router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
@@ -795,7 +835,8 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
       reason: body.reason,
     });
     const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
-    res.json(claim);
+    const [hydrated] = claim ? await hydrateEngagements([claim]) : [];
+    res.json(hydrated ?? null);
     return;
   } else {
     res.status(403).json({ error: 'No pending approval for you' });
@@ -803,7 +844,8 @@ router.patch('/:id/partial-approve', authorize('Partner', 'Admin', 'Manager'), a
   }
 
   const claim = await prisma.expenseClaim.findUnique({ where: { id: existing.id }, include: claimInclude });
-  res.json(claim);
+  const [hydrated] = claim ? await hydrateEngagements([claim]) : [];
+  res.json(hydrated ?? null);
 });
 
 router.get('/meta/work-types', async (req: AuthRequest, res: Response) => {
@@ -865,6 +907,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       res.status(404).json({ error: 'Claim not found' });
       return;
     }
+    const [withEngagement] = await hydrateEngagements([claim]);
     const role = req.user!.role;
     const uid = req.user!.id;
     const isElevated = ['Partner', 'Admin', 'Manager', 'Accounts'].includes(role);
@@ -877,7 +920,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
-    const fresh = await withFreshAppLogoff(claim);
+    const fresh = await withFreshAppLogoff(withEngagement);
     if (isElevated) recheckBareIdentifierOcr(fresh);
     res.json(stripOcrForEmployee(fresh, role));
   } catch (err) {

@@ -33,6 +33,7 @@ export const HIERARCHY_API_PREFIXES: Record<string, string[]> = {
     '/api/time-entries',
     '/api/stopwatch',
     '/api/engagements',
+    '/api/expense-claims',
     '/api/attendance',
     '/api/tasks',
     '/api/dashboard',

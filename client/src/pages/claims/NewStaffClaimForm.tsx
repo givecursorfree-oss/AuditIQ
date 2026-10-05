@@ -23,7 +23,7 @@ import { getApiErrorMessage } from '@/lib/formPayload';
 import { ErrorBanner } from '@/components/layout/ErrorBanner';
 
 type StaffOption = { id: string; firstName: string; lastName: string };
-type EngOption = { id: string; title: string; client: { id: string; name: string } };
+type EngOption = { id: string; title: string; client?: { id: string; name: string } | null };
 type ClientOption = { id: string; name: string };
 type ApproverOption = { id: string; firstName: string; lastName: string; role: string };
 
@@ -386,7 +386,7 @@ export function NewStaffClaimForm() {
                 </div>
                 {participants.map((p, idx) => {
                   const rowEngagements = p.clientId
-                    ? engagements.filter((e) => e.client.id === p.clientId)
+                    ? engagements.filter((e) => e.client?.id === p.clientId)
                     : engagements;
                   return (
                   <div key={idx} className="grid gap-2 border rounded-lg p-3 sm:grid-cols-2">
@@ -413,7 +413,7 @@ export function NewStaffClaimForm() {
                           const eng = engagements.find((e) => e.id === v);
                           updateParticipant(idx, {
                             engagementId: v,
-                            clientId: eng?.client.id ?? p.clientId,
+                            clientId: eng?.client?.id ?? p.clientId,
                           });
                         }}
                       >
@@ -423,7 +423,7 @@ export function NewStaffClaimForm() {
                         <SelectContent>
                           {rowEngagements.map((e) => (
                             <SelectItem key={e.id} value={e.id}>
-                              {e.client.name} — {e.title}
+                              {e.client?.name ? `${e.client.name} — ` : ''}{e.title}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -437,7 +437,7 @@ export function NewStaffClaimForm() {
                           const eng = engagements.find((e) => e.id === p.engagementId);
                           updateParticipant(idx, {
                             clientId: v,
-                            engagementId: eng?.client.id === v ? p.engagementId : '',
+                            engagementId: eng?.client?.id === v ? p.engagementId : '',
                           });
                         }}
                       >
