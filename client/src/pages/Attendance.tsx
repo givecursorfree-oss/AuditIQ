@@ -358,14 +358,17 @@ export default function AttendancePage() {
       });
       downloadCsv(
         `attendance-${exportFrom}_to_${exportTo}.csv`,
-        ['Date', 'Staff', 'Designation', 'Status', 'Location', 'Client', 'Check-in', 'Check-out', 'Hours', 'Method'],
+        ['Date', 'Staff', 'Designation', 'Status', 'Location', 'Client', 'GPS', 'Check-in', 'Check-out', 'Hours', 'Method'],
         data.map((record) => [
           new Date(record.date).toLocaleDateString('en-IN'),
           record.user ? `${record.user.firstName} ${record.user.lastName}`.trim() : '',
           record.user ? formatStaffTitle(record.user) : '',
           record.status,
-          record.location || '',
+          [record.location, record.office?.name].filter(Boolean).join(' · '),
           record.clientName || '',
+          record.gpsLat != null && record.gpsLng != null
+            ? `${record.gpsLat.toFixed(5)}, ${record.gpsLng.toFixed(5)}${record.gpsAccuracy != null ? ` (±${Math.round(record.gpsAccuracy)}m)` : ''}`
+            : '',
           record.checkIn ? new Date(record.checkIn).toLocaleString('en-IN') : '',
           record.checkOut ? new Date(record.checkOut).toLocaleString('en-IN') : '',
           record.hoursWorked ?? hoursBetween(record.checkIn, record.checkOut) ?? '',

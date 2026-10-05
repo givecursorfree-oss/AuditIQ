@@ -32,6 +32,7 @@ export const TIMESHEET_EXCEL_HEADERS = [
   'Time Spent',
   'Details of Work Performed',
   'Comp off',
+  'Location',
 ] as const;
 
 export type TimesheetLine = {
@@ -49,6 +50,7 @@ export type TimesheetDayRow = {
   hours: number;
   details: string;
   compOff: boolean;
+  location: string;
 };
 
 export type TimesheetSourceEntry = {
@@ -63,6 +65,7 @@ export type TimesheetSourceEntry = {
   hours: number;
   details: string;
   compOff: boolean;
+  location: string;
 };
 
 export function groupTimesheetDays(entries: TimesheetSourceEntry[]): TimesheetDayRow[] {
@@ -80,11 +83,13 @@ export function groupTimesheetDays(entries: TimesheetSourceEntry[]): TimesheetDa
         hours: 0,
         details: '',
         compOff: false,
+        location: '',
       };
       byKey.set(key, day);
     }
     day.hours += entry.hours;
     day.compOff = day.compOff || entry.compOff;
+    if (!day.location && entry.location) day.location = entry.location;
     const detail = entry.details.trim();
     if (detail) day.details = day.details ? `${day.details}; ${detail}` : detail;
     if (entry.clientName || entry.activity || entry.manager) {
@@ -108,9 +113,9 @@ function dayCells(day: TimesheetDayRow, lineOffset: number): (string | number)[]
     cells.push(line?.clientName ?? '', line?.activity ?? '', line?.manager ?? '');
   }
   if (lineOffset === 0) {
-    cells.push(day.hours, day.details, day.compOff ? 'Yes' : 'No');
+    cells.push(day.hours, day.details, day.compOff ? 'Yes' : 'No', day.location);
   } else {
-    cells.push('', '', '');
+    cells.push('', '', '', '');
   }
   return cells;
 }

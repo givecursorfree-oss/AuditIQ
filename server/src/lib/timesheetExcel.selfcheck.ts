@@ -24,12 +24,14 @@ const base = (n: number, extra: Partial<TimesheetSourceEntry> = {}): TimesheetSo
   hours: 1,
   details: n === 1 ? 'Fieldwork' : '',
   compOff: false,
+  location: 'Office',
   ...extra,
 });
 
-assert(TIMESHEET_EXCEL_HEADERS.length === 28, 'header width');
+assert(TIMESHEET_EXCEL_HEADERS.length === 29, 'header width');
 assert(TIMESHEET_EXCEL_HEADERS[26] === 'Details of Work Performed', 'details column');
 assert(TIMESHEET_EXCEL_HEADERS[27] === 'Comp off', 'comp off column');
+assert(TIMESHEET_EXCEL_HEADERS[28] === 'Location', 'location column');
 
 const one = groupTimesheetDays([base(1, { hours: 8, compOff: true })]);
 assert(one.length === 1, 'one day');
@@ -41,6 +43,7 @@ assert(wide[0][4] === 'Client 1', 'first client slot');
 assert(wide[0][6] === 'Nirmal P', 'manager slot');
 assert(wide[0][25] === 8, 'time spent');
 assert(wide[0][27] === 'Yes', 'comp off yes');
+assert(wide[0][28] === 'Office', 'location');
 
 const many = groupTimesheetDays(Array.from({ length: 8 }, (_, i) => base(i + 1)));
 const spilled = expandTimesheetDays(many);

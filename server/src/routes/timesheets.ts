@@ -79,6 +79,21 @@ const staffTitleSelect = {
   hierarchyLevel: { select: { title: true } },
 } as const;
 
+function attendanceLocationLabel(row: {
+  location: string | null;
+  clientName: string | null;
+  gpsLat: number | null;
+  gpsLng: number | null;
+  gpsAccuracy: number | null;
+}): string {
+  const place = [row.location, row.clientName].filter(Boolean).join(' · ');
+  const gps =
+    row.gpsLat != null && row.gpsLng != null
+      ? `${row.gpsLat.toFixed(5)}, ${row.gpsLng.toFixed(5)}${row.gpsAccuracy != null ? ` (±${Math.round(row.gpsAccuracy)}m)` : ''}`
+      : '';
+  return [place, gps].filter(Boolean).join(' · ');
+}
+
 function istDateKey(value: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -357,6 +372,9 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
           status: true,
           location: true,
           clientName: true,
+          gpsLat: true,
+          gpsLng: true,
+          gpsAccuracy: true,
         },
       }),
       prisma.timesheetDay.findMany({
@@ -377,6 +395,9 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
         status: string;
         location: string | null;
         clientName: string | null;
+        gpsLat: number | null;
+        gpsLng: number | null;
+        gpsAccuracy: number | null;
       }
     >();
     const attestationByKey = new Map<string, string>();
@@ -438,7 +459,7 @@ router.get('/firm/export', async (req: AuthRequest, res: Response): Promise<void
           formatDateTime(time?.checkIn),
           formatDateTime(time?.checkOut),
           attendance?.status || '',
-          attendance?.location || '',
+          attendance ? attendanceLocationLabel(attendance) : '',
           attendance?.clientName || '',
           attestationByKey.get(key) || 'Draft',
         ];
@@ -499,22 +520,32 @@ router.get('/firm/export.xlsx', async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const entries = await prisma.timeEntry.findMany({
-      where: { user: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } }, date: { gte: start, lt: end } },
-      select: {
-        userId: true,
-        date: true,
-        hours: true,
-        workType: true,
-        description: true,
-        clientName: true,
-        compOff: true,
-        user: { select: { ...staffTitleSelect, email: true } },
-        engagement: { select: { client: { select: { name: true } } } },
-        supervisor: { select: { firstName: true, lastName: true } },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    const [entries, attendances] = await Promise.all([
+      prisma.timeEntry.findMany({
+        where: { user: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } }, date: { gte: start, lt: end } },
+        select: {
+          userId: true,
+          date: true,
+          hours: true,
+          workType: true,
+          description: true,
+          clientName: true,
+          compOff: true,
+          user: { select: { ...staffTitleSelect, email: true } },
+          engagement: { select: { client: { select: { name: true } } } },
+          supervisor: { select: { firstName: true, lastName: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.attendance.findMany({
+        where: { user: { firmId, isActive: true, role: { in: [...FIRM_MEMBER_ROLES] } }, date: { gte: start, lt: end } },
+        select: { userId: true, date: true, location: true, clientName: true, gpsLat: true, gpsLng: true, gpsAccuracy: true },
+      }),
+    ]);
+
+    const locationByKey = new Map(
+      attendances.map((row) => [`${row.userId}|${istDateKey(row.date)}`, attendanceLocationLabel(row)])
+    );
 
     const days = groupTimesheetDays(
       entries.map((entry) => ({
@@ -529,6 +560,7 @@ router.get('/firm/export.xlsx', async (req: AuthRequest, res: Response): Promise
         hours: entry.hours,
         details: entry.description || '',
         compOff: entry.compOff,
+        location: locationByKey.get(`${entry.userId}|${istDateKey(entry.date)}`) || '',
       }))
     );
     const buffer = await timesheetWorkbookBuffer(expandTimesheetDays(days));
