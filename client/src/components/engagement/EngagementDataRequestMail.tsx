@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PaperPlaneTilt as Send } from '@phosphor-icons/react';
-import api from '../services/api';
+import api from '@/services/api';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -52,7 +52,7 @@ export default function EngagementDataRequestMail({ engagementId, clientId, canS
     setBusy(true);
     try {
       await api.post(`/templates/${templateId}/send`, { clientId, engagementId });
-      showToast({ title: 'Data request sent', variant: 'success' });
+      showToast({ message: 'Data request sent', variant: 'success' });
       setOpen(false);
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { error?: string } } };

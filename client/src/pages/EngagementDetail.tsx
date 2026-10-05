@@ -404,7 +404,7 @@ export default function EngagementDetail() {
                   if (!confirmed) return;
                   try {
                     await api.post(`/engagements/${eng.id}/archive`);
-                    appToast({ title: 'Archived', variant: 'success' });
+                    appToast({ message: 'Engagement archived', variant: 'success' });
                     navigate('/engagements');
                   } catch (e: unknown) {
                     const err = e as { response?: { data?: { error?: string } } };
