@@ -42,7 +42,7 @@ function isSeniorOrAuditManager(applicant: LeaveApplicantGrade): boolean {
   return /senior audit executive|sr\.?\s*audit executive/.test(text) || /\baudit manager\b/.test(text);
 }
 
-function isArticleAssistant(applicant: LeaveApplicantGrade): boolean {
+export function isArticleAssistant(applicant: LeaveApplicantGrade): boolean {
   const code = applicant.hierarchyCode || '';
   if (code === 'AUDIT_EXECUTIVE' || code === 'INTERN') return true;
   if (applicant.hasArticleship) return true;

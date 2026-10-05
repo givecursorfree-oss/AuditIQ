@@ -155,6 +155,7 @@ model User {
   compOffRequests          CompOffRequest[]   @relation("CompOffRequester")
   compOffManagerApprovals  CompOffRequest[]   @relation("CompOffManager")
   compOffHrCredits         CompOffRequest[]   @relation("CompOffHr")
+  compOffAssigned          CompOffRequest[]   @relation("CompOffAssignedManager")
   expenseClaims            ExpenseClaim[]     @relation("ExpenseClaimStaff")
   expenseClaimsReviewed    ExpenseClaim[]     @relation("ExpenseClaimManager")
   expenseClaimsPaid        ExpenseClaim[]     @relation("ExpenseClaimPayer")
@@ -973,6 +974,9 @@ model CompOffRequest {
   workDate             DateTime
   days                 Float     @default(1)
   reason               String?   @db.Text
+  /// Manager/Partner chosen on the manual time grid, when the request came from there.
+  assignedManagerId    String?
+  assignedManager      User?     @relation("CompOffAssignedManager", fields: [assignedManagerId], references: [id], onDelete: SetNull)
   /// Pending | ManagerApproved | HrCredited | Rejected
   status               String    @default("Pending")
   managerApprovedById  String?
@@ -990,6 +994,7 @@ model CompOffRequest {
   @@index([firmId, status])
   @@index([userId])
   @@index([workDate])
+  @@index([assignedManagerId])
 }
 
 model LeaveRequest {
@@ -998,7 +1003,8 @@ model LeaveRequest {
   examLevel         String? // For Exam leaves: Foundation | Intermediate | Final
   fromDate          DateTime
   toDate            DateTime
-  days              Int
+  days              Float
+  halfDay           Boolean   @default(false)
   reason            String?   @db.Text
   // Two-step approval: Manager then Partner
   status            String    @default("Pending") // Pending | Manager Approved | Approved | Rejected
@@ -1624,9 +1630,9 @@ model ArticleshipRecord {
   expectedEndDate DateTime
   actualEndDate   DateTime?
   // ICAI leave allowances (consumed counters)
-  examLeaveUsed   Int       @default(0) // out of 175 days
-  casualLeaveUsed Int       @default(0)
-  sickLeaveUsed   Int       @default(0)
+  examLeaveUsed   Float     @default(0) // out of 175 days
+  casualLeaveUsed Float     @default(0)
+  sickLeaveUsed   Float     @default(0)
   /// Firm allotted leave for Article Assistants (HR: 24 days / 2 years)
   firmLeaveCredit Float     @default(24)
 

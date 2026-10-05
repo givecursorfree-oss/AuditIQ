@@ -5,6 +5,7 @@ import { authenticate, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { listLookupValues, LOOKUP_ACTIVITY, LOOKUP_CLIENT } from '../lib/hrLookups.js';
 import { getAttendanceDateKey, isEntryDateAllowed } from '../lib/attendanceDates.js';
+import { notifyCompOffFromTimeEntry } from '../lib/compOffMail.js';
 
 const router = Router();
 router.use(authenticate);
@@ -327,6 +328,18 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
       include: entryInclude,
     });
     await markDaySubmitted(req.user!.id, data.date);
+    if (data.compOff) {
+      await notifyCompOffFromTimeEntry({
+        userId: req.user!.id,
+        firmId,
+        supervisorId: supervisor.id,
+        dateRaw: data.date,
+        clientName: canonical,
+        hours: data.hours,
+      }).catch((err: unknown) => {
+        logger.error('Comp-off notification failed', { error: (err as Error).message });
+      });
+    }
     res.status(201).json(entry);
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: err.errors }); return; }

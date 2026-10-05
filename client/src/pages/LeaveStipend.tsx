@@ -22,6 +22,7 @@ interface LeaveRequest {
   fromDate: string;
   toDate: string;
   days: number;
+  halfDay?: boolean;
   status: string;
   reason?: string | null;
   user: { firstName: string; lastName: string; initials: string };
@@ -106,6 +107,7 @@ export default function LeaveStipend() {
     type: 'Casual' as 'Casual' | 'Sick' | 'Exam' | 'Study' | 'Earned',
     examLevel: 'Intermediate' as 'Foundation' | 'Intermediate' | 'Final',
     reason: '',
+    halfDay: false,
   });
 
   const [focusLeaveId, setFocusLeaveId] = useState<string | null>(null);
@@ -198,9 +200,12 @@ export default function LeaveStipend() {
       approved: { title: 'Leave sanctioned', message: 'The leave application was approved.' },
       'manager-approved': { title: 'Leave approved', message: 'Forwarded for final sanction.' },
       rejected: { title: 'Leave rejected', message: 'The leave application was rejected.' },
+      'comp-off-approved': { title: 'Comp off approved', message: 'The comp-off request is approved on the portal.' },
+      'comp-off-rejected': { title: 'Comp off rejected', message: 'The comp-off request was rejected.' },
       'no-permission': { title: 'Not allowed', message: 'Your account cannot approve or reject leave.' },
       'cannot-approve': { title: 'Cannot approve', message: 'This leave is not in a state you can approve.' },
       'action-failed': { title: 'Action failed', message: 'Could not update this leave. Open Leave Management to try again.' },
+      'comp-off-failed': { title: 'Comp off', message: 'Could not update this comp-off request.' },
     };
     const key = done || err || '';
     const copy = messages[key] || { title: 'Leave', message: 'Opened from email.' };
@@ -237,6 +242,8 @@ export default function LeaveStipend() {
     try {
       await api.post('/attendance/leaves', {
         ...applyForm,
+        endDate: applyForm.halfDay ? applyForm.startDate : applyForm.endDate,
+        halfDay: applyForm.halfDay,
         examLevel: applyForm.type === 'Exam' ? applyForm.examLevel : undefined,
       });
       await appAlert({
@@ -418,13 +425,44 @@ export default function LeaveStipend() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block">
                   <span className="text-sm text-muted-foreground">From</span>
-                  <input type="date" className="input-field mt-1 w-full" value={applyForm.startDate} onChange={(e) => setApplyForm({ ...applyForm, startDate: e.target.value })} />
+                  <input
+                    type="date"
+                    className="input-field mt-1 w-full"
+                    value={applyForm.startDate}
+                    onChange={(e) =>
+                      setApplyForm({
+                        ...applyForm,
+                        startDate: e.target.value,
+                        endDate: applyForm.halfDay ? e.target.value : applyForm.endDate,
+                      })
+                    }
+                  />
                 </label>
                 <label className="block">
                   <span className="text-sm text-muted-foreground">To</span>
-                  <input type="date" className="input-field mt-1 w-full" value={applyForm.endDate} onChange={(e) => setApplyForm({ ...applyForm, endDate: e.target.value })} />
+                  <input
+                    type="date"
+                    className="input-field mt-1 w-full"
+                    value={applyForm.halfDay ? applyForm.startDate : applyForm.endDate}
+                    disabled={applyForm.halfDay}
+                    onChange={(e) => setApplyForm({ ...applyForm, endDate: e.target.value })}
+                  />
                 </label>
               </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={applyForm.halfDay}
+                  onChange={(e) =>
+                    setApplyForm({
+                      ...applyForm,
+                      halfDay: e.target.checked,
+                      endDate: e.target.checked ? applyForm.startDate : applyForm.endDate,
+                    })
+                  }
+                />
+                Half day
+              </label>
               <label className="block">
                 <span className="text-sm text-muted-foreground">Leave type</span>
                 <select className="input-field mt-1 w-full" value={applyForm.type} onChange={(e) => setApplyForm({ ...applyForm, type: e.target.value as typeof applyForm.type })}>
@@ -527,7 +565,7 @@ export default function LeaveStipend() {
                   <td>{l.type}{l.examLevel ? ` (${l.examLevel})` : ''}</td>
                   <td>{new Date(l.fromDate).toLocaleDateString('en-IN')}</td>
                   <td>{new Date(l.toDate).toLocaleDateString('en-IN')}</td>
-                  <td className="text-right">{l.days}</td>
+                  <td className="text-right">{l.halfDay ? '0.5' : l.days}</td>
                   <td><ApprovalStatusBadge status={l.status} /></td>
                   <td className="space-x-1 whitespace-nowrap">
                     {l.status === 'Pending' &&
@@ -584,7 +622,7 @@ export default function LeaveStipend() {
                 </div>
                 <div className="text-sm">
                   {new Date(l.fromDate).toLocaleDateString('en-IN')} → {new Date(l.toDate).toLocaleDateString('en-IN')}
-                  <span className="ml-2 text-muted-foreground">({l.days}d)</span>
+                  <span className="ml-2 text-muted-foreground">({l.halfDay ? '0.5' : l.days}d)</span>
                 </div>
               </div>
             ))}

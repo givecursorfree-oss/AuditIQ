@@ -7,6 +7,7 @@ import { generateToken, hashToken } from '../lib/authSecurity.js';
 import { setTokensCookie } from '../lib/sessionCookies.js';
 import { clientIp } from '../lib/clientIp.js';
 import { verifyLeaveMailToken } from '../lib/leaveMailAction.js';
+import { applyCompOffMailDecision, verifyCompOffMailToken } from '../lib/compOffMail.js';
 import {
   applyLeaveDecision,
   canManagerApproveLeave,
@@ -62,6 +63,55 @@ function redirectLeavePage(res: Response, query: Record<string, string>): void {
 function htmlPage(title: string, message: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${title}</title></head><body style="font-family:sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem"><h1 style="font-size:1.25rem">${title}</h1><p>${message}</p></body></html>`;
 }
+
+function redirectCompOffPage(res: Response, query: Record<string, string>): void {
+  const base = getEnv().CLIENT_URL.replace(/\/$/, '');
+  const params = new URLSearchParams({ tab: 'compoff', ...query });
+  res.redirect(302, `${base}/leave-stipend?${params.toString()}`);
+}
+
+/** GET /api/leave-mail/comp-off?token= — Open / Approve / Reject from a comp-off email. */
+router.get('/comp-off', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const payload = verifyCompOffMailToken(String(req.query.token || ''));
+    if (!payload) {
+      res.status(400).type('html').send(htmlPage('Link expired', 'This comp-off link is invalid or has expired. Sign in and open Comp-off.'));
+      return;
+    }
+    const actor = await prisma.user.findFirst({
+      where: { id: payload.userId, isActive: true },
+      select: { id: true, role: true, firmId: true },
+    });
+    if (!actor) {
+      res.status(403).type('html').send(htmlPage('Account required', 'No active account matches this comp-off link.'));
+      return;
+    }
+    if (payload.action === 'open') {
+      await establishSession(req, res, actor.id);
+      redirectCompOffPage(res, { compOffId: payload.requestId });
+      return;
+    }
+    const result = await applyCompOffMailDecision({
+      requestId: payload.requestId,
+      actorId: actor.id,
+      actorRole: actor.role,
+      actorFirmId: actor.firmId,
+      action: payload.action,
+    });
+    await establishSession(req, res, actor.id);
+    if (!result.ok) {
+      redirectCompOffPage(res, { compOffId: payload.requestId, mailError: 'comp-off-failed' });
+      return;
+    }
+    redirectCompOffPage(res, {
+      compOffId: payload.requestId,
+      mailDone: payload.action === 'approve' ? 'comp-off-approved' : 'comp-off-rejected',
+    });
+  } catch (err) {
+    logger.error('Comp-off mail action error', { error: (err as Error).message });
+    res.status(500).type('html').send(htmlPage('Error', 'Could not process this comp-off link.'));
+  }
+});
 
 /** GET /api/leave-mail/action?token= — Open / Approve / Reject from leave notification email. */
 router.get('/action', async (req: Request, res: Response): Promise<void> => {

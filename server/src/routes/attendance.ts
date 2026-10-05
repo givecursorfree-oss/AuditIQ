@@ -36,6 +36,7 @@ import { sendEmail } from '../lib/emailService.js';
 import { leaveRecipientsFor } from '../lib/leaveNotify.js';
 import { leaveMailActionButtonsHtml } from '../lib/leaveMailAction.js';
 import { applyLeaveDecision, canManagerApproveLeave } from '../lib/leaveDecision.js';
+import { leaveRequestDays } from '../lib/leaveRequestDays.js';
 import { normalizeEmail } from '../lib/emailNormalize.js';
 
 // ICAI articleship leave limits (from articleship.ts but duplicated here to
@@ -858,7 +859,7 @@ function escapeHtml(value: string): string {
 
 async function notifyLeaveSubmitted(
   userId: string,
-  leave: { id: string; fromDate: Date; toDate: Date; days: number; type: string; reason: string | null }
+  leave: { id: string; fromDate: Date; toDate: Date; days: number; type: string; reason: string | null; halfDay?: boolean }
 ): Promise<void> {
   const applicant = await prisma.user.findUnique({
     where: { id: userId },
@@ -885,7 +886,7 @@ async function notifyLeaveSubmitted(
   const title = applicant.hierarchyLevel?.title || applicant.designation || '';
   const when = leave.fromDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
   const until = leave.toDate.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
-  const bodyCore = `<p>${escapeHtml(name)}${title ? ` (${escapeHtml(title)})` : ''} submitted a ${escapeHtml(leave.type)} leave application.</p><p>${escapeHtml(when)} to ${escapeHtml(until)} · ${leave.days} day(s)</p>${leave.reason ? `<p>${escapeHtml(leave.reason)}</p>` : ''}<p><a href="mailto:${escapeHtml(applicant.email)}">${escapeHtml(applicant.email)}</a></p>`;
+  const bodyCore = `<p>${escapeHtml(name)}${title ? ` (${escapeHtml(title)})` : ''} submitted a ${escapeHtml(leave.type)} leave application${leave.halfDay ? ' (half day)' : ''}.</p><p>${escapeHtml(when)} to ${escapeHtml(until)} · ${leave.days} day(s)</p>${leave.reason ? `<p>${escapeHtml(leave.reason)}</p>` : ''}<p><a href="mailto:${escapeHtml(applicant.email)}">${escapeHtml(applicant.email)}</a></p>`;
 
   const recipientUsers = await prisma.user.findMany({
     where: {
@@ -923,6 +924,7 @@ const leaveCreateSchema = z.object({
   type: z.enum(['Casual', 'Sick', 'Earned', 'Holiday', 'Exam', 'Study']),
   examLevel: z.enum(['Foundation', 'Intermediate', 'Final']).optional(),
   reason: z.string().optional(),
+  halfDay: z.boolean().optional(),
 });
 
 router.post('/leaves', async (req: AuthRequest, res: Response): Promise<void> => {
@@ -932,10 +934,13 @@ router.post('/leaves', async (req: AuthRequest, res: Response): Promise<void> =>
       return;
     }
     const body = leaveCreateSchema.parse(req.body);
-    const from = new Date(body.startDate);
-    const to = new Date(body.endDate);
-    if (to < from) { res.status(400).json({ error: 'End date must be after start date' }); return; }
-    const days = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86400000) + 1);
+    const span = leaveRequestDays(body.startDate.slice(0, 10), body.endDate.slice(0, 10), Boolean(body.halfDay));
+    if ('error' in span) {
+      res.status(400).json({ error: span.error });
+      return;
+    }
+    const from = new Date(`${body.startDate.slice(0, 10)}T00:00:00.000Z`);
+    const to = new Date(`${body.endDate.slice(0, 10)}T00:00:00.000Z`);
 
     if (body.type === 'Exam' && !body.examLevel) {
       res.status(400).json({ error: 'examLevel is required for Exam leave' });
@@ -947,7 +952,8 @@ router.post('/leaves', async (req: AuthRequest, res: Response): Promise<void> =>
         userId: req.user!.id,
         fromDate: from,
         toDate: to,
-        days,
+        days: span.days,
+        halfDay: Boolean(body.halfDay),
         type: body.type,
         examLevel: body.examLevel,
         reason: body.reason,
