@@ -5,6 +5,7 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
 import logger from '../lib/logger.js';
 import { canAccessEngagement } from '../lib/engagementAccess.js';
 import { getFingerprintLogoffTime } from '../lib/biometricService.js';
+import { getComputerLogoffTime } from '../lib/appLogoff.js';
 import { verifyLateHoursClaim } from '../lib/lateHoursPolicy.js';
 
 const router = Router();
@@ -20,29 +21,6 @@ function parseTimeToMinutes(t: string): number {
 function computeOvertimeHours(normalEnd: string, actualEnd: string): number {
   const diff = parseTimeToMinutes(actualEnd) - parseTimeToMinutes(normalEnd);
   return Math.max(0, Math.round((diff / 60) * 100) / 100);
-}
-
-async function getComputerLogoffTime(userId: string, date: Date): Promise<string | null> {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-  const entry = await prisma.timeEntry.findFirst({
-    where: { userId, date: { gte: start, lte: end }, endedAt: { not: null } },
-    orderBy: { endedAt: 'desc' },
-    select: { endedAt: true },
-  });
-  if (entry?.endedAt) {
-    return entry.endedAt.toTimeString().slice(0, 5);
-  }
-  const att = await prisma.attendance.findFirst({
-    where: { userId, date: start },
-    select: { checkOut: true },
-  });
-  if (att?.checkOut) {
-    return new Date(att.checkOut).toTimeString().slice(0, 5);
-  }
-  return null;
 }
 
 const lateHoursSchema = z.object({

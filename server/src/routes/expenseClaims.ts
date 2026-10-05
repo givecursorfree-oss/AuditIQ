@@ -13,8 +13,9 @@ import { validateAmount, validatePartialAmount } from '../lib/expenseClaimPolicy
 import { evaluateFoodLateSittingPolicy } from '../lib/foodClaimPolicy.js';
 import { verifyLateHoursClaim } from '../lib/lateHoursPolicy.js';
 import { getFingerprintLogoffTime } from '../lib/biometricService.js';
+import { getComputerLogoffTime } from '../lib/appLogoff.js';
 import { logClaimAudit } from '../lib/claimAudit.js';
-import { queueClaimReceiptOcr } from '../lib/claimReceiptOcr.js';
+import { queueClaimReceiptOcr, recheckBareIdentifierOcr } from '../lib/claimReceiptOcr.js';
 import {
   createParticipantsAndApprovals,
   finalizeClaimWithoutManagers,
@@ -95,33 +96,18 @@ async function findFirmClaim(req: AuthRequest, id: string) {
   });
 }
 
-async function getComputerLogoffTime(userId: string, date: Date): Promise<string | null> {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
-  const entry = await prisma.timeEntry.findFirst({
-    where: { userId, date: { gte: start, lte: end }, endedAt: { not: null } },
-    orderBy: { endedAt: 'desc' },
-    select: { endedAt: true },
-  });
-  if (entry?.endedAt) return entry.endedAt.toTimeString().slice(0, 5);
-  const att = await prisma.attendance.findFirst({
-    where: { userId, date: start },
-    select: { checkOut: true },
-  });
-  if (att?.checkOut) return new Date(att.checkOut).toTimeString().slice(0, 5);
-  return null;
-}
-
-async function buildFoodPolicyFlags(staffId: string, expenseDate: Date) {
+async function buildFoodPolicyFlags(
+  staffId: string,
+  expenseDate: Date,
+  knownFingerprint?: string | null
+) {
   const late = await prisma.lateHoursClaim.findFirst({
     where: { staffId, date: expenseDate, status: 'approved' },
     select: { actualEndTime: true },
   });
   const [computerLogoffTime, fingerprintLogoffTime] = await Promise.all([
     getComputerLogoffTime(staffId, expenseDate),
-    getFingerprintLogoffTime(staffId, expenseDate),
+    knownFingerprint !== undefined ? Promise.resolve(knownFingerprint) : getFingerprintLogoffTime(staffId, expenseDate),
   ]);
   const endTime = late?.actualEndTime ?? computerLogoffTime;
   const sitting = evaluateFoodLateSittingPolicy(expenseDate, endTime);
@@ -141,6 +127,52 @@ async function buildFoodPolicyFlags(staffId: string, expenseDate: Date) {
     fingerprintLogoffTime,
     logoffMismatch: logoff.flagged,
     logoffMismatchReason: logoff.flagReason,
+  };
+}
+
+type StoredFoodFlags = {
+  fingerprintLogoffTime?: string | null;
+  people?: Array<{ userId: string; fingerprintLogoffTime?: string | null }>;
+};
+
+function storedFoodFlags(value: Prisma.JsonValue | null): StoredFoodFlags {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as StoredFoodFlags;
+}
+
+/** Attendance punch can land after submit, so manager views re-read app log-off. */
+async function withFreshAppLogoff<
+  T extends {
+    claimType: string;
+    expenseDate: Date;
+    expensePayerId: string | null;
+    staffId: string;
+    policyFlags: Prisma.JsonValue;
+  },
+>(claim: T): Promise<T> {
+  if (claim.claimType !== 'food') return claim;
+  const existing = storedFoodFlags(claim.policyFlags);
+  const payerId = claim.expensePayerId ?? claim.staffId;
+  const payerFlags = await buildFoodPolicyFlags(
+    payerId,
+    claim.expenseDate,
+    existing.fingerprintLogoffTime ?? null
+  );
+  const people = Array.isArray(existing.people)
+    ? await Promise.all(
+        existing.people.map(async (person) => ({
+          ...person,
+          ...(await buildFoodPolicyFlags(
+            person.userId,
+            claim.expenseDate,
+            person.fingerprintLogoffTime ?? null
+          )),
+        }))
+      )
+    : undefined;
+  return {
+    ...claim,
+    policyFlags: { ...existing, ...payerFlags, ...(people ? { people } : {}) } as Prisma.JsonValue,
   };
 }
 
@@ -563,7 +595,9 @@ router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: Aut
     include: claimInclude,
     orderBy: { submittedAt: 'asc' },
   });
-  res.json({ claims });
+  const fresh = await Promise.all(claims.map((claim) => withFreshAppLogoff(claim)));
+  for (const claim of fresh) recheckBareIdentifierOcr(claim);
+  res.json({ claims: fresh });
 });
 
 router.get('/approved', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (req: AuthRequest, res: Response) => {
@@ -576,7 +610,9 @@ router.get('/approved', authorize('Partner', 'Admin', 'Manager', 'Accounts'), as
     include: claimInclude,
     orderBy: { managerReviewedAt: 'asc' },
   });
-  res.json({ claims });
+  const fresh = await Promise.all(claims.map((claim) => withFreshAppLogoff(claim)));
+  for (const claim of fresh) recheckBareIdentifierOcr(claim);
+  res.json({ claims: fresh });
 });
 
 router.patch('/:id/approve', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
@@ -841,7 +877,9 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
-    res.json(stripOcrForEmployee(claim, role));
+    const fresh = await withFreshAppLogoff(claim);
+    if (isElevated) recheckBareIdentifierOcr(fresh);
+    res.json(stripOcrForEmployee(fresh, role));
   } catch (err) {
     logger.error('Get claim error', { error: (err as Error).message });
     res.status(500).json({ error: 'Failed to load claim' });

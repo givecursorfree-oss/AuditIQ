@@ -105,6 +105,8 @@ function looksLikeNonReceiptDocument(text: string): boolean {
   const hasPaidCue =
     PAID_LABELS.test(text) || GRAND_LABELS.test(text) || /\btotal\b/i.test(text);
   if (hasPaidCue) return false;
+  // IRCTC / NTES screenshots: train number in parentheses is not a rupee total.
+  if (/express\s*\(\s*\d{4,5}\s*\)|train\s*schedule|runs\s*on\s*:/i.test(text)) return true;
   const calendarHints =
     (lower.match(/\b(mon|tue|wed|thu|fri|sat|sun)\b/g) ?? []).length >= 4 ||
     /compliance\s*calendar|chartered\s*accountants|gstr\s*\d|financial\s*year|fy\s*\d{4}/i.test(
@@ -129,8 +131,12 @@ export function extractReceiptTotal(text: string): number | null {
   const fallback: number[] = [];
   for (const line of lines) {
     if (SKIP_LINE.test(line)) continue;
+    if (/\d{1,2}:\d{2}/.test(line) && !/(?:₹|rs\.?|inr)/i.test(line)) continue;
     const amt = pickBestAmount(amountsOnLine(line), line);
-    if (amt != null) fallback.push(amt);
+    if (amt == null) continue;
+    // Bare 5-digit integers (train numbers, PNRs) without a currency mark.
+    if (!/(?:₹|rs\.?|inr)\s*[\d]/i.test(line) && Number.isInteger(amt) && amt >= 10000) continue;
+    fallback.push(amt);
   }
 
   if (fallback.length === 0) return null;

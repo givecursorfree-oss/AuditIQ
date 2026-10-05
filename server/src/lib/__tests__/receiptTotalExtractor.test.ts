@@ -85,6 +85,19 @@ describe('extractReceiptTotal', () => {
     expect(extractReceiptTotal(text)).toBe(520);
   });
 
+  it('does not read an IRCTC train number as the bill total', () => {
+    const text = [
+      'NAVYUG EXPRESS (16788)',
+      'Runs On: M T W T F S S',
+      'Train Schedule',
+      '08:10 | SALEM JN | Sun, 02 Nov',
+      '16:28 | KOVILPATTI | Sun, 02 Nov',
+      'NOT AVAILABLE',
+    ].join('\n');
+    expect(extractReceiptTotal(text)).toBeNull();
+    expect(extractReceiptTotal('16788\n16:28\n08:10')).toBeNull();
+  });
+
   it('returns null for empty text', () => {
     expect(extractReceiptTotal('')).toBeNull();
   });

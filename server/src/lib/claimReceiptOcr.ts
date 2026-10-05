@@ -26,7 +26,7 @@ export async function runClaimReceiptOcr(claimId: string): Promise<void> {
     await prisma.expenseClaim.update({
       where: { id: claimId },
       data: {
-        ocrDetectedAmount: best ?? undefined,
+        ocrDetectedAmount: best,
         ocrStatus: best != null ? 'completed' : 'failed',
       },
     });
@@ -45,4 +45,31 @@ export async function runClaimReceiptOcr(claimId: string): Promise<void> {
 /** ponytail: fire-and-forget async OCR after upload. */
 export function queueClaimReceiptOcr(claimId: string): void {
   void runClaimReceiptOcr(claimId);
+}
+
+const recheckedOcr = new Set<string>();
+
+/**
+ * A claim under ₹100 whose OCR total is a bare 5-digit integer is usually a
+ * train number or PNR, not a bill. Re-read once per process.
+ * ponytail: in-memory set, so a restart rechecks once more. Upgrade: store an extractor version on the claim.
+ */
+export function recheckBareIdentifierOcr(claim: {
+  id: string;
+  amount: unknown;
+  ocrDetectedAmount: unknown;
+  ocrStatus: string | null;
+}): void {
+  if (claim.ocrStatus !== 'completed' || claim.ocrDetectedAmount == null || recheckedOcr.has(claim.id)) return;
+  const detected = Number(claim.ocrDetectedAmount);
+  const claimed = Number(claim.amount);
+  if (!Number.isInteger(detected) || detected < 10000 || detected > 99999) return;
+  if (!Number.isFinite(claimed) || claimed >= 100 || Math.abs(claimed - detected) <= 1) return;
+  recheckedOcr.add(claim.id);
+  claim.ocrStatus = 'pending';
+  claim.ocrDetectedAmount = null;
+  void prisma.expenseClaim
+    .update({ where: { id: claim.id }, data: { ocrStatus: 'pending', ocrDetectedAmount: null } })
+    .then(() => runClaimReceiptOcr(claim.id))
+    .catch((err) => logger.warn('OCR recheck failed', { claimId: claim.id, error: (err as Error).message }));
 }

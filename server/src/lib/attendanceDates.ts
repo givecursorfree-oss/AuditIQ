@@ -29,6 +29,20 @@ export function attendanceDayStart(d = new Date()): Date {
   return getAttendanceDayRange(d).start;
 }
 
+/** HH:mm in IST. Server local timezone must not be used for attendance clocks. */
+export function formatIstHm(d: Date): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ATTENDANCE_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d);
+  let hour = parts.find((p) => p.type === 'hour')?.value ?? '00';
+  const minute = parts.find((p) => p.type === 'minute')?.value ?? '00';
+  if (hour === '24') hour = '00';
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+}
+
 function shiftDateKey(key: string, days: number): string {
   const [y, m, d] = key.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);

@@ -3,6 +3,7 @@ import {
   attendanceDayFilter,
   attendanceDayFilterDaysAgo,
   entryDateWindow,
+  formatIstHm,
   getAttendanceDateKey,
   getAttendanceDayRange,
   isEntryDateAllowed,
@@ -12,6 +13,11 @@ import {
 } from '../attendanceDates.js';
 
 describe('attendanceDates', () => {
+  it('formats an IST wall clock from a UTC instant', () => {
+    expect(formatIstHm(new Date('2026-09-29T14:47:00.000Z'))).toBe('20:17');
+    expect(formatIstHm(new Date('2026-09-29T05:02:00.000Z'))).toBe('10:32');
+  });
+
   it('formats IST date key', () => {
     const key = getAttendanceDateKey(new Date('2026-06-04T10:00:00+05:30'));
     expect(key).toMatch(/^\d{4}-\d{2}-\d{2}$/);
