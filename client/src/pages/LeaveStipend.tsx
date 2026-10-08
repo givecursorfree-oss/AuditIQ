@@ -60,6 +60,13 @@ interface StipendRecord {
 
 type LeaveTab = 'apply' | 'inbox' | 'calendar' | 'stipend' | 'ediary' | 'compoff' | 'holidays';
 
+/** Must match server FINAL_LEAVE_APPROVER_EMAILS — only these may Sanction after manager approval. */
+const FINAL_LEAVE_SANCTION_EMAILS = ['arunmehta@mkdandeker.com', 'poosaidurai@mkdandeker.com'];
+
+function canSanctionLeaveFinally(email?: string | null): boolean {
+  return FINAL_LEAVE_SANCTION_EMAILS.includes((email || '').trim().toLowerCase());
+}
+
 interface CompOffRequest {
   id: string;
   workDate: string;
@@ -148,17 +155,18 @@ export default function LeaveStipend() {
       );
     }
     if (canManage) {
-      const isFinalApprover = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+      const canFinalSanction = canSanctionLeaveFinally(user?.email);
       tasks.push(
         api
           .get<LeaveRequest[]>('/attendance/leaves/inbox')
           .then((r) =>
             setInbox(
-              r.data.filter((l) =>
-                isFinalApprover
-                  ? l.status === 'Pending' || l.status === 'Manager Approved'
-                  : l.status === 'Pending'
-              )
+              r.data.filter((l) => {
+                if (l.status === 'Approved' || l.status === 'Rejected') return false;
+                if (l.status === 'Pending') return true;
+                if (l.status === 'Manager Approved') return canFinalSanction;
+                return false;
+              })
             )
           )
       );
@@ -235,19 +243,21 @@ export default function LeaveStipend() {
     el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [focusLeaveId, tab, inbox, leaves]);
 
-  const isFinalApprover = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+  const canFinalSanction = canSanctionLeaveFinally(user?.email);
 
   const inboxRows = useMemo(() => {
-    const actionable = (l: LeaveRequest) =>
-      isFinalApprover
-        ? l.status === 'Pending' || l.status === 'Manager Approved'
-        : l.status === 'Pending';
+    const actionable = (l: LeaveRequest) => {
+      if (l.status === 'Approved' || l.status === 'Rejected') return false;
+      if (l.status === 'Pending') return true;
+      if (l.status === 'Manager Approved') return canFinalSanction;
+      return false;
+    };
     const base = inbox.length ? inbox : leaves.filter(actionable);
     if (!focusLeaveId) return base;
     if (base.some((l) => l.id === focusLeaveId)) return base;
     const focused = leaves.find((l) => l.id === focusLeaveId);
     return focused && actionable(focused) ? [focused, ...base] : base;
-  }, [inbox, leaves, focusLeaveId, isFinalApprover]);
+  }, [inbox, leaves, focusLeaveId, canFinalSanction]);
 
   const selectTab = (k: LeaveTab) => {
     setTab(k);
@@ -594,14 +604,14 @@ export default function LeaveStipend() {
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <Button type="button" variant="success" size="sm" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</Button>
                     )}
-                    {(l.status === 'Manager Approved' || l.status === 'Pending') && isFinalApprover && (
+                    {(l.status === 'Manager Approved' || l.status === 'Pending') && canFinalSanction && (
                       <Button type="button" size="sm" variant="success" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</Button>
                     )}
                     {l.status === 'Pending' &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
                     )}
-                    {l.status === 'Manager Approved' && isFinalApprover && (
+                    {l.status === 'Manager Approved' && canFinalSanction && (
                       <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
                     )}
                   </td>

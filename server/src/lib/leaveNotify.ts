@@ -13,22 +13,32 @@ export const ARTICLE_LEAVE_RECIPIENTS = [
   'dhara@mkdandeker.com',
 ] as const;
 
-export const MANAGER_LEAVE_RECIPIENTS = [
-  'poosaidurai@mkdandeker.com',
+/** Final leave sanctioners for Audit Manager / Sr Audit Executive / Staff. */
+export const FINAL_LEAVE_APPROVER_EMAILS = [
   'arunmehta@mkdandeker.com',
-  'deepikat@mkdandeker.com',
-  'nirmal@mkdandeker.com',
-  'anandgupta@mkdandeker.com',
-  'shanmugam@mkdandeker.com',
-  'dhara@mkdandeker.com',
+  'poosaidurai@mkdandeker.com',
 ] as const;
+
+/** @deprecated alias — same as FINAL_LEAVE_APPROVER_EMAILS */
+export const MANAGER_LEAVE_RECIPIENTS = FINAL_LEAVE_APPROVER_EMAILS;
 
 export type LeaveApplicantGrade = {
   hierarchyCode?: string | null;
   hierarchyTitle?: string | null;
   designation?: string | null;
   hasArticleship?: boolean;
+  role?: string | null;
 };
+
+export function normalizeLeaveEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function isFinalLeaveApproverEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const e = normalizeLeaveEmail(email);
+  return (FINAL_LEAVE_APPROVER_EMAILS as readonly string[]).includes(e);
+}
 
 function textOf(applicant: LeaveApplicantGrade): string {
   return `${applicant.hierarchyTitle || ''} ${applicant.designation || ''}`.toLowerCase();
@@ -49,9 +59,10 @@ export function isArticleAssistant(applicant: LeaveApplicantGrade): boolean {
   return /article/.test(textOf(applicant));
 }
 
-/** Article assistants and senior executives / audit managers. Everyone else gets no list. */
+/** Audit Manager / Sr AE → two partners. Article assistants → article list. Other Staff → two partners. */
 export function leaveRecipientsFor(applicant: LeaveApplicantGrade): readonly string[] | null {
   if (isSeniorOrAuditManager(applicant)) return MANAGER_LEAVE_RECIPIENTS;
   if (isArticleAssistant(applicant)) return ARTICLE_LEAVE_RECIPIENTS;
+  if (applicant.role === 'Staff') return MANAGER_LEAVE_RECIPIENTS;
   return null;
 }

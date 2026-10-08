@@ -33,6 +33,7 @@ import {
 } from '../lib/articleAttendanceCompute.js';
 import { clientIp } from '../lib/clientIp.js';
 import { sendEmail } from '../lib/emailService.js';
+import { listLookupValues, LOOKUP_CLIENT } from '../lib/hrLookups.js';
 import { leaveRecipientsFor } from '../lib/leaveNotify.js';
 import { leaveMailActionButtonsHtml } from '../lib/leaveMailAction.js';
 import { applyLeaveDecision, canManagerApproveLeave } from '../lib/leaveDecision.js';
@@ -512,6 +513,22 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
+    let canonicalClient: string | null = null;
+    if (place === PLACE_CLIENT) {
+      const firmId = req.user!.firmId;
+      if (!firmId) {
+        res.status(400).json({ error: 'Your account is not linked to a firm' });
+        return;
+      }
+      const allowed = await listLookupValues(firmId, LOOKUP_CLIENT);
+      canonicalClient =
+        allowed.find((name) => name.trim().toLowerCase() === body.clientName!.trim().toLowerCase()) || null;
+      if (!canonicalClient) {
+        res.status(400).json({ error: 'Select a client from the firm list' });
+        return;
+      }
+    }
+
     const lateBand = isArticle ? classifyLateBand(now) : 'on_time';
     const status = isArticle ? statusFromLateBand(lateBand) : 'present';
 
@@ -524,7 +541,7 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
       ipAddress: checkInIp,
       officeId: officeId ?? null,
       location: place,
-      clientName: place === PLACE_CLIENT ? body.clientName!.trim() : null,
+      clientName: canonicalClient,
       lateBand: isArticle ? lateBand : null,
       status,
       wfhApprovedById: wfhApprovedById ?? null,
@@ -867,6 +884,7 @@ async function notifyLeaveSubmitted(
       firstName: true,
       lastName: true,
       email: true,
+      role: true,
       designation: true,
       firmId: true,
       hierarchyLevel: { select: { code: true, title: true } },
@@ -879,6 +897,7 @@ async function notifyLeaveSubmitted(
     hierarchyTitle: applicant.hierarchyLevel?.title,
     designation: applicant.designation,
     hasArticleship: Boolean(applicant.articleship),
+    role: applicant.role,
   });
   if (!recipients?.length) return;
 
@@ -1020,6 +1039,7 @@ router.patch('/leaves/:id', async (req: AuthRequest, res: Response): Promise<voi
       actorId: req.user!.id,
       actorRole: req.user!.role,
       actorFirmId: req.user!.firmId,
+      actorEmail: req.user!.email,
       status: body.status,
       rejectionReason: body.rejectionReason,
     });

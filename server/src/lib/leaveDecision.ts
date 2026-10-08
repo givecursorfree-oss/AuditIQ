@@ -1,4 +1,5 @@
 import prisma from './prisma.js';
+import { isFinalLeaveApproverEmail } from './leaveNotify.js';
 
 export function canManagerApproveLeave(role: string): boolean {
   return ['Manager', 'Partner', 'Admin', 'HR'].includes(role);
@@ -6,6 +7,11 @@ export function canManagerApproveLeave(role: string): boolean {
 
 export function canFinalApproveLeave(role: string): boolean {
   return ['Partner', 'Admin', 'HR'].includes(role);
+}
+
+/** Final Sanction / Reject after manager approval — only named partners. */
+export function canFinalSanctionLeave(role: string, email?: string | null): boolean {
+  return canFinalApproveLeave(role) && isFinalLeaveApproverEmail(email);
 }
 
 export type LeaveDecisionStatus = 'Manager Approved' | 'Approved' | 'Rejected';
@@ -17,14 +23,15 @@ export type LeaveDecisionResult =
 /** Resolve what "Approve" from email should do for this actor and leave state. */
 export function resolveEmailApproveStatus(
   role: string,
-  leaveStatus: string
+  leaveStatus: string,
+  actorEmail?: string | null
 ): LeaveDecisionStatus | null {
   if (leaveStatus === 'Pending') {
-    if (canFinalApproveLeave(role)) return 'Approved';
+    if (canFinalSanctionLeave(role, actorEmail)) return 'Approved';
     if (canManagerApproveLeave(role)) return 'Manager Approved';
     return null;
   }
-  if (leaveStatus === 'Manager Approved' && canFinalApproveLeave(role)) return 'Approved';
+  if (leaveStatus === 'Manager Approved' && canFinalSanctionLeave(role, actorEmail)) return 'Approved';
   return null;
 }
 
@@ -33,6 +40,7 @@ export async function applyLeaveDecision(input: {
   actorId: string;
   actorRole: string;
   actorFirmId: string | null;
+  actorEmail?: string | null;
   status: LeaveDecisionStatus;
   rejectionReason?: string;
 }): Promise<LeaveDecisionResult> {
@@ -63,8 +71,12 @@ export async function applyLeaveDecision(input: {
     data.managerApprovedAt = new Date();
     data.managerApprovedBy = input.actorId;
   } else if (input.status === 'Approved') {
-    if (!canFinalApproveLeave(input.actorRole)) {
-      return { ok: false, status: 403, error: 'Only Partner, Admin, or HR can grant final approval' };
+    if (!canFinalSanctionLeave(input.actorRole, input.actorEmail)) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'Only designated partners can grant final leave sanction',
+      };
     }
     if (leave.status !== 'Manager Approved' && leave.status !== 'Pending') {
       return { ok: false, status: 400, error: `Cannot approve a leave that is ${leave.status}` };
@@ -90,9 +102,9 @@ export async function applyLeaveDecision(input: {
     if (leave.status === 'Approved' || leave.status === 'Rejected') {
       return { ok: false, status: 400, error: `Leave is already ${leave.status}` };
     }
-    // After manager approval, only Partner/Admin/HR may reject (managers are done)
-    if (leave.status === 'Manager Approved' && !canFinalApproveLeave(input.actorRole)) {
-      return { ok: false, status: 403, error: 'Leave is awaiting Partner/HR sanction' };
+    // After manager approval, only designated partners may reject
+    if (leave.status === 'Manager Approved' && !canFinalSanctionLeave(input.actorRole, input.actorEmail)) {
+      return { ok: false, status: 403, error: 'Leave is awaiting partner sanction' };
     }
     data.status = 'Rejected';
     data.rejectedAt = new Date();

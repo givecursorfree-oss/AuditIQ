@@ -154,7 +154,7 @@ router.get('/action', async (req: Request, res: Response): Promise<void> => {
     }
 
     if (payload.action === 'approve') {
-      const status = resolveEmailApproveStatus(actor.role, leave.status);
+      const status = resolveEmailApproveStatus(actor.role, leave.status, actor.email);
       if (!status) {
         await establishSession(req, res, actor.id);
         redirectLeavePage(res, { leaveId: leave.id, mailError: 'cannot-approve' });
@@ -165,6 +165,7 @@ router.get('/action', async (req: Request, res: Response): Promise<void> => {
         actorId: actor.id,
         actorRole: actor.role,
         actorFirmId: actor.firmId,
+        actorEmail: actor.email,
         status,
       });
       if (!result.ok) {
@@ -186,6 +187,7 @@ router.get('/action', async (req: Request, res: Response): Promise<void> => {
       actorId: actor.id,
       actorRole: actor.role,
       actorFirmId: actor.firmId,
+      actorEmail: actor.email,
       status: 'Rejected',
     });
     if (!result.ok) {
