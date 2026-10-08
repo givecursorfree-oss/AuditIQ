@@ -274,7 +274,14 @@ export async function stageEngagementImportRows(opts: {
         matchedClientId = match.id;
         matchedClientName = match.name;
         clientAction = 'use_existing';
-        if (managerClientIds && !managerClientIds.has(match.id)) {
+        if (
+          !managerMayImportExistingClient({
+            managerClientIds,
+            clientId: match.id,
+            actorId: opts.actorId,
+            rowManagerId: manager?.id ?? null,
+          })
+        ) {
           errors.push('Manager may only import for assigned clients (or create a new client)');
         }
       } else {
@@ -318,12 +325,29 @@ export async function stageEngagementImportRows(opts: {
   });
 }
 
+/** Non-Manager actors skip the gate. Managers may use a client they already work on, or name themselves as row manager. */
+export function managerMayImportExistingClient(opts: {
+  managerClientIds: Set<string> | null;
+  clientId: string;
+  actorId: string;
+  rowManagerId: string | null;
+}): boolean {
+  if (!opts.managerClientIds) return true;
+  if (opts.managerClientIds.has(opts.clientId)) return true;
+  if (opts.rowManagerId && opts.rowManagerId === opts.actorId) return true;
+  return false;
+}
+
 async function clientIdsAssignedToManager(firmId: string, managerId: string): Promise<Set<string>> {
   const rows = await prisma.engagement.findMany({
     where: {
       firmId,
       archivedAt: null,
-      OR: [{ managerId }, { members: { some: { userId: managerId, teamRole: 'Manager' } } }],
+      OR: [
+        { managerId },
+        { partnerInChargeId: managerId },
+        { members: { some: { userId: managerId } } },
+      ],
     },
     select: { clientId: true },
   });
@@ -393,7 +417,15 @@ export async function confirmEngagementImport(opts: {
           details: { source: 'ENGAGEMENT_IMPORT', name: client.name },
           ipAddress: opts.ipAddress,
         });
-      } else if (clientId && managerClientIds && !managerClientIds.has(clientId)) {
+      } else if (
+        clientId &&
+        !managerMayImportExistingClient({
+          managerClientIds,
+          clientId,
+          actorId: opts.actorId,
+          rowManagerId: row.managerId,
+        })
+      ) {
         failed.push({ rowIndex: row.rowIndex, error: 'Not assigned to this client' });
         continue;
       }
