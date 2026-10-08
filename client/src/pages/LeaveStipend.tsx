@@ -111,6 +111,7 @@ export default function LeaveStipend() {
   });
 
   const [focusLeaveId, setFocusLeaveId] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
 
   const visibleTabs = useMemo(() => {
     const tabs: { k: LeaveTab; l: string }[] = [];
@@ -148,7 +149,13 @@ export default function LeaveStipend() {
     }
     if (canManage) {
       tasks.push(
-        api.get<LeaveRequest[]>('/attendance/leaves/inbox?status=Pending').then((r) => setInbox(r.data))
+        api
+          .get<LeaveRequest[]>('/attendance/leaves/inbox')
+          .then((r) =>
+            setInbox(
+              r.data.filter((l) => l.status === 'Pending' || l.status === 'Manager Approved')
+            )
+          )
       );
     }
     // Each panel degrades independently; surface only if every call fails
@@ -239,6 +246,8 @@ export default function LeaveStipend() {
   };
 
   async function applyLeave() {
+    if (applying) return;
+    setApplying(true);
     try {
       await api.post('/attendance/leaves', {
         ...applyForm,
@@ -255,6 +264,8 @@ export default function LeaveStipend() {
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
       await appAlert({ title: 'Could not apply', message: err?.response?.data?.error || 'Failed' });
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -487,7 +498,9 @@ export default function LeaveStipend() {
                 <span className="text-sm text-muted-foreground">Reason</span>
                 <textarea className="input-field mt-1 w-full" rows={2} value={applyForm.reason} onChange={(e) => setApplyForm({ ...applyForm, reason: e.target.value })} />
               </label>
-              <Button type="button" onClick={() => void applyLeave()}>Submit application</Button>
+              <Button type="button" disabled={applying} onClick={() => void applyLeave()}>
+                {applying ? 'Submitting…' : 'Submit application'}
+              </Button>
             </div>
           </PanelCard>
 

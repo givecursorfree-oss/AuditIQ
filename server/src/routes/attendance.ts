@@ -947,22 +947,52 @@ router.post('/leaves', async (req: AuthRequest, res: Response): Promise<void> =>
       return;
     }
 
-    const leave = await prisma.leaveRequest.create({
-      data: {
-        userId: req.user!.id,
-        fromDate: from,
-        toDate: to,
-        days: span.days,
-        halfDay: Boolean(body.halfDay),
-        type: body.type,
-        examLevel: body.examLevel,
-        reason: body.reason,
-      },
-    });
-    await notifyLeaveSubmitted(req.user!.id, leave).catch((err: unknown) => {
-      logger.error('Leave notification email failed', { error: (err as Error).message, leaveId: leave.id });
-    });
-    res.status(201).json(leave);
+    // Serialize apply-per-user so concurrent clicks cannot insert duplicate rows
+    const lockKey = `leave_apply_${req.user!.id}`.slice(0, 64);
+    const lockRows = await prisma.$queryRaw<Array<{ got: number | bigint | null }>>`
+      SELECT GET_LOCK(${lockKey}, 10) AS got
+    `;
+    if (!Number(lockRows[0]?.got)) {
+      res.status(503).json({ error: 'Could not submit leave right now. Please try again.' });
+      return;
+    }
+
+    try {
+      // Block overlapping active leave (double-click / re-apply). Rejected can re-apply.
+      const overlap = await prisma.leaveRequest.findFirst({
+        where: {
+          userId: req.user!.id,
+          status: { in: ['Pending', 'Manager Approved', 'Approved'] },
+          fromDate: { lte: to },
+          toDate: { gte: from },
+        },
+        select: { id: true },
+      });
+      if (overlap) {
+        res.status(409).json({ error: 'You already have a leave request covering these dates' });
+        return;
+      }
+
+      const leave = await prisma.leaveRequest.create({
+        data: {
+          userId: req.user!.id,
+          fromDate: from,
+          toDate: to,
+          days: span.days,
+          halfDay: Boolean(body.halfDay),
+          type: body.type,
+          examLevel: body.examLevel,
+          reason: body.reason,
+        },
+      });
+      // Respond before email — awaiting notify made slow submits look stuck and caused multi-click duplicates
+      void notifyLeaveSubmitted(req.user!.id, leave).catch((err: unknown) => {
+        logger.error('Leave notification email failed', { error: (err as Error).message, leaveId: leave.id });
+      });
+      res.status(201).json(leave);
+    } finally {
+      await prisma.$executeRaw`SELECT RELEASE_LOCK(${lockKey})`;
+    }
   } catch (err) {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: 'Validation failed', details: err.errors });
