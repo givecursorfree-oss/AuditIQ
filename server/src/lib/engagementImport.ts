@@ -423,7 +423,7 @@ export async function confirmEngagementImport(opts: {
           managerClientIds,
           clientId,
           actorId: opts.actorId,
-          rowManagerId: row.managerId,
+          rowManagerId: row.managerId ?? null,
         })
       ) {
         failed.push({ rowIndex: row.rowIndex, error: 'Not assigned to this client' });
