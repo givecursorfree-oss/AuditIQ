@@ -90,6 +90,10 @@ export async function applyLeaveDecision(input: {
     if (leave.status === 'Approved' || leave.status === 'Rejected') {
       return { ok: false, status: 400, error: `Leave is already ${leave.status}` };
     }
+    // After manager approval, only Partner/Admin/HR may reject (managers are done)
+    if (leave.status === 'Manager Approved' && !canFinalApproveLeave(input.actorRole)) {
+      return { ok: false, status: 403, error: 'Leave is awaiting Partner/HR sanction' };
+    }
     data.status = 'Rejected';
     data.rejectedAt = new Date();
     data.rejectedBy = input.actorId;

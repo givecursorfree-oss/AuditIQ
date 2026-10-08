@@ -148,12 +148,17 @@ export default function LeaveStipend() {
       );
     }
     if (canManage) {
+      const isFinalApprover = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
       tasks.push(
         api
           .get<LeaveRequest[]>('/attendance/leaves/inbox')
           .then((r) =>
             setInbox(
-              r.data.filter((l) => l.status === 'Pending' || l.status === 'Manager Approved')
+              r.data.filter((l) =>
+                isFinalApprover
+                  ? l.status === 'Pending' || l.status === 'Manager Approved'
+                  : l.status === 'Pending'
+              )
             )
           )
       );
@@ -230,15 +235,19 @@ export default function LeaveStipend() {
     el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [focusLeaveId, tab, inbox, leaves]);
 
+  const isFinalApprover = ['Partner', 'Admin', 'HR'].includes(user?.role || '');
+
   const inboxRows = useMemo(() => {
-    const base = inbox.length
-      ? inbox
-      : leaves.filter((l) => l.status === 'Pending' || l.status === 'Manager Approved');
+    const actionable = (l: LeaveRequest) =>
+      isFinalApprover
+        ? l.status === 'Pending' || l.status === 'Manager Approved'
+        : l.status === 'Pending';
+    const base = inbox.length ? inbox : leaves.filter(actionable);
     if (!focusLeaveId) return base;
     if (base.some((l) => l.id === focusLeaveId)) return base;
     const focused = leaves.find((l) => l.id === focusLeaveId);
-    return focused ? [focused, ...base] : base;
-  }, [inbox, leaves, focusLeaveId]);
+    return focused && actionable(focused) ? [focused, ...base] : base;
+  }, [inbox, leaves, focusLeaveId, isFinalApprover]);
 
   const selectTab = (k: LeaveTab) => {
     setTab(k);
@@ -585,12 +594,14 @@ export default function LeaveStipend() {
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <Button type="button" variant="success" size="sm" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</Button>
                     )}
-                    {(l.status === 'Manager Approved' || l.status === 'Pending') &&
-                      ['Partner', 'Admin', 'HR'].includes(user?.role || '') && (
+                    {(l.status === 'Manager Approved' || l.status === 'Pending') && isFinalApprover && (
                       <Button type="button" size="sm" variant="success" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</Button>
                     )}
-                    {!['Approved', 'Rejected'].includes(l.status) &&
+                    {l.status === 'Pending' &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
+                      <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
+                    )}
+                    {l.status === 'Manager Approved' && isFinalApprover && (
                       <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
                     )}
                   </td>
