@@ -59,7 +59,8 @@ router.get('/roles', authorize('Partner', 'Admin', 'HR'), async (req: AuthReques
       createdAt: r.createdAt,
     }));
 
-    const hidden = req.user!.role === 'HR' ? ['Partner', 'Admin', 'Client'] : [];
+    // HR may assign Partner when adding staff; Admin stays Partner/Admin-only
+    const hidden = req.user!.role === 'HR' ? ['Admin', 'Client'] : [];
     res.json(result.filter((r) => r.isActive && !hidden.includes(r.name)));
   } catch (err) {
     logger.error('Fetch roles error:', err);
@@ -384,8 +385,8 @@ router.put('/users/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRe
         res.status(400).json({ error: 'Invalid role ID' });
         return;
       }
-      if (req.user!.role === 'HR' && ['Partner', 'Admin'].includes(role.name)) {
-        res.status(403).json({ error: 'HR cannot assign Partner or Admin roles' });
+      if (req.user!.role === 'HR' && role.name === 'Admin') {
+        res.status(403).json({ error: 'HR cannot assign Admin roles' });
         return;
       }
       legacyRole = role.name;
@@ -395,8 +396,8 @@ router.put('/users/:id', authorize('Partner', 'Admin', 'HR'), async (req: AuthRe
       ? (data.firstName[0] + data.lastName[0]).toUpperCase()
       : undefined;
 
-    if (legacyRole === 'Partner' && req.user!.role !== 'Partner') {
-      res.status(403).json({ error: 'Only Partners can assign the Partner role' });
+    if (legacyRole === 'Admin' && !['Partner', 'Admin'].includes(req.user!.role)) {
+      res.status(403).json({ error: 'Only Partners or Admins can assign the Admin role' });
       return;
     }
     if (id === req.user!.id && legacyRole && legacyRole !== existing.role) {
@@ -497,12 +498,12 @@ router.post('/users', authorize('Partner', 'Admin', 'HR'), async (req: AuthReque
       res.status(400).json({ error: 'Invalid role ID' });
       return;
     }
-    if (role.name === 'Partner' && req.user!.role !== 'Partner') {
-      res.status(403).json({ error: 'Only Partners can create Partner accounts' });
+    if (role.name === 'Admin' && !['Partner', 'Admin'].includes(req.user!.role)) {
+      res.status(403).json({ error: 'Only Partners or Admins can create Admin accounts' });
       return;
     }
-    if (req.user!.role === 'HR' && ['Partner', 'Admin'].includes(role.name)) {
-      res.status(403).json({ error: 'HR cannot create Partner or Admin accounts' });
+    if (req.user!.role === 'HR' && role.name === 'Admin') {
+      res.status(403).json({ error: 'HR cannot create Admin accounts' });
       return;
     }
 

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Users, MagnifyingGlass as Search, Plus, PencilSimple as Edit, Trash as Trash2, X, UploadSimple as Upload, DownloadSimple as Download, CaretRight as ChevronRight,
-  Phone, Envelope as Mail, MapPin, CreditCard, Buildings as Building, FileText, CurrencyDollar as DollarSign, Shield
+  Phone, Envelope as Mail, MapPin, CreditCard, Buildings as Building, FileText, CurrencyDollar as DollarSign, Shield,
+  Eye, EyeSlash as EyeOff,
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import { appAlert, appConfirm } from '../context/AppDialogContext';
@@ -164,6 +165,7 @@ export default function Employees() {
     designation: '',
   });
   const [creating, setCreating] = useState(false);
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
 
   const searchRef = useRef(search);
   searchRef.current = search;
@@ -754,14 +756,26 @@ export default function Employees() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp-password">Password</Label>
-                <Input
-                  id="emp-password"
-                  type="password"
-                  value={createForm.password}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
-                  required
-                  minLength={8}
-                />
+                <div className="relative">
+                  <Input
+                    id="emp-password"
+                    type={showCreatePassword ? 'text' : 'password'}
+                    className="pr-10"
+                    value={createForm.password}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, password: e.target.value }))}
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                    aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowCreatePassword((v) => !v)}
+                  >
+                    {showCreatePassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="emp-role">Role</Label>
