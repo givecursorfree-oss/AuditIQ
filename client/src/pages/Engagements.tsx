@@ -497,7 +497,11 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
   const [creatingClient, setCreatingClient] = useState(false);
 
   useEffect(() => {
-    api.get('/clients').then(({ data }) => setClients(data.clients || [])).catch(() => {});
+    // Default /clients is page=1&limit=20 — that truncated the Select client list to early A-names
+    api
+      .get<{ clients?: { id: string; name: string }[] }>('/clients?limit=2000')
+      .then(({ data }) => setClients(data.clients || []))
+      .catch(() => {});
     api
       .get<{
         staff?: { id: string; firstName: string; lastName: string; role: string; email?: string }[];
