@@ -155,20 +155,10 @@ export default function LeaveStipend() {
       );
     }
     if (canManage) {
-      const canFinalSanction = canSanctionLeaveFinally(user?.email);
       tasks.push(
         api
           .get<LeaveRequest[]>('/attendance/leaves/inbox')
-          .then((r) =>
-            setInbox(
-              r.data.filter((l) => {
-                if (l.status === 'Approved' || l.status === 'Rejected') return false;
-                if (l.status === 'Pending') return true;
-                if (l.status === 'Manager Approved') return canFinalSanction;
-                return false;
-              })
-            )
-          )
+          .then((r) => setInbox(r.data.filter((l) => l.status === 'Pending')))
       );
     }
     // Each panel degrades independently; surface only if every call fails
@@ -246,19 +236,14 @@ export default function LeaveStipend() {
   const canFinalSanction = canSanctionLeaveFinally(user?.email);
 
   const inboxRows = useMemo(() => {
-    const actionable = (l: LeaveRequest) => {
-      if (l.status === 'Approved' || l.status === 'Rejected') return false;
-      if (l.status === 'Pending') return true;
-      if (l.status === 'Manager Approved') return canFinalSanction;
-      return false;
-    };
-    // Never fall back to `leaves` when inbox is empty — that re-showed Manager Approved + Reject for managers
+    // Only Pending needs action. Manager Approved / Approved / Rejected: no Sanction/Reject buttons.
+    const actionable = (l: LeaveRequest) => l.status === 'Pending';
     const base = canManage ? inbox.filter(actionable) : leaves.filter(actionable);
     if (!focusLeaveId) return base;
     if (base.some((l) => l.id === focusLeaveId)) return base;
     const focused = (canManage ? inbox : leaves).find((l) => l.id === focusLeaveId);
     return focused && actionable(focused) ? [focused, ...base] : base;
-  }, [inbox, leaves, focusLeaveId, canFinalSanction, canManage]);
+  }, [inbox, leaves, focusLeaveId, canManage]);
 
   const selectTab = (k: LeaveTab) => {
     setTab(k);
@@ -602,17 +587,15 @@ export default function LeaveStipend() {
                   <td><ApprovalStatusBadge status={l.status} /></td>
                   <td className="space-x-1 whitespace-nowrap">
                     {l.status === 'Pending' &&
+                      !canFinalSanction &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
                       <Button type="button" variant="success" size="sm" onClick={() => void approveLeave(l.id, 'Manager Approved')}>Approve (Mgr)</Button>
                     )}
-                    {(l.status === 'Manager Approved' || l.status === 'Pending') && canFinalSanction && (
+                    {l.status === 'Pending' && canFinalSanction && (
                       <Button type="button" size="sm" variant="success" onClick={() => void approveLeave(l.id, 'Approved')}>Sanction</Button>
                     )}
                     {l.status === 'Pending' &&
                       ['Manager', 'Partner', 'Admin', 'HR'].includes(user?.role || '') && (
-                      <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
-                    )}
-                    {l.status === 'Manager Approved' && canFinalSanction && (
                       <Button type="button" variant="destructive" size="sm" onClick={() => void approveLeave(l.id, 'Rejected')}>Reject</Button>
                     )}
                   </td>

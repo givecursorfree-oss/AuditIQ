@@ -34,7 +34,7 @@ import {
 import { clientIp } from '../lib/clientIp.js';
 import { sendEmail } from '../lib/emailService.js';
 import { listLookupValues, LOOKUP_CLIENT } from '../lib/hrLookups.js';
-import { isFinalLeaveApproverEmail, leaveRecipientsFor } from '../lib/leaveNotify.js';
+import { leaveRecipientsFor } from '../lib/leaveNotify.js';
 import { leaveMailActionButtonsHtml } from '../lib/leaveMailAction.js';
 import { applyLeaveDecision, canManagerApproveLeave } from '../lib/leaveDecision.js';
 import { leaveRequestDays } from '../lib/leaveRequestDays.js';
@@ -828,13 +828,11 @@ router.get('/leaves/inbox', async (req: AuthRequest, res: Response): Promise<voi
     const where: Record<string, unknown> = {
       user: { firmId: req.user!.firmId },
     };
+    // Actionable inbox is Pending only — Manager Approved has no Sanction/Reject in UI
     if (status) {
       where.status = status;
-    } else if (!isFinalLeaveApproverEmail(req.user!.email)) {
-      // Managers / other partners: only Pending — Manager Approved is for designated sanctioners
-      where.status = 'Pending';
     } else {
-      where.status = { in: ['Pending', 'Manager Approved'] };
+      where.status = 'Pending';
     }
 
     const leaves = await prisma.leaveRequest.findMany({
