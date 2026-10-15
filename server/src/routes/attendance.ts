@@ -824,15 +824,13 @@ router.get('/leaves/inbox', async (req: AuthRequest, res: Response): Promise<voi
       res.status(403).json({ error: 'Insufficient permissions' });
       return;
     }
-    const status = req.query.status ? String(req.query.status) : undefined;
+    const status = req.query.status ? String(req.query.status) : 'Pending';
     const where: Record<string, unknown> = {
       user: { firmId: req.user!.firmId },
     };
-    // Actionable inbox is Pending only — Manager Approved has no Sanction/Reject in UI
-    if (status) {
+    // status=all → history; specific status → filter; default Pending (action queue)
+    if (status !== 'all') {
       where.status = status;
-    } else {
-      where.status = 'Pending';
     }
 
     const leaves = await prisma.leaveRequest.findMany({

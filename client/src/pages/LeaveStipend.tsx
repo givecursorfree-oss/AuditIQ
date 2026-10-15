@@ -119,6 +119,9 @@ export default function LeaveStipend() {
 
   const [focusLeaveId, setFocusLeaveId] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [inboxView, setInboxView] = useState<'Pending' | 'Manager Approved' | 'Approved' | 'Rejected' | 'all'>(
+    'Pending'
+  );
 
   const visibleTabs = useMemo(() => {
     const tabs: { k: LeaveTab; l: string }[] = [];
@@ -155,10 +158,9 @@ export default function LeaveStipend() {
       );
     }
     if (canManage) {
+      const q = inboxView === 'all' ? 'all' : encodeURIComponent(inboxView);
       tasks.push(
-        api
-          .get<LeaveRequest[]>('/attendance/leaves/inbox')
-          .then((r) => setInbox(r.data.filter((l) => l.status === 'Pending')))
+        api.get<LeaveRequest[]>(`/attendance/leaves/inbox?status=${q}`).then((r) => setInbox(r.data))
       );
     }
     // Each panel degrades independently; surface only if every call fails
@@ -169,7 +171,7 @@ export default function LeaveStipend() {
     }
   }
 
-  useEffect(() => { void load(); }, [month, canManage, canManageHolidays]);
+  useEffect(() => { void load(); }, [month, canManage, canManageHolidays, inboxView]);
 
   // Real-time calendar: refresh while Calendar tab is open
   useEffect(() => {
@@ -189,6 +191,7 @@ export default function LeaveStipend() {
     const q = ((raw === 'manage' ? 'inbox' : raw) as LeaveTab | null);
     if (leaveId && canManage) {
       setTab('inbox');
+      setInboxView('all');
       setFocusLeaveId(leaveId);
       return;
     }
@@ -236,13 +239,11 @@ export default function LeaveStipend() {
   const canFinalSanction = canSanctionLeaveFinally(user?.email);
 
   const inboxRows = useMemo(() => {
-    // Only Pending needs action. Manager Approved / Approved / Rejected: no Sanction/Reject buttons.
-    const actionable = (l: LeaveRequest) => l.status === 'Pending';
-    const base = canManage ? inbox.filter(actionable) : leaves.filter(actionable);
+    const base = canManage ? inbox : leaves.filter((l) => l.status === 'Pending');
     if (!focusLeaveId) return base;
     if (base.some((l) => l.id === focusLeaveId)) return base;
     const focused = (canManage ? inbox : leaves).find((l) => l.id === focusLeaveId);
-    return focused && actionable(focused) ? [focused, ...base] : base;
+    return focused ? [focused, ...base] : base;
   }, [inbox, leaves, focusLeaveId, canManage]);
 
   const selectTab = (k: LeaveTab) => {
@@ -558,7 +559,24 @@ export default function LeaveStipend() {
       )}
 
       {tab === 'inbox' && canManage && (
-        <PanelCard title="Leave inbox" bodyClassName="p-0">
+        <PanelCard
+          title="Leave inbox"
+          bodyClassName="p-0"
+          action={
+            <select
+              className="input-field w-auto"
+              aria-label="Leave status filter"
+              value={inboxView}
+              onChange={(e) => setInboxView(e.target.value as typeof inboxView)}
+            >
+              <option value="Pending">Pending</option>
+              <option value="Manager Approved">Manager approved</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+              <option value="all">All leaves</option>
+            </select>
+          }
+        >
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -601,8 +619,21 @@ export default function LeaveStipend() {
                   </td>
                 </tr>
               ))}
-              {inbox.length === 0 && leaves.filter((l) => l.status === 'Pending').length === 0 && (
-                <tr><td colSpan={7}><EmptyState title="No leaves awaiting sanction" description="Leave requests needing sanction will show here." illustration="person-wait" illustrationSize="sm" /></td></tr>
+              {inboxRows.length === 0 && (
+                <tr>
+                  <td colSpan={7}>
+                    <EmptyState
+                      title={inboxView === 'Pending' ? 'No leaves awaiting sanction' : 'No leaves in this view'}
+                      description={
+                        inboxView === 'Pending'
+                          ? 'Leave requests needing sanction will show here.'
+                          : 'No leave requests match this filter.'
+                      }
+                      illustration="person-wait"
+                      illustrationSize="sm"
+                    />
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
