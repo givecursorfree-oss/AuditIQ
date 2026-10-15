@@ -176,6 +176,7 @@ model User {
   engagementsImported      Engagement[]       @relation("EngagementImportedBy")
   engagementsArchived      Engagement[]       @relation("EngagementArchivedBy")
   engagementsRestored      Engagement[]       @relation("EngagementRestoredBy")
+  engagementDriveFoldersLinked EngagementDriveFolder[] @relation("EngagementDriveFolderLinker")
 
   @@index([firmId])
   @@index([roleId])
@@ -388,6 +389,7 @@ model Engagement {
   expenseClaims    ExpenseClaim[]
   expenseClaimParticipants ExpenseClaimParticipant[]
   emailThreadMessages EmailThreadMessage[]
+  driveFolders        EngagementDriveFolder[]
 
   @@index([clientId])
   @@index([firmId])
@@ -408,6 +410,30 @@ model Engagement {
   @@index([importedById])
   @@index([archivedById])
   @@index([restoredById])
+}
+
+/// Linked Google Workspace Shared Drive folders for an engagement (Drive is file authority).
+model EngagementDriveFolder {
+  id           String   @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  /// Stable Google Drive folder file ID
+  folderId     String
+  /// Shared Drive ID (same as root folder id for that drive)
+  driveId      String
+  name         String
+  isPrimary    Boolean  @default(false)
+  webViewLink  String?  @db.Text
+  linkedById   String?
+  linkedBy     User?    @relation("EngagementDriveFolderLinker", fields: [linkedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([engagementId, folderId])
+  @@index([engagementId])
+  @@index([driveId])
+  @@index([folderId])
+  @@index([linkedById])
 }
 
 // ─── MKD: Client service requests (before engagement activation) ───

@@ -38,15 +38,16 @@ export const NAV_CATALOG: NavCatalogItem[] = [
   { id: 'engagements', path: '/engagements', label: 'Engagements', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'engagements', action: 'view' } },
   { id: 'engagement-portfolio', path: '/engagements/portfolio', label: 'Portfolio View', group: 'Main', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'engagements', action: 'view' } },
 
-  { id: 'requests', path: '/requests', label: 'Client Requests', group: 'Clients', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'clients', action: 'view' } },
+  // Deferred while Drive-backed collaboration is the primary path (routes remain valid)
+  { id: 'requests', path: '/requests', label: 'Client Requests', group: 'Clients', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'clients', action: 'view' }, sidebarHidden: true },
   { id: 'doc-templates', path: '/document-library', label: 'Letter Templates', group: 'Audit Work', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'documents', action: 'view' }, sidebarHidden: true },
   { id: 'scheduler', path: '/admin/scheduler', label: 'Compliance Scheduler', group: 'Administration', roles: ['Partner', 'Admin'], permission: { module: 'settings', action: 'view' } },
 
   { id: 'clients', path: '/clients', label: 'Client List', group: 'Clients', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'HR'], permission: { module: 'clients', action: 'view' } },
 
   { id: 'workpapers', path: '/workpapers', label: 'Workpapers', group: 'Audit Work', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'workpapers', action: 'view' } },
-  { id: 'documents', path: '/documents', label: 'Document Library', group: 'Audit Work', permission: { module: 'documents', action: 'view' } },
-  { id: 'approvals', path: '/approvals', label: 'Approvals', group: 'Audit Work', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'approvals', action: 'view' } },
+  { id: 'documents', path: '/documents', label: 'Drive workspace', group: 'Audit Work', permission: { module: 'documents', action: 'view' } },
+  { id: 'approvals', path: '/approvals', label: 'Approvals', group: 'Audit Work', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'approvals', action: 'view' }, sidebarHidden: true },
 
   { id: 'time-tracker', path: '/time-tracker', label: 'Time tracker', group: 'Team', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern', 'Accounts', 'HR'], permission: { module: 'attendance', action: 'view' } },
   { id: 'timesheets', path: '/timesheets', label: 'Timesheets', group: 'Team', roles: ['HR'], permission: { module: 'attendance', action: 'view' } },

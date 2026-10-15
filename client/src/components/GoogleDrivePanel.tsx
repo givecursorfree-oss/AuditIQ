@@ -34,6 +34,8 @@ interface Props {
   onSynced: () => void;
 }
 
+const SHARED_DRIVES_ROOT = 'shared-drives-root';
+
 export default function GoogleDrivePanel({
   status,
   canManage,
@@ -42,10 +44,13 @@ export default function GoogleDrivePanel({
   onSynced,
 }: Props) {
   const [engagements, setEngagements] = useState<{ id: string; title: string }[]>([]);
-  const [browseParent, setBrowseParent] = useState('root');
+  const [browseScope, setBrowseScope] = useState<'my' | 'shared'>('shared');
+  const [browseDriveId, setBrowseDriveId] = useState<string | null>(null);
+  const [browseParent, setBrowseParent] = useState(SHARED_DRIVES_ROOT);
   const [browseStack, setBrowseStack] = useState<SyncFolder[]>([]);
   const [browseItems, setBrowseItems] = useState<DriveBrowseItem[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [sharedDriveCount, setSharedDriveCount] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -83,18 +88,19 @@ export default function GoogleDrivePanel({
   }, []);
 
   const loadBrowseItems = useCallback(
-    async (parent: string) => {
+    async (parent: string, driveId: string | null) => {
       if (!status?.connected || !canManage) return;
       setBrowseLoading(true);
       try {
+        const qs = new URLSearchParams({ parent });
+        if (driveId) qs.set('driveId', driveId);
         const { data } = await api.get<{
           items?: DriveBrowseItem[];
           folders: SyncFolder[];
-        }>(`/integrations/google-drive/folders?parent=${encodeURIComponent(parent)}`);
+        }>(`/integrations/google-drive/folders?${qs.toString()}`);
         if (Array.isArray(data.items)) {
           setBrowseItems(data.items);
         } else {
-          // Fallback if older API returns folders only
           setBrowseItems(
             (data.folders || []).map((f) => ({
               id: f.id,
@@ -114,19 +120,33 @@ export default function GoogleDrivePanel({
   );
 
   useEffect(() => {
-    if (status?.connected && canManage) {
-      void loadBrowseItems(browseParent);
-    }
-  }, [status?.connected, canManage, browseParent, loadBrowseItems]);
+    if (!status?.connected || !canManage) return;
+    void loadBrowseItems(browseParent, browseDriveId);
+  }, [status?.connected, canManage, browseParent, browseDriveId, loadBrowseItems]);
+
+  useEffect(() => {
+    if (!status?.connected || !canManage) return;
+    api
+      .get<{ count: number }>('/integrations/google-drive/drives')
+      .then(({ data }) => setSharedDriveCount(data.count))
+      .catch(() => setSharedDriveCount(null));
+  }, [status?.connected, canManage]);
 
   // Live refresh while panel is open (Drive listing, not Document Library import)
   useEffect(() => {
     if (!status?.connected || !canManage) return;
     const id = window.setInterval(() => {
-      void loadBrowseItems(browseParent);
+      void loadBrowseItems(browseParent, browseDriveId);
     }, 15_000);
     return () => window.clearInterval(id);
-  }, [status?.connected, canManage, browseParent, loadBrowseItems]);
+  }, [status?.connected, canManage, browseParent, browseDriveId, loadBrowseItems]);
+
+  const switchBrowseScope = (scope: 'my' | 'shared') => {
+    setBrowseScope(scope);
+    setBrowseStack([]);
+    setBrowseDriveId(null);
+    setBrowseParent(scope === 'shared' ? SHARED_DRIVES_ROOT : 'root');
+  };
 
   const showMsg = (text: string, tone: 'info' | 'error' | 'success' = 'info') => {
     setMessage(text);
@@ -153,6 +173,13 @@ export default function GoogleDrivePanel({
   };
 
   const openSubfolder = (folder: SyncFolder) => {
+    if (browseParent === SHARED_DRIVES_ROOT) {
+      // Entering a Shared Drive: driveId === root folder id
+      setBrowseDriveId(folder.id);
+      setBrowseStack([folder]);
+      setBrowseParent(folder.id);
+      return;
+    }
     setBrowseStack((s) => [...s, folder]);
     setBrowseParent(folder.id);
   };
@@ -161,8 +188,12 @@ export default function GoogleDrivePanel({
     setBrowseStack((s) => {
       const next = [...s];
       next.pop();
-      const parent = next.length ? next[next.length - 1].id : 'root';
-      setBrowseParent(parent);
+      if (next.length === 0) {
+        setBrowseDriveId(null);
+        setBrowseParent(browseScope === 'shared' ? SHARED_DRIVES_ROOT : 'root');
+      } else {
+        setBrowseParent(next[next.length - 1].id);
+      }
       return next;
     });
   };
@@ -284,19 +315,47 @@ export default function GoogleDrivePanel({
                   </div>
                 )}
 
+                <div className="flex gap-1 mb-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={browseScope === 'my' ? 'default' : 'outline'}
+                    onClick={() => switchBrowseScope('my')}
+                  >
+                    My Drive
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={browseScope === 'shared' ? 'default' : 'outline'}
+                    onClick={() => switchBrowseScope('shared')}
+                  >
+                    Shared drives
+                    {sharedDriveCount != null ? ` (${sharedDriveCount})` : ''}
+                  </Button>
+                </div>
                 <div className="rounded-lg border border-border bg-surface-muted/50 overflow-hidden">
                   <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-foreground-muted">
-                    {browseStack.length > 0 && (
+                    {(browseStack.length > 0 || browseParent === SHARED_DRIVES_ROOT) && browseScope === 'shared' && browseStack.length > 0 && (
+                      <button type="button" onClick={goBrowseBack} className="icon-btn p-1">
+                        <ChevronLeft size={14} />
+                      </button>
+                    )}
+                    {browseScope === 'my' && browseStack.length > 0 && (
                       <button type="button" onClick={goBrowseBack} className="icon-btn p-1">
                         <ChevronLeft size={14} />
                       </button>
                     )}
                     <span className="font-medium text-foreground-secondary flex-1">
-                      {browseStack.length === 0 ? 'My Drive' : browseStack[browseStack.length - 1].name}
+                      {browseStack.length === 0
+                        ? browseScope === 'shared'
+                          ? 'Shared drives'
+                          : 'My Drive'
+                        : browseStack[browseStack.length - 1].name}
                     </span>
                     <button
                       type="button"
-                      onClick={() => void loadBrowseItems(browseParent)}
+                      onClick={() => void loadBrowseItems(browseParent, browseDriveId)}
                       className="icon-btn p-1"
                       aria-label="Refresh"
                       disabled={browseLoading}

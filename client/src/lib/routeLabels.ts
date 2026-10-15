@@ -12,7 +12,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/admin/scheduler': 'Compliance Scheduler',
   '/clients': 'Clients',
   '/workpapers': 'Workpapers',
-  '/documents': 'Document Library',
+  '/documents': 'Drive workspace',
   '/approvals': 'Approvals',
   '/time-tracker': 'Time tracker',
   '/timesheets': 'Timesheets',

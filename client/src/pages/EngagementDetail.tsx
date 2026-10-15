@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   Buildings, FileText, Calendar,
-  Sparkle, Receipt, ShareNetwork, ChatCircle, GitBranch,
+  Sparkle, Receipt, ShareNetwork, ChatCircle, GitBranch, CloudArrowUp,
 } from '@phosphor-icons/react';
 import api from '../services/api';
 import { appAlert, appConfirm } from '../context/AppDialogContext';
@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 import ClientAuditQueriesPanel from '../components/engagement/ClientAuditQueriesPanel';
 import EngagementDocumentsPanel from '../components/engagement/EngagementDocumentsPanel';
+import EngagementDriveWorkspace from '../components/engagement/EngagementDriveWorkspace';
 import EngagementWorkflowPanel from '../components/engagement/EngagementWorkflowPanel';
 import { EngagementStatusStrip } from '../components/engagement/EngagementStatusStrip';
 import { AppPageContainer } from '../components/layout/AppPageContainer';
@@ -97,20 +98,20 @@ interface CommandCenter {
 }
 
 
-type EngagementTab = 'overview' | 'documents' | 'queries' | 'el' | 'timelog';
+type EngagementTab = 'drive' | 'overview' | 'documents' | 'queries' | 'el' | 'timelog';
 
 const ENGAGEMENT_TABS = new Set<string>([
-  'overview', 'documents', 'queries', 'el', 'timelog',
+  'drive', 'overview', 'documents', 'queries', 'el', 'timelog',
   // legacy URL aliases
   'workflow', 'tasks', 'submissions', 'kyc', 'checklist', 'history',
 ]);
 
 function normalizeTab(raw: string | null): EngagementTab {
-  if (!raw) return 'documents';
-  if (raw === 'workflow' || raw === 'tasks' || raw === 'history') return 'documents';
+  if (!raw) return 'drive';
+  if (raw === 'workflow' || raw === 'tasks' || raw === 'history') return 'drive';
   if (raw === 'submissions' || raw === 'kyc' || raw === 'checklist') return 'documents';
   if (ENGAGEMENT_TABS.has(raw)) return raw as EngagementTab;
-  return 'documents';
+  return 'drive';
 }
 
 export default function EngagementDetail() {
@@ -126,7 +127,7 @@ export default function EngagementDetail() {
   const [engagementDocuments, setEngagementDocuments] = useState<
     NonNullable<ChecklistPayload & { engagementDocuments?: ChecklistPayload['clientUploads'] }>['clientUploads']
   >([]);
-  const [tab, setTab] = useState<EngagementTab>('documents');
+  const [tab, setTab] = useState<EngagementTab>('drive');
   const workflowSectionRef = useRef<HTMLElement>(null);
   const tabsSectionRef = useRef<HTMLDivElement>(null);
   const pageTopRef = useRef<HTMLDivElement>(null);
@@ -209,7 +210,7 @@ export default function EngagementDetail() {
   function selectTab(next: EngagementTab) {
     setTab(next);
     const params = new URLSearchParams(searchParams);
-    if (next === 'documents') params.delete('tab');
+    if (next === 'drive') params.delete('tab');
     else params.set('tab', next);
     setSearchParams(params, { replace: true });
   }
@@ -515,16 +516,25 @@ export default function EngagementDetail() {
         idPrefix="engagement"
         ariaLabel="Engagement sections"
         tabs={[
-          { key: 'documents', label: 'Documents', icon: FileText, badge: pendingClientDocs },
-          { key: 'queries', label: 'Client queries', icon: ChatCircle, badge: openClientQueryCount },
+          { key: 'drive', label: 'Drive', icon: CloudArrowUp },
           { key: 'overview', label: 'Scope & team', icon: Sparkle },
-          { key: 'el', label: 'Engagement Letter', icon: FileText },
+          { key: 'documents', label: 'Client docs', icon: FileText, badge: pendingClientDocs },
           { key: 'timelog', label: 'Time log', icon: Receipt },
+          { key: 'queries', label: 'Client queries', icon: ChatCircle, badge: openClientQueryCount },
+          { key: 'el', label: 'Letter (deferred)', icon: FileText },
         ]}
         active={tab}
         onChange={selectTab}
         className="-mx-1 px-1"
       />
+
+      <AccessibleTabPanel id="engagement-panel-drive" labelledBy="engagement-tab-drive" hidden={tab !== 'drive' || !id || !eng}>
+        <EngagementDriveWorkspace
+          engagementId={id!}
+          engagementTitle={eng!.title}
+          canManageDrive={!!isManagerOrAbove}
+        />
+      </AccessibleTabPanel>
 
       <AccessibleTabPanel id="engagement-panel-documents" labelledBy="engagement-tab-documents" hidden={tab !== 'documents'}>
         <EngagementDocumentsPanel
@@ -595,9 +605,10 @@ export default function EngagementDetail() {
       <AccessibleTabPanel id="engagement-panel-el" labelledBy="engagement-tab-el" hidden={tab !== 'el' || !id}>
         <PanelCard title="Engagement letter">
           <p className="text-sm text-muted-foreground mb-4">
-            Generate, send, and collect client signature before team assignment.
+            Letter / client-request flow is deferred while Drive collaboration is tested on existing
+            engagements. Team assignment is not blocked by letter status.
           </p>
-          <Button type="button" size="sm" asChild>
+          <Button type="button" size="sm" variant="outline" asChild>
             <Link to={`/engagements/${id}/letter`}>Open letter workflow</Link>
           </Button>
         </PanelCard>

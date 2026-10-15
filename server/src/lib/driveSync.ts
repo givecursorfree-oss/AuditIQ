@@ -209,10 +209,49 @@ export type DriveBrowseItem = {
   kind: 'folder' | 'file';
 };
 
-/** List immediate children (folders + files) for the Drive picker UI. */
+export type SharedDriveItem = { id: string; name: string };
+
+/** Virtual browse parent: lists Workspace Shared Drives the connected user can see. */
+export const SHARED_DRIVES_ROOT = 'shared-drives-root';
+
+/** List Shared Drives (Team Drives) for the connected Google account — probe only. */
+export async function listSharedDrives(userId: string): Promise<SharedDriveItem[]> {
+  const conn = await prisma.googleDriveConnection.findUnique({
+    where: { userId },
+    select: { id: true, isActive: true },
+  });
+  if (!conn?.isActive) {
+    throw new Error('Google Drive not connected');
+  }
+  const { drive } = await getDriveClient(conn.id);
+  const drives: SharedDriveItem[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await drive.drives.list({
+      pageSize: 100,
+      pageToken,
+      fields: 'nextPageToken, drives(id, name)',
+    });
+    for (const d of res.data.drives ?? []) {
+      if (!d.id || !d.name) continue;
+      drives.push({ id: d.id, name: d.name });
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  drives.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return drives;
+}
+
+/**
+ * List immediate children for the Drive picker.
+ * - parent=root → My Drive root
+ * - parent=shared-drives-root → Shared Drive list (as folders)
+ * - driveId set → list inside that Shared Drive (corpora=drive)
+ */
 export async function listDriveBrowseItems(
   userId: string,
-  parentId = 'root'
+  parentId = 'root',
+  options?: { driveId?: string | null }
 ): Promise<DriveBrowseItem[]> {
   const conn = await prisma.googleDriveConnection.findUnique({
     where: { userId },
@@ -222,7 +261,18 @@ export async function listDriveBrowseItems(
     throw new Error('Google Drive not connected');
   }
 
+  if (parentId === SHARED_DRIVES_ROOT) {
+    const drives = await listSharedDrives(userId);
+    return drives.map((d) => ({
+      id: d.id,
+      name: d.name,
+      mimeType: GOOGLE_FOLDER_MIME,
+      kind: 'folder' as const,
+    }));
+  }
+
   const { drive } = await getDriveClient(conn.id);
+  const driveId = options?.driveId?.trim() || null;
   const parent = parentId === 'root' ? 'root' : parentId;
   const safeParent = parent.replace(/'/g, "\\'");
   const q =
@@ -238,9 +288,18 @@ export async function listDriveBrowseItems(
       fields: 'nextPageToken, files(id, name, mimeType)',
       pageSize: 200,
       pageToken,
-      spaces: 'drive',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
+      ...(driveId
+        ? {
+            corpora: 'drive' as const,
+            driveId,
+            includeItemsFromAllDrives: true,
+            supportsAllDrives: true,
+          }
+        : {
+            spaces: 'drive',
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          }),
     });
     for (const f of res.data.files ?? []) {
       if (!f.id || !f.name || !f.mimeType) continue;
@@ -439,14 +498,93 @@ export async function syncAllActiveDriveConnections(): Promise<void> {
   }
 }
 
+/** Full Drive scope — required to create folders in Shared Drives. Users must reconnect after scope change. */
+export const GOOGLE_DRIVE_SCOPES = [
+  'https://www.googleapis.com/auth/drive',
+  'email',
+] as const;
+
 export function buildGoogleAuthUrl(state: string): string {
   const oauth2 = getOAuthClient();
   return oauth2.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/drive.readonly', 'email'],
+    scope: [...GOOGLE_DRIVE_SCOPES],
     state,
   });
+}
+
+export type SharedDriveFolderMeta = {
+  id: string;
+  name: string;
+  driveId: string;
+  webViewLink: string | null;
+};
+
+/** Resolve a folder and require it lives on a Shared Drive (not My Drive). */
+export async function getSharedDriveFolderMeta(
+  userId: string,
+  folderId: string
+): Promise<SharedDriveFolderMeta> {
+  const conn = await prisma.googleDriveConnection.findUnique({
+    where: { userId },
+    select: { id: true, isActive: true },
+  });
+  if (!conn?.isActive) throw new Error('Google Drive not connected');
+
+  const { drive } = await getDriveClient(conn.id);
+  const res = await drive.files.get({
+    fileId: folderId,
+    fields: 'id, name, mimeType, driveId, webViewLink',
+    supportsAllDrives: true,
+  });
+  if (!res.data.id || !res.data.name) throw new Error('Folder not found');
+  if (res.data.mimeType !== GOOGLE_FOLDER_MIME) throw new Error('Selected item is not a folder');
+  if (!res.data.driveId) {
+    throw new Error('Folder must be inside a Google Workspace Shared Drive (not My Drive)');
+  }
+  return {
+    id: res.data.id,
+    name: res.data.name,
+    driveId: res.data.driveId,
+    webViewLink: res.data.webViewLink ?? `https://drive.google.com/drive/folders/${res.data.id}`,
+  };
+}
+
+/** Create a folder under a Shared Drive parent (parent may be the drive root = driveId). */
+export async function createSharedDriveFolder(
+  userId: string,
+  opts: { name: string; parentId: string; driveId: string }
+): Promise<SharedDriveFolderMeta> {
+  const name = opts.name.trim();
+  if (!name) throw new Error('Folder name is required');
+  if (!opts.parentId || !opts.driveId) throw new Error('Shared Drive parent is required');
+
+  const conn = await prisma.googleDriveConnection.findUnique({
+    where: { userId },
+    select: { id: true, isActive: true },
+  });
+  if (!conn?.isActive) throw new Error('Google Drive not connected');
+
+  const { drive } = await getDriveClient(conn.id);
+  const res = await drive.files.create({
+    requestBody: {
+      name,
+      mimeType: GOOGLE_FOLDER_MIME,
+      parents: [opts.parentId],
+    },
+    fields: 'id, name, driveId, webViewLink',
+    supportsAllDrives: true,
+  });
+  if (!res.data.id || !res.data.name) throw new Error('Failed to create folder');
+  const driveId = res.data.driveId || opts.driveId;
+  if (!driveId) throw new Error('Created folder is not on a Shared Drive');
+  return {
+    id: res.data.id,
+    name: res.data.name,
+    driveId,
+    webViewLink: res.data.webViewLink ?? `https://drive.google.com/drive/folders/${res.data.id}`,
+  };
 }
 
 export async function exchangeGoogleCode(
