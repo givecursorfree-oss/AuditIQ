@@ -274,9 +274,12 @@ model Client {
   engagementLetters EngagementLetter[]
   recurringSchedules RecurringSchedule[]
   governmentNotices  GovernmentNotice[]
+  gstNotices         ClientGstNotice[]
   expenseClaims      ExpenseClaim[]
   expenseClaimParticipants ExpenseClaimParticipant[]
   emailThreadMessages EmailThreadMessage[]
+  gstNoticeLastImportAt DateTime?
+  gstNoticeDataComplete Boolean  @default(false)
 
   @@index([firmId])
   @@index([status])
@@ -286,6 +289,7 @@ model Client {
   @@index([importedById])
   @@index([archivedById])
   @@index([restoredById])
+  @@index([gstin])
 }
 
 model Engagement {
@@ -2165,6 +2169,57 @@ model DeptVisitClaim {
   @@index([staffId])
   @@index([status])
   @@index([engagementId])
+}
+
+// ─── GST portal notices (Excel import + hosted edits) ───
+
+model ClientGstNotice {
+  id             String   @id @default(uuid())
+  firmId         String
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  noticeOrderId  String
+  importOrder    Int      @default(0)
+
+  // Portal / imported fields
+  portalType           String?
+  portalDescription    String?   @db.Text
+  portalIssueDate      DateTime? @db.Date
+  portalDueDate        DateTime? @db.Date
+  portalDueKind        String    @default("unclear") // date | not_applicable | unclear
+  portalPeriod         String?
+  portalSourceStatus   String?
+  portalAssignedTo     String?
+
+  // Hosted overrides (null = use portal value)
+  overrideType         String?
+  overrideDescription  String?   @db.Text
+  overrideIssueDate    DateTime? @db.Date
+  overrideDueDate      DateTime? @db.Date
+  overrideDueKind      String?
+  overridePeriod       String?
+
+  // Hosted-only
+  appStatus       String    @default("Auto")
+  customStatus    String?
+  followUp        String    @default("None")
+  customFollowUp  String?
+  followUpDueDate DateTime? @db.Date
+  assignedTo      String?
+  notes           String?   @db.Text
+  viewState       String    @default("New") // New | Seen | Updated
+  seenAt          DateTime?
+  editedBy        String?
+  editedAt        DateTime?
+  version         Int       @default(1)
+  lastImportedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([clientId, noticeOrderId])
+  @@index([firmId, clientId])
+  @@index([viewState])
+  @@index([importOrder])
 }
 
 // ─── Government portal notices ───

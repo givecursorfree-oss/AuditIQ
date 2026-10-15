@@ -64,7 +64,7 @@ export const NAV_CATALOG: NavCatalogItem[] = [
   { id: 'reports', path: '/reports', label: 'Reports', group: 'Insights', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'Intern'], permission: { module: 'reports', action: 'view' } },
   { id: 'billing', path: '/billing', label: 'Billing & Invoices', group: 'Insights', roles: ['Partner', 'Admin', 'Manager', 'Accounts'], permission: { module: 'invoices', action: 'view' } },
   { id: 'billing-pending', path: '/billing/pending', label: 'Pending Billing', group: 'Insights', roles: ['Partner', 'Admin', 'Manager', 'Accounts'], permission: { module: 'invoices', action: 'view' }, sidebarHidden: true },
-  { id: 'notices', path: '/notices', label: 'Notices', group: 'Insights', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'reports', action: 'view' } },
+  { id: 'notices', path: '/notices', label: 'GST notices', group: 'Insights', roles: ['Partner', 'Admin', 'Manager', 'Staff', 'HR'], permission: { module: 'reports', action: 'view' } },
   { id: 'management-reports', path: '/management-reports', label: 'Management Reports', group: 'Insights', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'reports', action: 'export' } },
   { id: 'vault', path: '/vault', label: 'Password Vault', group: 'Insights', roles: ['Partner', 'Admin', 'Manager'], permission: { module: 'vault', action: 'view' } },
 

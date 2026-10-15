@@ -67,6 +67,7 @@ import claimsRoutes from './routes/claims.js';
 import expenseClaimsRoutes from './routes/expenseClaims.js';
 import claimBatchesRoutes from './routes/claimBatches.js';
 import noticesRoutes from './routes/notices.js';
+import gstNoticesRoutes from './routes/gstNotices.js';
 import portalsRoutes from './routes/portals.js';
 import { startScheduler } from './lib/scheduler.js';
 import { warnIfSchemaOutOfDate } from './lib/schemaHealth.js';
@@ -382,6 +383,7 @@ app.use('/api/claims', staffApi(claimsRoutes));
 app.use('/api/expense-claims', staffApi(expenseClaimsRoutes));
 app.use('/api/claim-batches', staffApi(claimBatchesRoutes));
 app.use('/api/notices', staffApi(noticesRoutes));
+app.use('/api/gst-notices', staffApi(gstNoticesRoutes));
 app.use('/api/portals', staffApi(portalsRoutes));
 
 // Health check
