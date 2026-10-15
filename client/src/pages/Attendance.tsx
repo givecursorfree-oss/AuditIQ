@@ -174,7 +174,7 @@ export default function AttendancePage() {
   const handleCheckIn = async () => {
     if (!user?.id) return;
     if (placeOfWork === 'Client Place' && !clientName.trim()) {
-      await appAlert('Enter or select the client name for Client Place check-in.');
+      await appAlert('Select the client for Client Place check-in.');
       return;
     }
     setCheckingIn(true);
@@ -534,19 +534,19 @@ export default function AttendancePage() {
                   {placeOfWork === 'Client Place' && (
                     <div className="space-y-1.5">
                       <Label htmlFor="attendance-client">Client</Label>
-                      <Input
+                      <select
                         id="attendance-client"
-                        list="attendance-client-names"
+                        aria-label="Client"
+                        className="input-field h-10 w-full"
+                        required
                         value={clientName}
                         onChange={(e) => setClientName(e.target.value)}
-                        className="h-10"
-                        autoComplete="organization"
-                      />
-                      <datalist id="attendance-client-names">
+                      >
+                        <option value="">Select client</option>
                         {clientOptions.map((c) => (
-                          <option key={c} value={c} />
+                          <option key={c} value={c}>{c}</option>
                         ))}
-                      </datalist>
+                      </select>
                     </div>
                   )}
                   <Button

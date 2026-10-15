@@ -613,18 +613,18 @@ export default function TimeTracker() {
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Client</span>
-              <input
+              <select
                 className="input-field mt-1"
                 aria-label="Client"
-                list="manual-time-clients"
+                required
                 value={manualForm.clientName}
                 onChange={(e) => setManualForm({ ...manualForm, clientName: e.target.value, engagementId: '' })}
-              />
-              <datalist id="manual-time-clients">
+              >
+                <option value="">Select client</option>
                 {gridClients.map((client) => (
-                  <option key={client.name} value={client.name} />
+                  <option key={client.name} value={client.name}>{client.name}</option>
                 ))}
-              </datalist>
+              </select>
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Engagement</span>
