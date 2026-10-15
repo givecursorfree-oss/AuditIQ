@@ -38,14 +38,25 @@ async function main() {
   }
 
   if (
-    managerMayImportExistingClient({
+    !managerMayImportExistingClient({
       managerClientIds: new Set(),
       clientId: 'c1',
       actorId: 'm1',
       rowManagerId: 'other',
     })
   ) {
-    throw new Error('unassigned other-manager row must fail');
+    throw new Error('row with resolved manager must pass');
+  }
+
+  if (
+    managerMayImportExistingClient({
+      managerClientIds: new Set(),
+      clientId: 'c1',
+      actorId: 'm1',
+      rowManagerId: null,
+    })
+  ) {
+    throw new Error('unassigned with no row manager must fail');
   }
 
   console.log('engagementImport.managerClient.selfcheck: ok');

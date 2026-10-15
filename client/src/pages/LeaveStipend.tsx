@@ -252,12 +252,13 @@ export default function LeaveStipend() {
       if (l.status === 'Manager Approved') return canFinalSanction;
       return false;
     };
-    const base = inbox.length ? inbox : leaves.filter(actionable);
+    // Never fall back to `leaves` when inbox is empty — that re-showed Manager Approved + Reject for managers
+    const base = canManage ? inbox.filter(actionable) : leaves.filter(actionable);
     if (!focusLeaveId) return base;
     if (base.some((l) => l.id === focusLeaveId)) return base;
-    const focused = leaves.find((l) => l.id === focusLeaveId);
+    const focused = (canManage ? inbox : leaves).find((l) => l.id === focusLeaveId);
     return focused && actionable(focused) ? [focused, ...base] : base;
-  }, [inbox, leaves, focusLeaveId, canFinalSanction]);
+  }, [inbox, leaves, focusLeaveId, canFinalSanction, canManage]);
 
   const selectTab = (k: LeaveTab) => {
     setTab(k);

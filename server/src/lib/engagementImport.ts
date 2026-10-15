@@ -325,7 +325,11 @@ export async function stageEngagementImportRows(opts: {
   });
 }
 
-/** Non-Manager actors skip the gate. Managers may use a client they already work on, or name themselves as row manager. */
+/**
+ * Non-Manager actors skip the gate.
+ * Managers may use an existing client when already assigned, named as row manager,
+ * or the row already resolves a valid firm manager (assignment is explicit on the sheet).
+ */
 export function managerMayImportExistingClient(opts: {
   managerClientIds: Set<string> | null;
   clientId: string;
@@ -335,6 +339,8 @@ export function managerMayImportExistingClient(opts: {
   if (!opts.managerClientIds) return true;
   if (opts.managerClientIds.has(opts.clientId)) return true;
   if (opts.rowManagerId && opts.rowManagerId === opts.actorId) return true;
+  // Sheet names Partner + Manager — allow first engagement on an existing client
+  if (opts.rowManagerId) return true;
   return false;
 }
 
