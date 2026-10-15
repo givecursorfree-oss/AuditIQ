@@ -9,6 +9,7 @@ import {
   buildGoogleAuthUrl,
   exchangeGoogleCode,
   listDriveBrowseItems,
+  listSharedDrives,
   parseSyncFolders,
   serializeSyncFolders,
   syncGoogleDriveConnection,
@@ -105,7 +106,28 @@ const settingsSchema = z.object({
   defaultEngagementId: z.string().uuid().nullable().optional(),
 });
 
-// GET /api/integrations/google-drive/folders?parent=root
+// GET /api/integrations/google-drive/drives — Shared Drive probe (does not lock product model)
+router.get(
+  '/drives',
+  authenticate,
+  authorize(...DRIVE_MANAGERS),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const drives = await listSharedDrives(req.user!.id);
+      res.json({ drives, count: drives.length });
+    } catch (err) {
+      const msg = (err as Error).message;
+      logger.error('Drive shared-drives list error', { error: msg });
+      if (msg.includes('not connected')) {
+        res.status(404).json({ error: 'Google Drive not connected' });
+      } else {
+        res.status(500).json({ error: 'Google Drive connection failed' });
+      }
+    }
+  }
+);
+
+// GET /api/integrations/google-drive/folders?parent=root&driveId=
 router.get(
   '/folders',
   authenticate,
@@ -113,11 +135,12 @@ router.get(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const parent = String(req.query.parent || 'root');
-      const items = await listDriveBrowseItems(req.user!.id, parent);
+      const driveId = req.query.driveId ? String(req.query.driveId) : null;
+      const items = await listDriveBrowseItems(req.user!.id, parent, { driveId });
       const folders = items
         .filter((i) => i.kind === 'folder')
         .map((i) => ({ id: i.id, name: i.name }));
-      res.json({ items, folders, parent });
+      res.json({ items, folders, parent, driveId });
     } catch (err) {
       const msg = (err as Error).message;
       logger.error('Drive folders error', { error: msg });
