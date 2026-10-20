@@ -13,10 +13,15 @@ export const ARTICLE_LEAVE_RECIPIENTS = [
   'dhara@mkdandeker.com',
 ] as const;
 
-/** Final leave sanctioners for Audit Manager / Sr Audit Executive / Staff. */
+/** Leave approvers for Audit Manager / Sr Audit Executive / Staff (mail + final sanction). */
 export const FINAL_LEAVE_APPROVER_EMAILS = [
   'arunmehta@mkdandeker.com',
   'poosaidurai@mkdandeker.com',
+  'shanmugam@mkdandeker.com',
+  'dhara@mkdandeker.com',
+  'deepikat@mkdandeker.com',
+  'nirmal@mkdandeker.com',
+  'anandgupta@mkdandeker.com',
 ] as const;
 
 /** @deprecated alias — same as FINAL_LEAVE_APPROVER_EMAILS */
@@ -59,7 +64,7 @@ export function isArticleAssistant(applicant: LeaveApplicantGrade): boolean {
   return /article/.test(textOf(applicant));
 }
 
-/** Audit Manager / Sr AE → two partners. Article assistants → article list. Other Staff → two partners. */
+/** Audit Manager / Sr AE / Staff → partner approver list. Article assistants → article list. */
 export function leaveRecipientsFor(applicant: LeaveApplicantGrade): readonly string[] | null {
   if (isSeniorOrAuditManager(applicant)) return MANAGER_LEAVE_RECIPIENTS;
   if (isArticleAssistant(applicant)) return ARTICLE_LEAVE_RECIPIENTS;

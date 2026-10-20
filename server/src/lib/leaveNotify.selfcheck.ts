@@ -13,9 +13,14 @@ function assert(cond: unknown, message: string): void {
   if (!cond) throw new Error(message);
 }
 
-assert(MANAGER_LEAVE_RECIPIENTS.length === 2, 'manager list size');
+assert(MANAGER_LEAVE_RECIPIENTS.length === 7, 'manager list size');
 assert(MANAGER_LEAVE_RECIPIENTS.includes('arunmehta@mkdandeker.com'), 'arunmehta');
 assert(MANAGER_LEAVE_RECIPIENTS.includes('poosaidurai@mkdandeker.com'), 'poosaidurai');
+assert(MANAGER_LEAVE_RECIPIENTS.includes('shanmugam@mkdandeker.com'), 'shanmugam');
+assert(MANAGER_LEAVE_RECIPIENTS.includes('dhara@mkdandeker.com'), 'dhara');
+assert(MANAGER_LEAVE_RECIPIENTS.includes('deepikat@mkdandeker.com'), 'deepikat');
+assert(MANAGER_LEAVE_RECIPIENTS.includes('nirmal@mkdandeker.com'), 'nirmal');
+assert(MANAGER_LEAVE_RECIPIENTS.includes('anandgupta@mkdandeker.com'), 'anandgupta');
 assert(FINAL_LEAVE_APPROVER_EMAILS === MANAGER_LEAVE_RECIPIENTS, 'alias');
 
 const article = leaveRecipientsFor({ designation: 'Audit Executive (Article)' });
@@ -34,6 +39,7 @@ assert(
   'senior audit manager is not the audit-manager list'
 );
 assert(isFinalLeaveApproverEmail('ArunMehta@mkdandeker.com'), 'email normalize');
-assert(!isFinalLeaveApproverEmail('deepikat@mkdandeker.com'), 'other partner not final');
+assert(isFinalLeaveApproverEmail('deepikat@mkdandeker.com'), 'deepikat is final');
+assert(!isFinalLeaveApproverEmail('soundarya@mkdandeker.com'), 'article-only not final');
 
 console.log('leaveNotify.selfcheck: ok');

@@ -60,8 +60,16 @@ interface StipendRecord {
 
 type LeaveTab = 'apply' | 'inbox' | 'calendar' | 'stipend' | 'ediary' | 'compoff' | 'holidays';
 
-/** Must match server FINAL_LEAVE_APPROVER_EMAILS — only these may Sanction after manager approval. */
-const FINAL_LEAVE_SANCTION_EMAILS = ['arunmehta@mkdandeker.com', 'poosaidurai@mkdandeker.com'];
+/** Must match server FINAL_LEAVE_APPROVER_EMAILS — these may Sanction after manager approval. */
+const FINAL_LEAVE_SANCTION_EMAILS = [
+  'arunmehta@mkdandeker.com',
+  'poosaidurai@mkdandeker.com',
+  'shanmugam@mkdandeker.com',
+  'dhara@mkdandeker.com',
+  'deepikat@mkdandeker.com',
+  'nirmal@mkdandeker.com',
+  'anandgupta@mkdandeker.com',
+];
 
 function canSanctionLeaveFinally(email?: string | null): boolean {
   return FINAL_LEAVE_SANCTION_EMAILS.includes((email || '').trim().toLowerCase());
