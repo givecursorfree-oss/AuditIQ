@@ -412,15 +412,18 @@ model Engagement {
   @@index([restoredById])
 }
 
-/// Linked Google Workspace Shared Drive folders for an engagement (Drive is file authority).
+/// Opaque engagement ↔ Google Drive link (layout independent of engagement tree).
+/// linkKind: SHARED_DRIVE | SHARED_FOLDER — switch by unlink + re-link; no folder tree migration.
 model EngagementDriveFolder {
   id           String   @id @default(uuid())
   engagementId String
   engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
-  /// Stable Google Drive folder file ID
+  /// SHARED_DRIVE | SHARED_FOLDER
+  linkKind     String   @default("SHARED_DRIVE")
+  /// Stable Google Drive folder file ID (or Shared Drive root id)
   folderId     String
-  /// Shared Drive ID (same as root folder id for that drive)
-  driveId      String
+  /// Shared Drive ID when linkKind=SHARED_DRIVE; null for SHARED_FOLDER
+  driveId      String?
   name         String
   isPrimary    Boolean  @default(false)
   webViewLink  String?  @db.Text
@@ -434,6 +437,7 @@ model EngagementDriveFolder {
   @@index([driveId])
   @@index([folderId])
   @@index([linkedById])
+  @@index([linkKind])
 }
 
 // ─── MKD: Client service requests (before engagement activation) ───

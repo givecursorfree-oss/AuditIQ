@@ -9,6 +9,8 @@ COPY prisma ./prisma
 RUN npx prisma generate
 
 COPY . .
+# Regenerate after full copy so schema changes never stick to a stale cached client
+RUN npx prisma generate
 RUN npm run build
 
 # ── Stage 2: Production ──
