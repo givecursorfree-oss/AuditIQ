@@ -202,7 +202,7 @@ async function downloadDriveFile(
     await streamToFile(res.data as NodeJS.ReadableStream, localPath);
   } else {
     const res = await drive.files.get(
-      { fileId, alt: 'media' },
+      { fileId, alt: 'media', supportsAllDrives: true },
       { responseType: 'stream' }
     );
     await streamToFile(res.data as NodeJS.ReadableStream, localPath);
@@ -555,6 +555,151 @@ export async function syncAllActiveDriveConnections(): Promise<void> {
   }
 }
 
+export type DriveSendReviewResult = {
+  synced: number;
+  skipped: number;
+  errors: string[];
+  documentIds: string[];
+};
+
+/**
+ * Pull selected Drive file ids into the engagement Document library and return sync stats.
+ * Callers notify managers separately.
+ */
+export async function syncSelectedDriveFilesToEngagement(
+  userId: string,
+  engagementId: string,
+  fileIds: string[]
+): Promise<DriveSendReviewResult> {
+  const uniqueIds = [...new Set(fileIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    throw new Error('Select at least one file');
+  }
+  if (uniqueIds.length > 50) {
+    throw new Error('Select at most 50 files at a time');
+  }
+
+  const conn = await prisma.googleDriveConnection.findUnique({
+    where: { userId },
+    select: { id: true, isActive: true, firmId: true, userId: true },
+  });
+  if (!conn?.isActive) throw new Error('Google Drive not connected');
+
+  const eng = await prisma.engagement.findFirst({
+    where: { id: engagementId, firmId: conn.firmId, archivedAt: null },
+    select: { id: true, clientId: true, title: true },
+  });
+  if (!eng) throw new Error('Engagement not found');
+
+  const { drive } = await getDriveClient(conn.id);
+  const uploadDir = path.join(process.cwd(), getEnv().UPLOAD_DIR);
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+  let synced = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  const documentIds: string[] = [];
+
+  for (const fileId of uniqueIds) {
+    try {
+      const meta = await drive.files.get({
+        fileId,
+        fields: 'id, name, mimeType, modifiedTime',
+        supportsAllDrives: true,
+      });
+      if (!meta.data.id || !meta.data.name || !meta.data.mimeType) {
+        skipped++;
+        errors.push(`${fileId}: not found`);
+        continue;
+      }
+      if (meta.data.mimeType === GOOGLE_FOLDER_MIME) {
+        skipped++;
+        errors.push(`${meta.data.name}: folders cannot be sent — open and select files`);
+        continue;
+      }
+      if (
+        !EXPORTABLE_MIME.has(meta.data.mimeType) &&
+        !meta.data.mimeType.startsWith('application/vnd.google-apps.')
+      ) {
+        skipped++;
+        errors.push(`${meta.data.name}: unsupported type`);
+        continue;
+      }
+
+      const { localPath, mimeType, size } = await downloadDriveFile(
+        drive,
+        meta.data.id,
+        meta.data.mimeType,
+        uploadDir
+      );
+      const driveModified = meta.data.modifiedTime
+        ? new Date(meta.data.modifiedTime)
+        : new Date();
+
+      const existing = await prisma.document.findFirst({
+        where: { firmId: conn.firmId, externalId: meta.data.id },
+      });
+
+      if (existing) {
+        if (existing.storagePath && fs.existsSync(existing.storagePath)) {
+          try {
+            fs.unlinkSync(existing.storagePath);
+          } catch {
+            /* ignore stale path */
+          }
+        }
+        await prisma.document.update({
+          where: { id: existing.id },
+          data: {
+            fileName: path.basename(localPath),
+            originalName: meta.data.name,
+            mimeType,
+            size,
+            storagePath: localPath,
+            driveModifiedAt: driveModified,
+            syncedAt: new Date(),
+            indexStatus: 'PENDING',
+            isOcrProcessed: false,
+            engagementId: eng.id,
+            clientId: eng.clientId,
+            visibility: 'ENGAGEMENT',
+          },
+        });
+        enqueueDocumentIndex(existing.id);
+        documentIds.push(existing.id);
+      } else {
+        const doc = await prisma.document.create({
+          data: {
+            fileName: path.basename(localPath),
+            originalName: meta.data.name,
+            mimeType,
+            size,
+            storagePath: localPath,
+            source: 'GOOGLE_DRIVE',
+            externalId: meta.data.id,
+            visibility: 'ENGAGEMENT',
+            firmId: conn.firmId,
+            clientId: eng.clientId,
+            engagementId: eng.id,
+            uploadedById: conn.userId,
+            driveModifiedAt: driveModified,
+            syncedAt: new Date(),
+            indexStatus: 'PENDING',
+          },
+        });
+        enqueueDocumentIndex(doc.id);
+        documentIds.push(doc.id);
+      }
+      synced++;
+    } catch (err) {
+      skipped++;
+      errors.push(`${fileId}: ${(err as Error).message}`);
+    }
+  }
+
+  return { synced, skipped, errors, documentIds };
+}
+
 /** Full Drive scope — required to create folders in Shared Drives. Users must reconnect after scope change. */
 export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
@@ -571,18 +716,29 @@ export function buildGoogleAuthUrl(state: string): string {
   });
 }
 
-export type SharedDriveFolderMeta = {
+/** Opaque storage kind — engagement tree stays independent of Drive layout. */
+export type DriveLinkKind = 'SHARED_DRIVE' | 'SHARED_FOLDER';
+
+export type LinkableFolderMeta = {
   id: string;
   name: string;
-  driveId: string;
+  driveId: string | null;
+  linkKind: DriveLinkKind;
   webViewLink: string | null;
 };
 
-/** Resolve a folder and require it lives on a Shared Drive (not My Drive). */
-export async function getSharedDriveFolderMeta(
+/** @deprecated Use LinkableFolderMeta */
+export type SharedDriveFolderMeta = LinkableFolderMeta & { driveId: string };
+
+export function resolveDriveLinkKind(driveId: string | null | undefined): DriveLinkKind {
+  return driveId ? 'SHARED_DRIVE' : 'SHARED_FOLDER';
+}
+
+/** Resolve any linkable folder (Shared Drive or Shared Folder / My Drive). */
+export async function getLinkableFolderMeta(
   userId: string,
   folderId: string
-): Promise<SharedDriveFolderMeta> {
+): Promise<LinkableFolderMeta> {
   const conn = await prisma.googleDriveConnection.findUnique({
     where: { userId },
     select: { id: true, isActive: true },
@@ -597,25 +753,39 @@ export async function getSharedDriveFolderMeta(
   });
   if (!res.data.id || !res.data.name) throw new Error('Folder not found');
   if (res.data.mimeType !== GOOGLE_FOLDER_MIME) throw new Error('Selected item is not a folder');
-  if (!res.data.driveId) {
-    throw new Error('Folder must be inside a Google Workspace Shared Drive (not My Drive)');
-  }
+  const driveId = res.data.driveId ?? null;
   return {
     id: res.data.id,
     name: res.data.name,
-    driveId: res.data.driveId,
+    driveId,
+    linkKind: resolveDriveLinkKind(driveId),
     webViewLink: res.data.webViewLink ?? `https://drive.google.com/drive/folders/${res.data.id}`,
   };
 }
 
-/** Create a folder under a Shared Drive parent (parent may be the drive root = driveId). */
-export async function createSharedDriveFolder(
+/** Resolve a folder and require Shared Drive (legacy callers). */
+export async function getSharedDriveFolderMeta(
   userId: string,
-  opts: { name: string; parentId: string; driveId: string }
+  folderId: string
 ): Promise<SharedDriveFolderMeta> {
+  const meta = await getLinkableFolderMeta(userId, folderId);
+  if (!meta.driveId || meta.linkKind !== 'SHARED_DRIVE') {
+    throw new Error('Folder must be inside a Google Workspace Shared Drive (not My Drive)');
+  }
+  return { ...meta, driveId: meta.driveId };
+}
+
+/**
+ * Create a folder under a Shared Drive parent or a Shared Folder / My Drive parent.
+ * Pass driveId when creating inside a Shared Drive; omit for Shared Folder.
+ */
+export async function createLinkableFolder(
+  userId: string,
+  opts: { name: string; parentId: string; driveId?: string | null }
+): Promise<LinkableFolderMeta> {
   const name = opts.name.trim();
   if (!name) throw new Error('Folder name is required');
-  if (!opts.parentId || !opts.driveId) throw new Error('Shared Drive parent is required');
+  if (!opts.parentId) throw new Error('Parent folder is required');
 
   const conn = await prisma.googleDriveConnection.findUnique({
     where: { userId },
@@ -634,14 +804,25 @@ export async function createSharedDriveFolder(
     supportsAllDrives: true,
   });
   if (!res.data.id || !res.data.name) throw new Error('Failed to create folder');
-  const driveId = res.data.driveId || opts.driveId;
-  if (!driveId) throw new Error('Created folder is not on a Shared Drive');
+  const driveId = res.data.driveId ?? opts.driveId?.trim() ?? null;
   return {
     id: res.data.id,
     name: res.data.name,
     driveId,
+    linkKind: resolveDriveLinkKind(driveId),
     webViewLink: res.data.webViewLink ?? `https://drive.google.com/drive/folders/${res.data.id}`,
   };
+}
+
+/** Create a folder under a Shared Drive parent (parent may be the drive root = driveId). */
+export async function createSharedDriveFolder(
+  userId: string,
+  opts: { name: string; parentId: string; driveId: string }
+): Promise<SharedDriveFolderMeta> {
+  if (!opts.driveId) throw new Error('Shared Drive parent is required');
+  const meta = await createLinkableFolder(userId, opts);
+  if (!meta.driveId) throw new Error('Created folder is not on a Shared Drive');
+  return { ...meta, driveId: meta.driveId };
 }
 
 export async function exchangeGoogleCode(
