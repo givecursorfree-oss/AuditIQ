@@ -6,6 +6,26 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
 }
 
+/** Mirrors parseGoogleDriveFolderId in driveSync.ts — keep in sync. */
+function parseFolderRef(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(s) && !s.includes('/')) return s;
+  const fromFolders = s.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (fromFolders?.[1]) return fromFolders[1];
+  const fromId = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (fromId?.[1]) return fromId[1];
+  return null;
+}
+
+assert(
+  parseFolderRef('https://drive.google.com/drive/u/0/folders/0ABC_SharedDriveFolder') ===
+    '0ABC_SharedDriveFolder',
+  'folder url parse'
+);
+assert(parseFolderRef('0ABC_SharedDriveFolder') === '0ABC_SharedDriveFolder', 'raw id');
+assert(parseFolderRef('nope') === null, 'reject junk');
+
 /** My Drive folders have no driveId — must reject for Shared Drive model. */
 function isSharedDriveFolder(meta: { mimeType: string; driveId?: string | null }): boolean {
   return meta.mimeType === 'application/vnd.google-apps.folder' && Boolean(meta.driveId);

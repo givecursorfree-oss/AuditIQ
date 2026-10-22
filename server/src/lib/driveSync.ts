@@ -56,16 +56,73 @@ const EXPORTABLE_MIME = new Set([
 
 const GOOGLE_FOLDER_MIME = 'application/vnd.google-apps.folder';
 
-function getOAuthClient() {
+export function isGoogleDriveOAuthConfigured(): boolean {
   const env = getEnv();
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_REDIRECT_URI) {
-    throw new Error('Google Drive OAuth is not configured');
+  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI);
+}
+
+function getOAuthClient() {
+  if (!isGoogleDriveOAuthConfigured()) {
+    throw new Error(
+      'Google Drive OAuth is not configured — set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI on the API host, then recreate the server container'
+    );
   }
+  const env = getEnv();
   return new google.auth.OAuth2(
-    env.GOOGLE_CLIENT_ID,
-    env.GOOGLE_CLIENT_SECRET,
-    env.GOOGLE_REDIRECT_URI
+    env.GOOGLE_CLIENT_ID!,
+    env.GOOGLE_CLIENT_SECRET!,
+    env.GOOGLE_REDIRECT_URI!
   );
+}
+
+/** Map Drive/OAuth failures to HTTP-friendly client messages. */
+export function mapDriveApiError(err: unknown): { status: number; error: string } {
+  const msg = err instanceof Error ? err.message : String(err);
+  const lower = msg.toLowerCase();
+  if (lower.includes('oauth is not configured') || lower.includes('google drive oauth is not configured')) {
+    return {
+      status: 503,
+      error:
+        'Google Drive OAuth credentials missing on the API server. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in .env.kvm2 (or .env.api), then recreate the server container.',
+    };
+  }
+  if (lower.includes('not connected') || lower.includes('connection not found')) {
+    return { status: 404, error: 'Google Drive not connected. Connect from Drive workspace first.' };
+  }
+  if (
+    lower.includes('invalid_grant') ||
+    lower.includes('invalid_rapt') ||
+    lower.includes('token has been expired') ||
+    lower.includes('token has been revoked')
+  ) {
+    return {
+      status: 401,
+      error: 'Google authorization expired. Disconnect Google Drive and connect again.',
+    };
+  }
+  if (lower.includes('insufficient') || lower.includes('access_denied') || lower.includes('forbidden')) {
+    return {
+      status: 403,
+      error:
+        'This Google account cannot access Shared Drives with the current grant. Disconnect, reconnect, and ensure the account is a Shared Drive member.',
+    };
+  }
+  if (lower.includes('shared drive') || lower.includes('not a folder') || lower.includes('not found')) {
+    return { status: 400, error: msg };
+  }
+  return { status: 500, error: msg || 'Google Drive request failed' };
+}
+
+/** Accept a Drive folder URL or raw folder id. */
+export function parseGoogleDriveFolderId(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(s) && !s.includes('/')) return s;
+  const fromFolders = s.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (fromFolders?.[1]) return fromFolders[1];
+  const fromId = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (fromId?.[1]) return fromId[1];
+  return null;
 }
 
 async function getDriveClient(connectionId: string) {

@@ -6,6 +6,8 @@ import logger from '../lib/logger.js';
 import {
   createSharedDriveFolder,
   getSharedDriveFolderMeta,
+  mapDriveApiError,
+  parseGoogleDriveFolderId,
 } from '../lib/driveSync.js';
 
 const router = Router({ mergeParams: true });
@@ -62,10 +64,15 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response): Promise<v
   }
 });
 
-const linkSchema = z.object({
-  folderId: z.string().min(1),
-  isPrimary: z.boolean().optional(),
-});
+const linkSchema = z
+  .object({
+    folderId: z.string().min(1).optional(),
+    folderUrl: z.string().min(1).optional(),
+    isPrimary: z.boolean().optional(),
+  })
+  .refine((b) => Boolean(b.folderId?.trim() || b.folderUrl?.trim()), {
+    message: 'folderId or folderUrl is required',
+  });
 
 // POST /api/engagements/:id/drive-folders — link existing Shared Drive folder
 router.post(
@@ -81,7 +88,17 @@ router.post(
         return;
       }
       const body = linkSchema.parse(req.body);
-      const meta = await getSharedDriveFolderMeta(req.user!.id, body.folderId);
+      const folderId =
+        parseGoogleDriveFolderId(body.folderId || body.folderUrl || '') ||
+        body.folderId?.trim() ||
+        null;
+      if (!folderId) {
+        res.status(400).json({
+          error: 'Could not read a Drive folder id from the URL. Paste a Shared Drive folder link or id.',
+        });
+        return;
+      }
+      const meta = await getSharedDriveFolderMeta(req.user!.id, folderId);
 
       const existingCount = await prisma.engagementDriveFolder.count({ where: { engagementId } });
       const makePrimary =
@@ -118,17 +135,13 @@ router.post(
 
       res.status(201).json(serializeLink(row));
     } catch (err) {
-      const msg = (err as Error).message;
-      logger.error('Link engagement drive folder error', { error: msg });
-      if (msg.includes('not connected')) {
-        res.status(404).json({ error: 'Connect Google Drive first' });
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: 'Validation failed', details: err.errors });
         return;
       }
-      if (msg.includes('Shared Drive') || msg.includes('not a folder') || msg.includes('not found')) {
-        res.status(400).json({ error: msg });
-        return;
-      }
-      res.status(500).json({ error: 'Failed to link Drive folder' });
+      logger.error('Link engagement drive folder error', { error: (err as Error).message });
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );
@@ -186,17 +199,13 @@ router.post(
 
       res.status(201).json(serializeLink(row));
     } catch (err) {
-      const msg = (err as Error).message;
-      logger.error('Create engagement drive folder error', { error: msg });
-      if (msg.includes('not connected')) {
-        res.status(404).json({ error: 'Connect Google Drive first' });
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: 'Validation failed', details: err.errors });
         return;
       }
-      if (msg.includes('required') || msg.includes('Shared Drive')) {
-        res.status(400).json({ error: msg });
-        return;
-      }
-      res.status(500).json({ error: 'Failed to create Drive folder' });
+      logger.error('Create engagement drive folder error', { error: (err as Error).message });
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );

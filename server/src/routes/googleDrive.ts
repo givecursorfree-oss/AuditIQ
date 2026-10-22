@@ -8,8 +8,10 @@ import { createGoogleOAuthState, verifyGoogleOAuthState } from '../lib/googleOAu
 import {
   buildGoogleAuthUrl,
   exchangeGoogleCode,
+  isGoogleDriveOAuthConfigured,
   listDriveBrowseItems,
   listSharedDrives,
+  mapDriveApiError,
   parseSyncFolders,
   serializeSyncFolders,
   syncGoogleDriveConnection,
@@ -18,11 +20,6 @@ import {
 const router = Router();
 
 const DRIVE_MANAGERS = ['Partner', 'Admin', 'Manager'] as const;
-
-function isDriveConfigured(): boolean {
-  const env = getEnv();
-  return !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI);
-}
 
 // GET /api/integrations/google-drive/status
 router.get('/status', authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
@@ -41,9 +38,13 @@ router.get('/status', authenticate, async (req: AuthRequest, res: Response): Pro
 
     const folders = parseSyncFolders(conn?.folderIds);
 
+    const configured = isGoogleDriveOAuthConfigured();
+    const connected = !!conn?.isActive;
     res.json({
-      configured: isDriveConfigured(),
-      connected: !!conn?.isActive,
+      configured,
+      connected,
+      /** Browse/sync/link need OAuth env + an active connection. */
+      browseReady: configured && connected,
       googleEmail: conn?.googleEmail ?? null,
       folderIds: folders.map((f) => f.id),
       folders,
@@ -63,8 +64,9 @@ router.get(
   authorize(...DRIVE_MANAGERS),
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      if (!isDriveConfigured()) {
-        res.status(503).json({ error: 'Google Drive OAuth is not configured on the server' });
+      if (!isGoogleDriveOAuthConfigured()) {
+        const mapped = mapDriveApiError(new Error('Google Drive OAuth is not configured'));
+        res.status(mapped.status).json({ error: mapped.error });
         return;
       }
       if (!req.user?.firmId) {
@@ -75,7 +77,8 @@ router.get(
       res.json({ url: buildGoogleAuthUrl(state), state });
     } catch (err) {
       logger.error('Drive auth-url error', { error: (err as Error).message });
-      res.status(500).json({ error: 'Google Drive connection failed' });
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );
@@ -116,13 +119,9 @@ router.get(
       const drives = await listSharedDrives(req.user!.id);
       res.json({ drives, count: drives.length });
     } catch (err) {
-      const msg = (err as Error).message;
-      logger.error('Drive shared-drives list error', { error: msg });
-      if (msg.includes('not connected')) {
-        res.status(404).json({ error: 'Google Drive not connected' });
-      } else {
-        res.status(500).json({ error: 'Google Drive connection failed' });
-      }
+      logger.error('Drive shared-drives list error', { error: (err as Error).message });
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );
@@ -142,13 +141,9 @@ router.get(
         .map((i) => ({ id: i.id, name: i.name }));
       res.json({ items, folders, parent, driveId });
     } catch (err) {
-      const msg = (err as Error).message;
-      logger.error('Drive folders error', { error: msg });
-      if (msg.includes('not connected')) {
-        res.status(404).json({ error: 'Google Drive not connected' });
-      } else {
-        res.status(500).json({ error: 'Google Drive connection failed' });
-      }
+      logger.error('Drive folders error', { error: (err as Error).message });
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );
@@ -239,9 +234,10 @@ router.post(
       logger.error('Manual drive sync failed', { error: msg });
       if (msg.includes('already in progress')) {
         res.status(409).json({ error: 'A sync is already in progress' });
-      } else {
-        res.status(500).json({ error: 'Google Drive connection failed' });
+        return;
       }
+      const mapped = mapDriveApiError(err);
+      res.status(mapped.status).json({ error: mapped.error });
     }
   }
 );

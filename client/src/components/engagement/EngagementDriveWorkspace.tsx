@@ -52,7 +52,9 @@ export default function EngagementDriveWorkspace({
   const [browseStack, setBrowseStack] = useState<BrowseStackItem[]>([]);
   const [browseItems, setBrowseItems] = useState<DriveBrowseItem[]>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
+  const [pasteRef, setPasteRef] = useState('');
 
   const reloadLinks = useCallback(async () => {
     const { data } = await api.get<{ folders: DriveLink[] }>(
@@ -63,14 +65,20 @@ export default function EngagementDriveWorkspace({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      api.get<GoogleDriveStatus>('/integrations/google-drive/status'),
-      api.get<{ folders: DriveLink[] }>(`/engagements/${engagementId}/drive-folders`),
-    ])
-      .then(([st, folders]) => {
-        if (cancelled) return;
-        setStatus(st.data);
-        setLinks(folders.data.folders || []);
+    setLoadError(null);
+    // Load independently — a folders 404 must not blank Google status
+    api
+      .get<GoogleDriveStatus>('/integrations/google-drive/status')
+      .then(({ data }) => {
+        if (!cancelled) setStatus(data);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoadError(formatApiError(e));
+      });
+    api
+      .get<{ folders: DriveLink[] }>(`/engagements/${engagementId}/drive-folders`)
+      .then(({ data }) => {
+        if (!cancelled) setLinks(data.folders || []);
       })
       .catch((e: unknown) => {
         if (!cancelled) setLoadError(formatApiError(e));
@@ -80,10 +88,14 @@ export default function EngagementDriveWorkspace({
     };
   }, [engagementId]);
 
+  const browseReady =
+    status?.browseReady ?? Boolean(status?.configured && status?.connected);
+
   const loadBrowse = useCallback(
     async (parent: string, driveId: string | null) => {
-      if (!status?.connected || !canManageDrive) return;
+      if (!browseReady || !canManageDrive) return;
       setBrowseLoading(true);
+      setBrowseError(null);
       try {
         const qs = new URLSearchParams({ parent });
         if (driveId) qs.set('driveId', driveId);
@@ -91,13 +103,14 @@ export default function EngagementDriveWorkspace({
           `/integrations/google-drive/folders?${qs.toString()}`
         );
         setBrowseItems((data.items || []).filter((i) => i.kind === 'folder'));
-      } catch {
+      } catch (e: unknown) {
         setBrowseItems([]);
+        setBrowseError(formatApiError(e));
       } finally {
         setBrowseLoading(false);
       }
     },
-    [status?.connected, canManageDrive]
+    [browseReady, canManageDrive]
   );
 
   useEffect(() => {
@@ -138,6 +151,25 @@ export default function EngagementDriveWorkspace({
         folderId,
         isPrimary: asPrimary,
       });
+      await reloadLinks();
+    } catch (e: unknown) {
+      setActionError(formatApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function linkFromPaste() {
+    const ref = pasteRef.trim();
+    if (!ref) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.post(`/engagements/${engagementId}/drive-folders`, {
+        folderUrl: ref,
+        isPrimary: links.length === 0 || !links.some((l) => l.isPrimary),
+      });
+      setPasteRef('');
       await reloadLinks();
     } catch (e: unknown) {
       setActionError(formatApiError(e));
@@ -212,11 +244,11 @@ export default function EngagementDriveWorkspace({
             <dd>
               {!status
                 ? '…'
-                : status.connected
-                  ? status.googleEmail || 'Connected'
-                  : status.configured
-                    ? 'Not connected — reconnect required for Shared Drive write scope'
-                    : 'OAuth not configured on server'}
+                : !status.configured
+                  ? 'OAuth credentials missing on API server (.env.kvm2)'
+                  : status.connected
+                    ? status.googleEmail || 'Connected'
+                    : 'Not connected — reconnect required for Shared Drive write scope'}
             </dd>
           </div>
           <div>
@@ -225,13 +257,35 @@ export default function EngagementDriveWorkspace({
           </div>
         </dl>
 
-        {!status?.connected && canManageDrive && (
+        {canManageDrive && (!status?.connected || !status?.configured) && (
           <Button type="button" size="sm" asChild className="mb-3">
             <Link to="/documents">
               <CloudArrowUp size={16} className="mr-1.5" />
-              Connect Google Drive
+              {status?.connected && !status.configured
+                ? 'Fix Google Drive on Documents'
+                : 'Connect Google Drive'}
             </Link>
           </Button>
+        )}
+
+        {canManageDrive && browseReady && (
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <input
+              className="input-field flex-1"
+              aria-label="Shared Drive folder URL or id"
+              placeholder="Paste Shared Drive folder URL or id"
+              value={pasteRef}
+              onChange={(e) => setPasteRef(e.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !pasteRef.trim()}
+              onClick={() => void linkFromPaste()}
+            >
+              Link folder
+            </Button>
+          </div>
         )}
 
         {links.length > 0 && (
@@ -287,8 +341,18 @@ export default function EngagementDriveWorkspace({
         )}
       </PanelCard>
 
-      {canManageDrive && status?.connected && (
+      {canManageDrive && status?.connected && !browseReady && (
         <PanelCard title="Browse Shared Drives">
+          <p className="text-sm text-destructive">
+            {browseError ||
+              'Google Drive OAuth is not configured on the API server. Shared drives cannot be listed until GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI are set and the API container is recreated.'}
+          </p>
+        </PanelCard>
+      )}
+
+      {canManageDrive && browseReady && (
+        <PanelCard title="Browse Shared Drives">
+          {browseError && <p className="text-sm text-destructive mb-2">{browseError}</p>}
           <div className="flex items-center gap-2 border-b border-border pb-2 mb-2 text-xs text-muted-foreground">
             {browseStack.length > 0 && (
               <button type="button" className="icon-btn p-1" onClick={goBack} aria-label="Back">
@@ -329,30 +393,28 @@ export default function EngagementDriveWorkspace({
                     <FolderOpen size={16} className="shrink-0" />
                     <span className="truncate">{item.name}</span>
                   </button>
-                  {browseParent !== SHARED_DRIVES_ROOT && (
-                    <div className="flex gap-1 shrink-0">
+                  <div className="flex gap-1 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void linkFolder(item.id, !primary)}
+                    >
+                      {primary ? 'Link' : 'Link primary'}
+                    </Button>
+                    {primary && (
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
+                        variant="ghost"
                         disabled={busy}
-                        onClick={() => void linkFolder(item.id, !primary)}
+                        onClick={() => void linkFolder(item.id, true)}
                       >
-                        {primary ? 'Link' : 'Link primary'}
+                        As primary
                       </Button>
-                      {primary && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => void linkFolder(item.id, true)}
-                        >
-                          As primary
-                        </Button>
-                      )}
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </li>
               ))
             )}

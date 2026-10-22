@@ -87,9 +87,17 @@ export default function GoogleDrivePanel({
       .catch(() => {});
   }, []);
 
+  const browseReady =
+    status?.browseReady ?? Boolean(status?.configured && status?.connected);
+
+  const showMsg = (text: string, tone: 'info' | 'error' | 'success' = 'info') => {
+    setMessage(text);
+    setMessageTone(tone);
+  };
+
   const loadBrowseItems = useCallback(
     async (parent: string, driveId: string | null) => {
-      if (!status?.connected || !canManage) return;
+      if (!browseReady || !canManage) return;
       setBrowseLoading(true);
       try {
         const qs = new URLSearchParams({ parent });
@@ -98,6 +106,7 @@ export default function GoogleDrivePanel({
           items?: DriveBrowseItem[];
           folders: SyncFolder[];
         }>(`/integrations/google-drive/folders?${qs.toString()}`);
+        setMessage('');
         if (Array.isArray(data.items)) {
           setBrowseItems(data.items);
         } else {
@@ -110,47 +119,56 @@ export default function GoogleDrivePanel({
             }))
           );
         }
-      } catch {
+      } catch (err: unknown) {
         setBrowseItems([]);
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error;
+        setMessage(msg || 'Google Drive connection failed');
+        setMessageTone('error');
       } finally {
         setBrowseLoading(false);
       }
     },
-    [status?.connected, canManage]
+    [browseReady, canManage]
   );
 
   useEffect(() => {
-    if (!status?.connected || !canManage) return;
+    if (!browseReady || !canManage) return;
     void loadBrowseItems(browseParent, browseDriveId);
-  }, [status?.connected, canManage, browseParent, browseDriveId, loadBrowseItems]);
+  }, [browseReady, canManage, browseParent, browseDriveId, loadBrowseItems]);
 
   useEffect(() => {
-    if (!status?.connected || !canManage) return;
+    if (!browseReady || !canManage) return;
     api
       .get<{ count: number }>('/integrations/google-drive/drives')
-      .then(({ data }) => setSharedDriveCount(data.count))
-      .catch(() => setSharedDriveCount(null));
-  }, [status?.connected, canManage]);
+      .then(({ data }) => {
+        setSharedDriveCount(data.count);
+      })
+      .catch((err: unknown) => {
+        setSharedDriveCount(null);
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error;
+        if (msg) {
+          setMessage(msg);
+          setMessageTone('error');
+        }
+      });
+  }, [browseReady, canManage]);
 
   // Live refresh while panel is open (Drive listing, not Document Library import)
   useEffect(() => {
-    if (!status?.connected || !canManage) return;
+    if (!browseReady || !canManage) return;
     const id = window.setInterval(() => {
       void loadBrowseItems(browseParent, browseDriveId);
     }, 15_000);
     return () => window.clearInterval(id);
-  }, [status?.connected, canManage, browseParent, browseDriveId, loadBrowseItems]);
+  }, [browseReady, canManage, browseParent, browseDriveId, loadBrowseItems]);
 
   const switchBrowseScope = (scope: 'my' | 'shared') => {
     setBrowseScope(scope);
     setBrowseStack([]);
     setBrowseDriveId(null);
     setBrowseParent(scope === 'shared' ? SHARED_DRIVES_ROOT : 'root');
-  };
-
-  const showMsg = (text: string, tone: 'info' | 'error' | 'success' = 'info') => {
-    setMessage(text);
-    setMessageTone(tone);
   };
 
   const connect = async () => {
@@ -273,7 +291,10 @@ export default function GoogleDrivePanel({
         <p className="text-sm text-amber-700 dark:text-amber-300 mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
           Server admin must set <code className="text-xs">GOOGLE_CLIENT_ID</code>,{' '}
           <code className="text-xs">GOOGLE_CLIENT_SECRET</code>, and{' '}
-          <code className="text-xs">GOOGLE_REDIRECT_URI</code> in server <code className="text-xs">.env</code>.
+          <code className="text-xs">GOOGLE_REDIRECT_URI</code> in{' '}
+          <code className="text-xs">.env.kvm2</code> (or API <code className="text-xs">.env</code>), then
+          recreate the API container. Browse and sync stay blocked until then
+          {status?.connected ? ' — Disconnect after credentials are live, then Connect again' : ''}.
         </p>
       )}
 
@@ -292,7 +313,14 @@ export default function GoogleDrivePanel({
             )}
           </p>
 
-          {canManage && (
+          {canManage && !browseReady && status?.connected && (
+            <p className="text-sm text-danger">
+              Google Drive connection failed — OAuth credentials are missing on the API server, so
+              Shared drives cannot be listed.
+            </p>
+          )}
+
+          {canManage && browseReady && (
             <>
               <fieldset>
                 <legend className="block text-xs font-medium text-foreground-secondary mb-2">
@@ -461,6 +489,12 @@ export default function GoogleDrivePanel({
                 </Button>
               </div>
             </>
+          )}
+
+          {canManage && status?.connected && !browseReady && (
+            <Button type="button" variant="outline" size="sm" className="text-danger" onClick={disconnect}>
+              Disconnect
+            </Button>
           )}
         </div>
       ) : canManage ? (

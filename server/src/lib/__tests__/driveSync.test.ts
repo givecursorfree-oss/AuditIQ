@@ -1,5 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { parseSyncFolders, serializeSyncFolders } from '../driveSync.js';
+import {
+  parseGoogleDriveFolderId,
+  parseSyncFolders,
+  serializeSyncFolders,
+} from '../driveSync.js';
+
+describe('parseGoogleDriveFolderId', () => {
+  it('accepts raw ids', () => {
+    expect(parseGoogleDriveFolderId('1aBcDeFgHiJkLmNoPqRsTuVwXyZ')).toBe(
+      '1aBcDeFgHiJkLmNoPqRsTuVwXyZ'
+    );
+  });
+
+  it('parses folder URLs', () => {
+    expect(
+      parseGoogleDriveFolderId(
+        'https://drive.google.com/drive/folders/0ABcdSharedDriveXYZ?usp=sharing'
+      )
+    ).toBe('0ABcdSharedDriveXYZ');
+  });
+
+  it('parses open?id= URLs', () => {
+    expect(
+      parseGoogleDriveFolderId('https://drive.google.com/open?id=1folderIdHere99')
+    ).toBe('1folderIdHere99');
+  });
+
+  it('rejects garbage', () => {
+    expect(parseGoogleDriveFolderId('')).toBeNull();
+    expect(parseGoogleDriveFolderId('not a link')).toBeNull();
+  });
+});
 
 describe('parseSyncFolders', () => {
   it('parses legacy string array', () => {

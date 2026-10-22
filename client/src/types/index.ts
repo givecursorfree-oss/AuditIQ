@@ -219,6 +219,8 @@ export interface DriveBrowseItem {
 export interface GoogleDriveStatus {
   configured: boolean;
   connected: boolean;
+  /** True when OAuth env is set and a connection exists — browse/sync/link work. */
+  browseReady?: boolean;
   googleEmail: string | null;
   folderIds: string[];
   folders?: SyncFolder[];
