@@ -1012,6 +1012,8 @@ model CompOffRequest {
   managerApprovedById  String?
   managerApprover      User?     @relation("CompOffManager", fields: [managerApprovedById], references: [id], onDelete: SetNull)
   managerApprovedAt    DateTime?
+  /// Optional Manager/Partner remark on approve (or general review note).
+  managerRemark        String?   @db.Text
   hrCreditedById       String?
   hrCreditor           User?     @relation("CompOffHr", fields: [hrCreditedById], references: [id], onDelete: SetNull)
   hrCreditedAt         DateTime?

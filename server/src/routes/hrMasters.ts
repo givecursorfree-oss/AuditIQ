@@ -320,9 +320,11 @@ router.post('/comp-off', async (req: AuthRequest, res: Response): Promise<void> 
       .object({
         workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         days: z.number().min(0.5).max(2).optional(),
+        halfDay: z.boolean().optional(),
         reason: z.string().max(2000).optional(),
       })
       .parse(req.body);
+    const days = body.halfDay ? 0.5 : (body.days ?? DEFAULT_COMP_OFF_DAYS);
 
     const workDate = new Date(`${body.workDate}T00:00:00.000Z`);
     if (!(await isCompOffEligibleDate(firmId, workDate))) {
@@ -349,7 +351,7 @@ router.post('/comp-off', async (req: AuthRequest, res: Response): Promise<void> 
         firmId,
         userId: req.user!.id,
         workDate,
-        days: body.days ?? DEFAULT_COMP_OFF_DAYS,
+        days,
         reason: body.reason,
         status: COMP_OFF_PENDING,
       },
@@ -379,8 +381,10 @@ router.patch('/comp-off/:id', async (req: AuthRequest, res: Response): Promise<v
       .object({
         status: z.enum([COMP_OFF_MANAGER_APPROVED, COMP_OFF_HR_CREDITED, COMP_OFF_REJECTED]),
         rejectionReason: z.string().max(2000).optional(),
+        managerRemark: z.string().max(2000).optional(),
       })
       .parse(req.body);
+    const remark = body.managerRemark?.trim() || undefined;
 
     const row = await prisma.compOffRequest.findFirst({
       where: { id: req.params.id, firmId },
@@ -407,6 +411,7 @@ router.patch('/comp-off/:id', async (req: AuthRequest, res: Response): Promise<v
           status: COMP_OFF_MANAGER_APPROVED,
           managerApprovedById: req.user!.id,
           managerApprovedAt: new Date(),
+          ...(remark ? { managerRemark: remark } : {}),
         },
         include: { user: { select: userSelect } },
       });
@@ -467,7 +472,8 @@ router.patch('/comp-off/:id', async (req: AuthRequest, res: Response): Promise<v
         status: COMP_OFF_REJECTED,
         rejectedById: req.user!.id,
         rejectedAt: new Date(),
-        rejectionReason: body.rejectionReason,
+        rejectionReason: body.rejectionReason?.trim() || remark || undefined,
+        ...(remark ? { managerRemark: remark } : {}),
       },
       include: { user: { select: userSelect } },
     });

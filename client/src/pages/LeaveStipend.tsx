@@ -80,6 +80,8 @@ interface CompOffRequest {
   workDate: string;
   days: number;
   reason?: string | null;
+  managerRemark?: string | null;
+  rejectionReason?: string | null;
   status: string;
   user: { firstName: string; lastName: string; initials: string };
 }
@@ -109,7 +111,13 @@ export default function LeaveStipend() {
   const [compOffForm, setCompOffForm] = useState({
     workDate: new Date().toISOString().slice(0, 10),
     reason: '',
+    halfDay: false,
   });
+  const [compOffReview, setCompOffReview] = useState<{
+    id: string;
+    status: 'ManagerApproved' | 'HrCredited' | 'Rejected';
+  } | null>(null);
+  const [compOffRemark, setCompOffRemark] = useState('');
   const [holidays, setHolidays] = useState<{ id: string; date: string; name: string }[]>([]);
   const [holidayDate, setHolidayDate] = useState(new Date().toISOString().slice(0, 10));
   const [holidayName, setHolidayName] = useState('');
@@ -305,12 +313,14 @@ export default function LeaveStipend() {
       await api.post('/hr-masters/comp-off', {
         workDate: compOffForm.workDate,
         reason: compOffForm.reason || undefined,
+        halfDay: compOffForm.halfDay,
+        days: compOffForm.halfDay ? 0.5 : 1,
       });
       await appAlert({
         title: 'Comp-off submitted',
         message: 'Sent to Manager/Partner for approval. HR will credit leave after verification.',
       });
-      setCompOffForm({ ...compOffForm, reason: '' });
+      setCompOffForm({ ...compOffForm, reason: '', halfDay: false });
       await load();
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
@@ -318,9 +328,22 @@ export default function LeaveStipend() {
     }
   }
 
-  async function patchCompOff(id: string, status: 'ManagerApproved' | 'HrCredited' | 'Rejected') {
+  function startCompOffReview(id: string, status: 'ManagerApproved' | 'HrCredited' | 'Rejected') {
+    setCompOffReview({ id, status });
+    setCompOffRemark('');
+  }
+
+  async function confirmCompOffReview() {
+    if (!compOffReview) return;
+    const { id, status } = compOffReview;
     try {
-      await api.patch(`/hr-masters/comp-off/${id}`, { status });
+      await api.patch(`/hr-masters/comp-off/${id}`, {
+        status,
+        managerRemark: compOffRemark.trim() || undefined,
+        rejectionReason: status === 'Rejected' ? compOffRemark.trim() || undefined : undefined,
+      });
+      setCompOffReview(null);
+      setCompOffRemark('');
       await appAlert({
         title: 'Done',
         message:
@@ -705,6 +728,14 @@ export default function LeaveStipend() {
                     onChange={(e) => setCompOffForm({ ...compOffForm, workDate: e.target.value })}
                   />
                 </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={compOffForm.halfDay}
+                    onChange={(e) => setCompOffForm({ ...compOffForm, halfDay: e.target.checked })}
+                  />
+                  Half day (0.5)
+                </label>
                 <label className="block">
                   <span className="text-sm text-muted-foreground">Reason / notes</span>
                   <textarea
@@ -720,6 +751,43 @@ export default function LeaveStipend() {
               </div>
             </PanelCard>
           )}
+          {compOffReview && (
+            <PanelCard
+              title={
+                compOffReview.status === 'Rejected'
+                  ? 'Reject comp-off'
+                  : compOffReview.status === 'HrCredited'
+                    ? 'Credit leave'
+                    : 'Approve comp-off'
+              }
+            >
+              <label className="block mb-3">
+                <span className="text-sm text-muted-foreground">Remark (optional)</span>
+                <textarea
+                  className="input-field mt-1 w-full"
+                  rows={2}
+                  value={compOffRemark}
+                  onChange={(e) => setCompOffRemark(e.target.value)}
+                  aria-label="Manager or Partner remark"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={() => void confirmCompOffReview()}>
+                  Confirm
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setCompOffReview(null);
+                    setCompOffRemark('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </PanelCard>
+          )}
           <PanelCard title="Comp-off requests" bodyClassName="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -728,6 +796,7 @@ export default function LeaveStipend() {
                     <th className="px-4 py-3">Staff</th>
                     <th className="px-4 py-3">Work date</th>
                     <th className="px-4 py-3 text-right">Days</th>
+                    <th className="px-4 py-3">Notes</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Actions</th>
                   </tr>
@@ -739,7 +808,13 @@ export default function LeaveStipend() {
                         {c.user.firstName} {c.user.lastName}
                       </td>
                       <td>{new Date(c.workDate).toLocaleDateString('en-IN')}</td>
-                      <td className="text-right">{c.days}</td>
+                      <td className="text-right">{c.days === 0.5 ? '0.5' : c.days}</td>
+                      <td className="px-4 py-2 max-w-[14rem] text-xs text-muted-foreground">
+                        {c.reason ? <div>{c.reason}</div> : null}
+                        {c.managerRemark ? <div>Mgr: {c.managerRemark}</div> : null}
+                        {c.rejectionReason ? <div>Reject: {c.rejectionReason}</div> : null}
+                        {!c.reason && !c.managerRemark && !c.rejectionReason ? '—' : null}
+                      </td>
                       <td>
                         <ApprovalStatusBadge status={c.status} />
                       </td>
@@ -750,7 +825,7 @@ export default function LeaveStipend() {
                               type="button"
                               variant="success"
                               size="sm"
-                              onClick={() => void patchCompOff(c.id, 'ManagerApproved')}
+                              onClick={() => startCompOffReview(c.id, 'ManagerApproved')}
                             >
                               Approve (Mgr)
                             </Button>
@@ -761,7 +836,7 @@ export default function LeaveStipend() {
                               type="button"
                               size="sm"
                               variant="success"
-                              onClick={() => void patchCompOff(c.id, 'HrCredited')}
+                              onClick={() => startCompOffReview(c.id, 'HrCredited')}
                             >
                               Credit leave (HR)
                             </Button>
@@ -771,7 +846,7 @@ export default function LeaveStipend() {
                             type="button"
                             variant="destructive"
                             size="sm"
-                            onClick={() => void patchCompOff(c.id, 'Rejected')}
+                            onClick={() => startCompOffReview(c.id, 'Rejected')}
                           >
                             Reject
                           </Button>
@@ -781,7 +856,7 @@ export default function LeaveStipend() {
                   ))}
                   {compOffs.length === 0 && (
                     <tr>
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <EmptyState title="No comp-off requests" description="Comp-off requests will appear here." illustration="person-mail" illustrationSize="sm" />
                       </td>
                     </tr>

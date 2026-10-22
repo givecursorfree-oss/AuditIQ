@@ -514,7 +514,11 @@ router.post('/check-in', async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     let canonicalClient: string | null = null;
-    if (place === PLACE_CLIENT) {
+    // Client Place: required. Office: optional client tagging for the day.
+    if (
+      (place === PLACE_CLIENT || place === PLACE_OFFICE) &&
+      body.clientName?.trim()
+    ) {
       const firmId = req.user!.firmId;
       if (!firmId) {
         res.status(400).json({ error: 'Your account is not linked to a firm' });

@@ -210,7 +210,10 @@ export default function AttendancePage() {
         accuracyMeters: gps.accuracyMeters,
         gpsAttempted: true,
         placeOfWork,
-        clientName: placeOfWork === 'Client Place' ? clientName.trim() : undefined,
+        clientName:
+          placeOfWork === 'Client Place' || placeOfWork === 'Office'
+            ? clientName.trim() || undefined
+            : undefined,
       });
       if (loadingId != null) gooeyToast.dismiss(loadingId);
       gooeyToast.dismiss();
@@ -524,25 +527,32 @@ export default function AttendancePage() {
                           size="sm"
                           variant={placeOfWork === p ? 'default' : 'outline'}
                           className={cn('h-10 min-w-[7rem] flex-1 sm:flex-none', placeOfWork === p && 'ring-1 ring-primary/30')}
-                          onClick={() => setPlaceOfWork(p)}
+                          onClick={() => {
+                            setPlaceOfWork(p);
+                            if (p === 'Work from Home') setClientName('');
+                          }}
                         >
                           {p}
                         </Button>
                       ))}
                     </div>
                   </div>
-                  {placeOfWork === 'Client Place' && (
+                  {(placeOfWork === 'Client Place' || placeOfWork === 'Office') && (
                     <div className="space-y-1.5">
-                      <Label htmlFor="attendance-client">Client</Label>
+                      <Label htmlFor="attendance-client">
+                        Client{placeOfWork === 'Office' ? ' (optional)' : ''}
+                      </Label>
                       <select
                         id="attendance-client"
                         aria-label="Client"
                         className="input-field h-10 w-full"
-                        required
+                        required={placeOfWork === 'Client Place'}
                         value={clientName}
                         onChange={(e) => setClientName(e.target.value)}
                       >
-                        <option value="">Select client</option>
+                        <option value="">
+                          {placeOfWork === 'Office' ? 'No client / —' : 'Select client'}
+                        </option>
                         {clientOptions.map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
