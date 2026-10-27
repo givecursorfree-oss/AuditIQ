@@ -449,6 +449,7 @@ router.patch('/comp-off/:id', async (req: AuthRequest, res: Response): Promise<v
             status: COMP_OFF_HR_CREDITED,
             hrCreditedById: req.user!.id,
             hrCreditedAt: new Date(),
+            ...(remark ? { managerRemark: remark } : {}),
           },
           include: { user: { select: userSelect } },
         });

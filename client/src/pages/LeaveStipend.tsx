@@ -12,6 +12,13 @@ import { EmptyState } from '../components/layout/StatePanels';
 import { ErrorBanner } from '../components/layout/ErrorBanner';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { apiAbsoluteUrl } from '@/lib/apiBase';
 import { formatApiError } from '@/lib/apiErrors';
 
@@ -118,6 +125,9 @@ export default function LeaveStipend() {
     status: 'ManagerApproved' | 'HrCredited' | 'Rejected';
   } | null>(null);
   const [compOffRemark, setCompOffRemark] = useState('');
+  const [compOffView, setCompOffView] = useState<
+    'Pending' | 'ManagerApproved' | 'HrCredited' | 'Rejected' | 'all'
+  >('Pending');
   const [holidays, setHolidays] = useState<{ id: string; date: string; name: string }[]>([]);
   const [holidayDate, setHolidayDate] = useState(new Date().toISOString().slice(0, 10));
   const [holidayName, setHolidayName] = useState('');
@@ -163,8 +173,17 @@ export default function LeaveStipend() {
         setIcaiMin(r.data.icaiMinimum || {});
       }),
       api.get<LeaveRequest[]>(`/attendance/leaves/calendar?month=${month}`).then((r) => setCalendar(r.data)),
-      api.get<CompOffRequest[]>('/hr-masters/comp-off').then((r) => setCompOffs(r.data)).catch(() => setCompOffs([])),
     ];
+    {
+      const compOffQs =
+        compOffView === 'all' ? '' : `?status=${encodeURIComponent(compOffView)}`;
+      tasks.push(
+        api
+          .get<CompOffRequest[]>(`/hr-masters/comp-off${compOffQs}`)
+          .then((r) => setCompOffs(r.data))
+          .catch(() => setCompOffs([]))
+      );
+    }
     if (canManageHolidays) {
       tasks.push(
         api
@@ -187,7 +206,9 @@ export default function LeaveStipend() {
     }
   }
 
-  useEffect(() => { void load(); }, [month, canManage, canManageHolidays, inboxView]);
+  useEffect(() => {
+    void load();
+  }, [month, canManage, canManageHolidays, inboxView, compOffView]);
 
   // Real-time calendar: refresh while Calendar tab is open
   useEffect(() => {
@@ -751,30 +772,37 @@ export default function LeaveStipend() {
               </div>
             </PanelCard>
           )}
-          {compOffReview && (
-            <PanelCard
-              title={
-                compOffReview.status === 'Rejected'
-                  ? 'Reject comp-off'
-                  : compOffReview.status === 'HrCredited'
-                    ? 'Credit leave'
-                    : 'Approve comp-off'
+          <Dialog
+            open={Boolean(compOffReview)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setCompOffReview(null);
+                setCompOffRemark('');
               }
-            >
-              <label className="block mb-3">
-                <span className="text-sm text-muted-foreground">Remark (optional)</span>
+            }}
+          >
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>
+                  {compOffReview?.status === 'Rejected'
+                    ? 'Reject comp-off'
+                    : compOffReview?.status === 'HrCredited'
+                      ? 'Credit leave'
+                      : 'Approve comp-off'}
+                </DialogTitle>
+              </DialogHeader>
+              <label className="block">
+                <span className="text-sm text-muted-foreground">Comments / Remarks</span>
                 <textarea
                   className="input-field mt-1 w-full"
-                  rows={2}
+                  rows={3}
                   value={compOffRemark}
                   onChange={(e) => setCompOffRemark(e.target.value)}
-                  aria-label="Manager or Partner remark"
+                  aria-label="Comments or remarks"
+                  autoFocus
                 />
               </label>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => void confirmCompOffReview()}>
-                  Confirm
-                </Button>
+              <DialogFooter>
                 <Button
                   type="button"
                   variant="outline"
@@ -785,10 +813,30 @@ export default function LeaveStipend() {
                 >
                   Cancel
                 </Button>
-              </div>
-            </PanelCard>
-          )}
-          <PanelCard title="Comp-off requests" bodyClassName="p-0">
+                <Button type="button" onClick={() => void confirmCompOffReview()}>
+                  Confirm
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <PanelCard
+            title="Comp-off requests"
+            bodyClassName="p-0"
+            action={
+              <select
+                className="input-field w-auto"
+                aria-label="Comp-off status filter"
+                value={compOffView}
+                onChange={(e) => setCompOffView(e.target.value as typeof compOffView)}
+              >
+                <option value="Pending">Pending</option>
+                <option value="ManagerApproved">Manager approved</option>
+                <option value="HrCredited">HR credited</option>
+                <option value="Rejected">Rejected</option>
+                <option value="all">All requests</option>
+              </select>
+            }
+          >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -808,7 +856,9 @@ export default function LeaveStipend() {
                         {c.user.firstName} {c.user.lastName}
                       </td>
                       <td>{new Date(c.workDate).toLocaleDateString('en-IN')}</td>
-                      <td className="text-right">{c.days === 0.5 ? '0.5' : c.days}</td>
+                      <td className="text-right">
+                        {c.days === 0.5 ? '0.5 (Half day)' : c.days}
+                      </td>
                       <td className="px-4 py-2 max-w-[14rem] text-xs text-muted-foreground">
                         {c.reason ? <div>{c.reason}</div> : null}
                         {c.managerRemark ? <div>Mgr: {c.managerRemark}</div> : null}
@@ -857,7 +907,20 @@ export default function LeaveStipend() {
                   {compOffs.length === 0 && (
                     <tr>
                       <td colSpan={6}>
-                        <EmptyState title="No comp-off requests" description="Comp-off requests will appear here." illustration="person-mail" illustrationSize="sm" />
+                        <EmptyState
+                          title={
+                            compOffView === 'Pending'
+                              ? 'No comp-off awaiting approval'
+                              : 'No comp-off in this view'
+                          }
+                          description={
+                            compOffView === 'Pending'
+                              ? 'Pending comp-off requests will show here.'
+                              : 'No comp-off requests match this filter.'
+                          }
+                          illustration="person-mail"
+                          illustrationSize="sm"
+                        />
                       </td>
                     </tr>
                   )}
