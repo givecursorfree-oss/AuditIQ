@@ -1,22 +1,13 @@
 import { DotmSquare3 } from '@/components/ui/dotm-square-3';
 import {
   OCR_STATUS_LABELS,
-  claimEvidenceLines,
   formatInr,
   ocrAmountMismatch,
-  type ClaimEvidenceTone,
   type StaffClaimRow,
 } from '@/lib/expenseClaims';
 
-const EVIDENCE_TONE: Record<ClaimEvidenceTone, string> = {
-  success: 'text-success',
-  warning: 'text-warning',
-  muted: 'text-muted-foreground',
-  error: 'text-destructive',
-};
-
+/** Claim-level OCR only. Log-off / thumbprint / duplicates live on each participant. */
 export function ClaimValidationPanel({ claim }: { claim: StaffClaimRow }) {
-  const evidence = claim.claimType === 'food' ? claimEvidenceLines(claim.policyFlags) : [];
   const ocrStatus = claim.ocrStatus ?? 'pending';
   const ocrAmount = claim.ocrDetectedAmount;
   const mismatch = ocrAmountMismatch(claim.amount, ocrAmount);
@@ -65,20 +56,6 @@ export function ClaimValidationPanel({ claim }: { claim: StaffClaimRow }) {
           </dd>
         </div>
       </dl>
-
-      {evidence.length > 0 && (
-        <ul className="space-y-0.5 text-[11px]">
-          {evidence.map((line) => (
-            <li key={line.label}>
-              <span className="text-foreground">{line.label}: </span>
-              <span className={EVIDENCE_TONE[line.tone]}>
-                {line.value}
-                {line.mark ? ` ${line.mark}` : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

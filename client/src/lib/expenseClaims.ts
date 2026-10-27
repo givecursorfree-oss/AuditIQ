@@ -112,6 +112,15 @@ export interface ClaimParticipantRow {
   manager?: { id: string; firstName: string; lastName: string } | null;
 }
 
+/** Per covered person inside policyFlags.people (food claims). */
+export interface ClaimPersonPolicyFlags {
+  userId: string;
+  computerLogoffTime?: string | null;
+  fingerprintLogoffTime?: string | null;
+  duplicateSameDay?: boolean;
+  duplicateClaimIds?: string[];
+}
+
 export interface ClaimManagerApprovalRow {
   id: string;
   status: string;
@@ -153,6 +162,7 @@ export interface StaffClaimRow {
     fingerprintLogoffTime?: string | null;
     logoffMismatch?: boolean;
     logoffMismatchReason?: string | null;
+    people?: ClaimPersonPolicyFlags[];
   } | null;
   staff: { firstName: string; lastName: string };
   expensePayer?: { id: string; firstName: string; lastName: string } | null;
@@ -254,12 +264,28 @@ function evidenceLine(
 
 /** Two evidence rows for the manager. They do not approve or reject the claim. */
 export function claimEvidenceLines(
-  flags: StaffClaimRow['policyFlags'] | null | undefined
+  flags: Pick<ClaimPersonPolicyFlags, 'computerLogoffTime' | 'fingerprintLogoffTime'> | null | undefined
 ): [ClaimEvidenceLine, ClaimEvidenceLine] {
   return [
     evidenceLine('App log-off', flags?.computerLogoffTime, 'Not recorded'),
     evidenceLine('Thumbprint out', flags?.fingerprintLogoffTime, 'Not available'),
   ];
+}
+
+export function personPolicyFlags(
+  claim: Pick<StaffClaimRow, 'policyFlags'>,
+  userId: string
+): ClaimPersonPolicyFlags | undefined {
+  return claim.policyFlags?.people?.find((p) => p.userId === userId);
+}
+
+export function participantManagerApproval(
+  claim: Pick<StaffClaimRow, 'managerApprovals'>,
+  participant: ClaimParticipantRow
+): ClaimManagerApprovalRow | undefined {
+  const managerId = participant.manager?.id;
+  if (!managerId) return undefined;
+  return claim.managerApprovals?.find((a) => a.manager.id === managerId);
 }
 
 export function claimStatusBadgeVariant(

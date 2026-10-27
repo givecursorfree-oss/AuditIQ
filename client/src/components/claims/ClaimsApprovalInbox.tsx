@@ -12,6 +12,7 @@ import { RangeSlider } from '@/components/motion/range-slider';
 import { ClaimReceiptLightbox } from '@/components/claims/ClaimReceiptLightbox';
 import { ClaimFirmHeader } from '@/components/claims/ClaimFirmHeader';
 import { ClaimValidationPanel } from '@/components/claims/ClaimValidationPanel';
+import { ClaimParticipantEvidence } from '@/components/claims/ClaimParticipantEvidence';
 import {
   CLAIM_TYPE_LABELS,
   MANAGER_APPROVAL_STATUS_LABELS,
@@ -100,9 +101,12 @@ function ClaimActionBar({
   );
 }
 
+type ApproverInboxView = 'pending' | 'approved' | 'rejected' | 'all';
+
 export function ClaimsApprovalInbox() {
   const { user } = useAuth();
   const isPartnerOrAdmin = user?.role === 'Partner' || user?.role === 'Admin';
+  const [inboxView, setInboxView] = useState<ApproverInboxView>('pending');
   const [claims, setClaims] = useState<StaffClaimRow[]>([]);
   const [batches, setBatches] = useState<BatchApprovalRow[]>([]);
   const [batchExpanded, setBatchExpanded] = useState<Record<string, boolean>>({});
@@ -129,11 +133,11 @@ export function ClaimsApprovalInbox() {
   const load = useCallback(() => {
     setLoadError(null);
     void api
-      .get<{ claims: StaffClaimRow[] }>('/expense-claims/pending')
+      .get<{ claims: StaffClaimRow[] }>(`/expense-claims/pending?status=${encodeURIComponent(inboxView)}`)
       .then((r) => setClaims(r.data.claims))
       .catch((e) => setLoadError(formatApiError(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [inboxView]);
 
   const loadBatches = useCallback(() => {
     if (!isPartnerOrAdmin) return;
@@ -150,11 +154,12 @@ export function ClaimsApprovalInbox() {
   }, [load, loadBatches]);
 
   useEffect(() => {
+    if (inboxView !== 'pending') return;
     const needsOcrPoll = claims.some((c) => (c.ocrStatus ?? 'pending') === 'pending');
     if (!needsOcrPoll) return;
     const timer = window.setInterval(() => load(), 5000);
     return () => window.clearInterval(timer);
-  }, [claims, load]);
+  }, [claims, load, inboxView]);
 
   useEffect(() => {
     void (async () => {
@@ -321,9 +326,22 @@ export function ClaimsApprovalInbox() {
   if (loading) return <PageLoading className="py-8" label="Loading claims…" />;
   if (loadError) return <ErrorBanner message={loadError} onRetry={() => { setLoading(true); load(); }} />;
 
+  const emptyTitle =
+    inboxView === 'pending'
+      ? 'No pending claims'
+      : inboxView === 'approved'
+        ? 'No accepted claims'
+        : inboxView === 'rejected'
+          ? 'No rejected claims'
+          : 'No claims in this view';
+  const emptyDescription =
+    inboxView === 'pending'
+      ? 'Food, travel, and group claims routed to you will appear here.'
+      : 'No food or travel claims match this filter.';
+
   return (
     <div className="space-y-6">
-      {isPartnerOrAdmin && (
+      {isPartnerOrAdmin && inboxView === 'pending' && (
         <PanelCard title="Pending Approval">
           {batches.length === 0 ? (
             <p className="text-sm text-muted-foreground py-2">No batches pending approval.</p>
@@ -422,10 +440,26 @@ export function ClaimsApprovalInbox() {
         </PanelCard>
       )}
 
+      <PanelCard
+        title="Food & travel"
+        action={
+          <select
+            className="input-field w-auto"
+            aria-label="Claim status filter"
+            value={inboxView}
+            onChange={(e) => setInboxView(e.target.value as ApproverInboxView)}
+          >
+            <option value="pending">Pending</option>
+            <option value="approved">Accepted</option>
+            <option value="rejected">Rejected</option>
+            <option value="all">All</option>
+          </select>
+        }
+      >
       {claims.length === 0 ? (
         <EmptyState
-          title="No pending claims"
-          description="Food, travel, and group claims routed to you will appear here."
+          title={emptyTitle}
+          description={emptyDescription}
           illustration="person-quiet"
           className="py-6"
         />
@@ -574,7 +608,7 @@ export function ClaimsApprovalInbox() {
                     Participants ({c.participants!.length})
                   </button>
                   {expanded[c.id] && (
-                    <ul className="mt-1 space-y-0.5 border-l border-border pl-2 text-[11px]">
+                    <ul className="mt-1 space-y-2 border-l border-border pl-2 text-[11px]">
                       {c.participants!.map((p) => (
                         <li key={p.id} className="space-y-0.5">
                           <div className="flex gap-2">
@@ -588,6 +622,7 @@ export function ClaimsApprovalInbox() {
                               .join(' · ') || '—'}
                           </p>
                           {p.notes ? <p>{p.notes}</p> : null}
+                          <ClaimParticipantEvidence claim={c} participant={p} />
                         </li>
                       ))}
                     </ul>
@@ -670,24 +705,26 @@ export function ClaimsApprovalInbox() {
               )}
             </div>
 
-            <footer className="border-t border-border bg-muted/20 px-3 py-3 sm:px-4">
-              <ClaimActionBar
-                isBusy={isBusy}
-                hasReceipt={claimHasRequiredProof(c)}
-                onAccept={() => void approve(c)}
-                onLimit={() => {
-                  setPartialId(c.id);
-                  setPartialAmount(String(maxPartial));
-                  setPartialReason('');
-                  setRejectId(null);
-                }}
-                onReject={() => {
-                  setRejectId(c.id);
-                  setRejectReason('');
-                  setPartialId(null);
-                }}
-              />
-            </footer>
+            {myApproval ? (
+              <footer className="border-t border-border bg-muted/20 px-3 py-3 sm:px-4">
+                <ClaimActionBar
+                  isBusy={isBusy}
+                  hasReceipt={claimHasRequiredProof(c)}
+                  onAccept={() => void approve(c)}
+                  onLimit={() => {
+                    setPartialId(c.id);
+                    setPartialAmount(String(maxPartial));
+                    setPartialReason('');
+                    setRejectId(null);
+                  }}
+                  onReject={() => {
+                    setRejectId(c.id);
+                    setRejectReason('');
+                    setPartialId(null);
+                  }}
+                />
+              </footer>
+            ) : null}
           </article>
         );
       })}
@@ -704,6 +741,7 @@ export function ClaimsApprovalInbox() {
       )}
     </div>
       )}
+      </PanelCard>
     </div>
   );
 }

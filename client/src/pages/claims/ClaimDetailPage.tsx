@@ -11,14 +11,17 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ClaimFirmHeader } from '@/components/claims/ClaimFirmHeader';
 import { ClaimValidationPanel } from '@/components/claims/ClaimValidationPanel';
+import { ClaimParticipantEvidence } from '@/components/claims/ClaimParticipantEvidence';
 import { ClaimReceiptLightbox } from '@/components/claims/ClaimReceiptLightbox';
 import {
   CLAIM_STATUS_LABELS,
   CLAIM_TYPE_LABELS,
+  MANAGER_APPROVAL_STATUS_LABELS,
   PROCESSING_STATUS_LABELS,
   TRAVEL_MODE_LABELS,
   claimStatusBadgeVariant,
   formatInr,
+  managerApprovalBadgeVariant,
   receiptDownloadUrl,
   staffName,
   type StaffClaimRow,
@@ -130,6 +133,18 @@ export default function ClaimDetailPage() {
             )}
           </div>
           <ClaimFirmHeader claim={claim} />
+          {(claim.managerApprovals?.length ?? 0) > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1 text-[11px]">
+              {claim.managerApprovals!.map((a) => (
+                <Badge key={a.id} variant={managerApprovalBadgeVariant(a.status)} className="font-normal">
+                  {staffName(a.manager)} · {MANAGER_APPROVAL_STATUS_LABELS[a.status] ?? a.status}
+                  {a.status === 'partially_approved' && a.approvedAmount != null
+                    ? ` (${formatInr(a.approvedAmount)})`
+                    : ''}
+                </Badge>
+              ))}
+            </div>
+          )}
         </PanelCard>
 
         {canSeeValidation && (
@@ -262,9 +277,9 @@ export default function ClaimDetailPage() {
 
         {(claim.participants?.length ?? 0) > 0 && (
           <PanelCard title="People">
-            <ul className="text-sm space-y-1">
+            <ul className="text-sm space-y-3">
               {claim.participants!.map((p) => (
-                <li key={p.id} className="space-y-0.5">
+                <li key={p.id} className="space-y-1 border-b border-border pb-3 last:border-0 last:pb-0">
                   <div className="flex flex-wrap gap-2">
                     <span>{staffName(p.user)}</span>
                     <span className="text-muted-foreground">{p.engagement?.title ?? '—'}</span>
@@ -276,6 +291,9 @@ export default function ClaimDetailPage() {
                       .join(' · ') || '—'}
                   </p>
                   {p.notes ? <p>{p.notes}</p> : null}
+                  {canSeeValidation ? (
+                    <ClaimParticipantEvidence claim={claim} participant={p} />
+                  ) : null}
                 </li>
               ))}
             </ul>

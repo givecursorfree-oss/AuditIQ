@@ -174,14 +174,50 @@ function storedFoodFlags(value: Prisma.JsonValue | null): StoredFoodFlags {
   return value as StoredFoodFlags;
 }
 
+/** Other non-rejected food claims covering the same person on the same calendar day. */
+async function sameDayFoodDuplicateMap(
+  firmId: string,
+  expenseDate: Date,
+  userIds: string[],
+  excludeClaimId?: string
+): Promise<Map<string, string[]>> {
+  const unique = [...new Set(userIds.filter(Boolean))];
+  const out = new Map<string, string[]>();
+  if (unique.length === 0) return out;
+
+  const rows = await prisma.expenseClaimParticipant.findMany({
+    where: {
+      userId: { in: unique },
+      claim: {
+        firmId,
+        claimType: 'food',
+        expenseDate,
+        claimStatus: { not: 'rejected' },
+        ...(excludeClaimId ? { id: { not: excludeClaimId } } : {}),
+      },
+    },
+    select: { userId: true, claimId: true },
+  });
+
+  for (const row of rows) {
+    const list = out.get(row.userId) ?? [];
+    if (!list.includes(row.claimId)) list.push(row.claimId);
+    out.set(row.userId, list);
+  }
+  return out;
+}
+
 /** Attendance punch can land after submit, so manager views re-read app log-off. */
 async function withFreshAppLogoff<
   T extends {
+    id: string;
+    firmId: string;
     claimType: string;
     expenseDate: Date;
     expensePayerId: string | null;
     staffId: string;
     policyFlags: Prisma.JsonValue;
+    participants?: Array<{ userId: string }>;
   },
 >(claim: T): Promise<T> {
   if (claim.claimType !== 'food') return claim;
@@ -192,18 +228,34 @@ async function withFreshAppLogoff<
     claim.expenseDate,
     existing.fingerprintLogoffTime ?? null
   );
-  const people = Array.isArray(existing.people)
-    ? await Promise.all(
-        existing.people.map(async (person) => ({
-          ...person,
-          ...(await buildFoodPolicyFlags(
-            person.userId,
-            claim.expenseDate,
-            person.fingerprintLogoffTime ?? null
-          )),
-        }))
-      )
-    : undefined;
+  const personIds =
+    Array.isArray(existing.people) && existing.people.length > 0
+      ? existing.people.map((p) => p.userId)
+      : (claim.participants ?? []).map((p) => p.userId);
+  const dupMap = await sameDayFoodDuplicateMap(claim.firmId, claim.expenseDate, personIds, claim.id);
+  const people =
+    personIds.length > 0
+      ? await Promise.all(
+          personIds.map(async (userId) => {
+            const prior = Array.isArray(existing.people)
+              ? existing.people.find((p) => p.userId === userId)
+              : undefined;
+            const flags = await buildFoodPolicyFlags(
+              userId,
+              claim.expenseDate,
+              prior?.fingerprintLogoffTime ?? null
+            );
+            const duplicateClaimIds = dupMap.get(userId) ?? [];
+            return {
+              ...prior,
+              userId,
+              ...flags,
+              duplicateSameDay: duplicateClaimIds.length > 0,
+              ...(duplicateClaimIds.length > 0 ? { duplicateClaimIds } : {}),
+            };
+          })
+        )
+      : undefined;
   return {
     ...claim,
     policyFlags: { ...existing, ...payerFlags, ...(people ? { people } : {}) } as Prisma.JsonValue,
@@ -401,8 +453,18 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     let policyFlags: Record<string, unknown> | undefined;
     if (body.claimType === 'food') {
       const coveredIds = [...new Set(participantRows.map((p) => p.userId))];
+      const dupMap = await sameDayFoodDuplicateMap(req.user!.firmId!, expenseDate, coveredIds);
       const perPerson = await Promise.all(
-        coveredIds.map(async (uid) => ({ userId: uid, ...(await buildFoodPolicyFlags(uid, expenseDate)) }))
+        coveredIds.map(async (uid) => {
+          const flags = await buildFoodPolicyFlags(uid, expenseDate);
+          const duplicateClaimIds = dupMap.get(uid) ?? [];
+          return {
+            userId: uid,
+            ...flags,
+            duplicateSameDay: duplicateClaimIds.length > 0,
+            ...(duplicateClaimIds.length > 0 ? { duplicateClaimIds } : {}),
+          };
+        })
       );
       const payerFlags = await buildFoodPolicyFlags(payerId, expenseDate);
       policyFlags = {
@@ -612,29 +674,78 @@ router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => 
   }
 });
 
+/** Fix claims marked rejected while other managers still have pending/approved rows. */
+async function healWronglyRejectedClaims(firmId: string): Promise<void> {
+  const broken = await prisma.expenseClaim.findMany({
+    where: {
+      firmId,
+      claimStatus: 'rejected',
+      managerApprovals: { some: { status: { not: 'rejected' } } },
+    },
+    select: { id: true },
+    take: 50,
+  });
+  for (const row of broken) {
+    await recomputeClaimStatus(row.id);
+  }
+}
+
+/** Approver Food-Travel inbox. ?status=pending|approved|rejected|all (default pending). */
 router.get('/pending', authorize('Partner', 'Admin', 'Manager'), async (req: AuthRequest, res: Response) => {
   const role = req.user!.role;
-  const where =
-    role === 'Admin'
-      ? {
-          firmId: req.user!.firmId!,
-          claimStatus: { in: ['pending_approval', 'partially_approved'] },
-        }
-      : {
-          firmId: req.user!.firmId!,
-          claimStatus: { in: ['pending_approval', 'partially_approved'] },
-          managerApprovals: { some: { managerId: req.user!.id, status: 'pending' } },
-        };
+  const uid = req.user!.id;
+  const firmId = req.user!.firmId!;
+  const viewRaw = String(req.query.status || 'pending').toLowerCase();
+  const view = ['pending', 'approved', 'rejected', 'all'].includes(viewRaw) ? viewRaw : 'pending';
+
+  await healWronglyRejectedClaims(firmId);
+
+  let where: Prisma.ExpenseClaimWhereInput;
+  if (role === 'Admin') {
+    if (view === 'pending') {
+      where = { firmId, claimStatus: { in: ['pending_approval', 'partially_approved'] } };
+    } else if (view === 'approved') {
+      where = { firmId, claimStatus: { in: ['approved', 'partially_approved'] } };
+    } else if (view === 'rejected') {
+      where = { firmId, claimStatus: 'rejected' };
+    } else {
+      where = { firmId };
+    }
+  } else if (view === 'pending') {
+    where = {
+      firmId,
+      claimStatus: { in: ['pending_approval', 'partially_approved'] },
+      managerApprovals: { some: { managerId: uid, status: 'pending' } },
+    };
+  } else if (view === 'approved') {
+    where = {
+      firmId,
+      managerApprovals: {
+        some: { managerId: uid, status: { in: ['approved', 'partially_approved'] } },
+      },
+    };
+  } else if (view === 'rejected') {
+    where = {
+      firmId,
+      managerApprovals: { some: { managerId: uid, status: 'rejected' } },
+    };
+  } else {
+    where = {
+      firmId,
+      managerApprovals: { some: { managerId: uid } },
+    };
+  }
 
   const claims = await prisma.expenseClaim.findMany({
     where,
     include: claimInclude,
-    orderBy: { submittedAt: 'asc' },
+    orderBy: view === 'pending' ? { submittedAt: 'asc' } : { submittedAt: 'desc' },
+    take: view === 'pending' ? undefined : 100,
   });
   const hydrated = await hydrateEngagements(claims);
   const fresh = await Promise.all(hydrated.map((claim) => withFreshAppLogoff(claim)));
   for (const claim of fresh) recheckBareIdentifierOcr(claim);
-  res.json({ claims: fresh });
+  res.json({ claims: fresh, status: view });
 });
 
 router.get('/approved', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (req: AuthRequest, res: Response) => {
@@ -899,13 +1010,29 @@ router.get('/meta/form-options', authorize('Partner', 'Admin', 'Manager', 'Staff
 /** GET /api/expense-claims/:id — claim detail (staff own / participants / managers / accounts) */
 router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const claim = await prisma.expenseClaim.findFirst({
+    let claim = await prisma.expenseClaim.findFirst({
       where: { id: String(req.params.id), firmId: req.user!.firmId! },
       include: claimInclude,
     });
     if (!claim) {
       res.status(404).json({ error: 'Claim not found' });
       return;
+    }
+    // Heal claims wrongly marked rejected when only some managers rejected.
+    if (
+      claim.claimStatus === 'rejected' &&
+      claim.managerApprovals.length > 0 &&
+      !claim.managerApprovals.every((a) => a.status === 'rejected')
+    ) {
+      await recomputeClaimStatus(claim.id);
+      claim = await prisma.expenseClaim.findFirst({
+        where: { id: claim.id, firmId: req.user!.firmId! },
+        include: claimInclude,
+      });
+      if (!claim) {
+        res.status(404).json({ error: 'Claim not found' });
+        return;
+      }
     }
     const [withEngagement] = await hydrateEngagements([claim]);
     const role = req.user!.role;

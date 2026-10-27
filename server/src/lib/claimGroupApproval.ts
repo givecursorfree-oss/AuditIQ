@@ -216,36 +216,50 @@ export async function repairMissingClaimManagerApprovals(firmId?: string): Promi
   return fixed;
 }
 
-export async function recomputeClaimStatus(claimId: string): Promise<void> {
-  const approvals = await prisma.expenseClaimManagerApproval.findMany({ where: { claimId } });
-  // No manager rows: Partner/Admin must call finalizeClaimWithoutManagers
-  if (approvals.length === 0) return;
-
-  if (approvals.some((a) => a.status === 'rejected')) {
-    await prisma.expenseClaim.update({
-      where: { id: claimId },
-      data: { claimStatus: 'rejected', approvedAmount: null },
-    });
-    return;
+/** Pure rollup: one manager reject must not kill other managers' shares. */
+export function rollupManagerApprovals(
+  approvals: Array<{ status: string; teamAmount: number | string; approvedAmount?: number | string | null }>
+): { claimStatus: string; approvedSum: number } {
+  if (approvals.length === 0) {
+    return { claimStatus: 'pending_approval', approvedSum: 0 };
   }
 
-  const allDone = approvals.every((a) => a.status !== 'pending');
-  const anyPartial = approvals.some((a) => a.status === 'partially_approved');
   const approvedSum = approvals.reduce((s, a) => {
     if (a.status === 'approved') return s + Number(a.teamAmount);
     if (a.status === 'partially_approved' && a.approvedAmount != null) return s + Number(a.approvedAmount);
     return s;
   }, 0);
 
-  let claimStatus: string;
+  const allDone = approvals.every((a) => a.status !== 'pending');
+  const anyRejected = approvals.some((a) => a.status === 'rejected');
+  const anyPartial = approvals.some((a) => a.status === 'partially_approved');
+  const allRejected = approvals.every((a) => a.status === 'rejected');
+
+  if (allDone && (allRejected || approvedSum === 0)) {
+    return { claimStatus: 'rejected', approvedSum: 0 };
+  }
+
   if (!allDone) {
     const anyAction = approvals.some((a) => a.status !== 'pending');
-    claimStatus = anyAction ? 'partially_approved' : 'pending_approval';
-  } else if (anyPartial) {
-    claimStatus = 'partially_approved';
-  } else {
-    claimStatus = 'approved';
+    return {
+      claimStatus: anyAction ? 'partially_approved' : 'pending_approval',
+      approvedSum,
+    };
   }
+
+  if (anyPartial || anyRejected) {
+    return { claimStatus: 'partially_approved', approvedSum };
+  }
+
+  return { claimStatus: 'approved', approvedSum };
+}
+
+export async function recomputeClaimStatus(claimId: string): Promise<void> {
+  const approvals = await prisma.expenseClaimManagerApproval.findMany({ where: { claimId } });
+  // No manager rows: Partner/Admin must call finalizeClaimWithoutManagers
+  if (approvals.length === 0) return;
+
+  const { claimStatus, approvedSum } = rollupManagerApprovals(approvals);
 
   const lastReview = approvals
     .filter((a) => a.reviewedAt)
@@ -255,7 +269,7 @@ export async function recomputeClaimStatus(claimId: string): Promise<void> {
     where: { id: claimId },
     data: {
       claimStatus,
-      approvedAmount: allDone || anyPartial ? new Prisma.Decimal(approvedSum) : null,
+      approvedAmount: approvedSum > 0 ? new Prisma.Decimal(approvedSum) : null,
       managerReviewedById: lastReview?.reviewedById ?? undefined,
       managerReviewedAt: lastReview?.reviewedAt ?? undefined,
     },
