@@ -237,7 +237,7 @@ export default function Approvals() {
           <>
             {['Partner', 'Admin', 'Manager'].includes(user?.role || '') && (
               <Button type="button" variant="outline" size="sm" asChild>
-                <Link to="/claims?tab=approvals">Food–Travel claims →</Link>
+                <Link to="/claims?tab=approvals">Claims Approvals →</Link>
               </Button>
             )}
             {['Partner', 'Admin', 'Manager', 'Accounts'].includes(user?.role || '') && (

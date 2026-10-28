@@ -441,7 +441,7 @@ export function ClaimsApprovalInbox() {
       )}
 
       <PanelCard
-        title="Food & travel"
+        title="Approvals"
         action={
           <select
             className="input-field w-auto"

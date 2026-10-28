@@ -115,8 +115,8 @@ export default function ClaimsHub() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ClaimsTab)} className="space-y-4">
         <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="mine">Mine</TabsTrigger>
-          {canApprove && <TabsTrigger value="approvals">Food–Travel</TabsTrigger>}
+          <TabsTrigger value="mine">My Claims</TabsTrigger>
+          {canApprove && <TabsTrigger value="approvals">Approvals</TabsTrigger>}
           {canApprove && <TabsTrigger value="attendance">Attendance</TabsTrigger>}
           {canBatches && <TabsTrigger value="batches">Batches</TabsTrigger>}
         </TabsList>
