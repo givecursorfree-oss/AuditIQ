@@ -218,7 +218,12 @@ export async function repairMissingClaimManagerApprovals(firmId?: string): Promi
 
 /** Pure rollup: one manager reject must not kill other managers' shares. */
 export function rollupManagerApprovals(
-  approvals: Array<{ status: string; teamAmount: number | string; approvedAmount?: number | string | null }>
+  approvals: Array<{
+    status: string;
+    /** number | string | Prisma.Decimal */
+    teamAmount: { toString(): string } | number | string;
+    approvedAmount?: { toString(): string } | number | string | null;
+  }>
 ): { claimStatus: string; approvedSum: number } {
   if (approvals.length === 0) {
     return { claimStatus: 'pending_approval', approvedSum: 0 };
