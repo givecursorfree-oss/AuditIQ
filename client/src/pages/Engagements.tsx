@@ -448,7 +448,15 @@ export default function Engagements() {
       )}
 
       {/* Create Modal */}
-      {showCreate && <CreateEngagementModal onClose={() => setShowCreate(false)} onCreated={fetchEngagements} />}
+      {showCreate && (
+        <CreateEngagementModal
+          onClose={() => setShowCreate(false)}
+          onCreated={(engagementId) => {
+            void fetchEngagements();
+            if (engagementId) navigate(`/engagements/${engagementId}`);
+          }}
+        />
+      )}
     </AppPageContainer>
   );
 }
@@ -464,7 +472,13 @@ function serviceToEngagementType(code: string): EngagementType {
   return 'Special';
 }
 
-function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateEngagementModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (engagementId?: string) => void;
+}) {
   const [form, setForm] = useState({
     title: '',
     clientId: '',
@@ -569,7 +583,7 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
     setSaving(true);
     setError('');
     try {
-      await api.post('/engagements', {
+      const { data } = await api.post<{ id: string }>('/engagements', {
         ...form,
         billingAmount: form.billingAmount ? parseFloat(form.billingAmount) : undefined,
         isRecurring: recurring.enabled,
@@ -584,8 +598,9 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
             }
           : undefined,
       });
-      onCreated();
       onClose();
+      // Opens engagement Drive tab (default) to connect Shared Drive or Shared Folder
+      onCreated(data.id);
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to create';
       setError(message);
@@ -831,7 +846,7 @@ function CreateEngagementModal({ onClose, onCreated }: { onClose: () => void; on
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="outline" size="sm" className="flex-1" onClick={onClose}>Cancel</Button>
             <Button type="submit" size="sm" className="flex-1" disabled={saving}>
-              {saving ? 'Creating...' : 'Create Engagement'}
+              {saving ? 'Creating...' : 'Create & connect Drive'}
             </Button>
           </div>
         </form>

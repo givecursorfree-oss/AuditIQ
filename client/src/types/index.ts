@@ -209,6 +209,20 @@ export interface SyncFolder {
   name: string;
 }
 
+/** Opaque engagement ↔ Drive link kind — independent of engagement folder layout. */
+export type DriveLinkKind = 'SHARED_DRIVE' | 'SHARED_FOLDER';
+
+export interface EngagementDriveFolder {
+  id: string;
+  folderId: string;
+  driveId: string | null;
+  linkKind: DriveLinkKind;
+  name: string;
+  isPrimary: boolean;
+  webViewLink: string;
+  createdAt?: string;
+}
+
 export interface DriveBrowseItem {
   id: string;
   name: string;
