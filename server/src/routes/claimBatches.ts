@@ -8,9 +8,14 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth.js';
 import { logClaimAudit } from '../lib/claimAudit.js';
 import {
   buildClaimDataFromBatch,
+  formatDdMmYyyy,
   generateApprovalExcel,
   generateApprovalPdf,
 } from '../lib/claimApprovalExport.js';
+import {
+  mergeApprovalCoverWithProofs,
+  type ClaimProofSource,
+} from '../lib/claimApprovalProofs.js';
 
 const router = Router();
 router.use(authenticate);
@@ -47,6 +52,7 @@ const exportInclude = {
       client: { select: { name: true } },
       engagement: { select: { title: true } },
       managerReviewedBy: { select: { firstName: true, lastName: true } },
+      receipts: { select: { fileName: true, storagePath: true, mimeType: true } },
       participants: {
         include: {
           user: { select: { firstName: true, lastName: true } },
@@ -59,6 +65,36 @@ const exportInclude = {
     },
   },
 };
+
+function proofsFromBatch(batch: {
+  claims: Array<{
+    expenseDate: Date;
+    amount: { toString(): string } | number;
+    approvedAmount?: { toString(): string } | number | null;
+    staff: { firstName: string; lastName: string };
+    expensePayer?: { firstName: string; lastName: string } | null;
+    receipts: Array<{ fileName: string; storagePath: string; mimeType: string | null }>;
+  }>;
+}): ClaimProofSource[] {
+  const out: ClaimProofSource[] = [];
+  for (const c of batch.claims) {
+    const payer = c.expensePayer ?? c.staff;
+    const claimantName = `${payer.firstName} ${payer.lastName}`.trim();
+    const amount = Number(c.approvedAmount ?? c.amount);
+    const dateLabel = formatDdMmYyyy(new Date(c.expenseDate));
+    for (const r of c.receipts) {
+      out.push({
+        claimantName,
+        dateLabel,
+        amount,
+        filePath: r.storagePath,
+        mimeType: r.mimeType,
+        fileName: r.fileName,
+      });
+    }
+  }
+  return out;
+}
 
 function batchTotal(claims: { approvedAmount: { toString(): string } | null; amount: { toString(): string } }[]): number {
   return claims.reduce((s, c) => s + Number(c.approvedAmount ?? c.amount), 0);
@@ -279,7 +315,7 @@ router.get('/:id/export.xlsx', authorize('Partner', 'Admin', 'Manager', 'Account
   }
 });
 
-/** GET /api/claim-batches/:id/export.pdf */
+/** GET /api/claim-batches/:id/export.pdf — approval cover + 2×2 receipt proof collage */
 router.get('/:id/export.pdf', authorize('Partner', 'Admin', 'Manager', 'Accounts'), async (req: AuthRequest, res: Response) => {
   const batch = await loadBatchForExport(req, String(req.params.id));
   if (!batch) {
@@ -287,13 +323,24 @@ router.get('/:id/export.pdf', authorize('Partner', 'Admin', 'Manager', 'Accounts
     return;
   }
   const data = buildClaimDataFromBatch(batch);
-  const tmp = path.join(os.tmpdir(), `claim-batch-${batch.id.slice(0, 8)}-${Date.now()}.pdf`);
+  const stamp = Date.now();
+  const coverTmp = path.join(os.tmpdir(), `claim-batch-cover-${batch.id.slice(0, 8)}-${stamp}.pdf`);
+  const tmp = path.join(os.tmpdir(), `claim-batch-${batch.id.slice(0, 8)}-${stamp}.pdf`);
   try {
-    await generateApprovalPdf(data, tmp);
-    res.download(tmp, `claim-batch-${batch.id.slice(0, 8)}.pdf`, () => {
+    await generateApprovalPdf(data, coverTmp);
+    const proofs = proofsFromBatch(batch);
+    if (proofs.length > 0) {
+      await mergeApprovalCoverWithProofs(coverTmp, proofs, tmp);
+      fs.unlink(coverTmp, () => {});
+    } else {
+      fs.renameSync(coverTmp, tmp);
+    }
+    const datePart = data.submission_date || formatDdMmYyyy();
+    res.download(tmp, `Late Sitting Package - ${datePart}.pdf`, () => {
       fs.unlink(tmp, () => {});
     });
   } catch {
+    fs.unlink(coverTmp, () => {});
     fs.unlink(tmp, () => {});
     res.status(500).json({ error: 'Export failed' });
   }
