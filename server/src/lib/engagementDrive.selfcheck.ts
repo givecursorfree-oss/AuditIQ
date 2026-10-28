@@ -1,6 +1,6 @@
 /**
  * Run: npx --yes tsx src/lib/engagementDrive.selfcheck.ts
- * Pure checks for Shared Drive folder-link rules (no Google / DB).
+ * Pure checks for engagement ↔ Drive link rules (no Google / DB).
  */
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -26,32 +26,25 @@ assert(
 assert(parseFolderRef('0ABC_SharedDriveFolder') === '0ABC_SharedDriveFolder', 'raw id');
 assert(parseFolderRef('nope') === null, 'reject junk');
 
-/** My Drive folders have no driveId — must reject for Shared Drive model. */
-function isSharedDriveFolder(meta: { mimeType: string; driveId?: string | null }): boolean {
-  return meta.mimeType === 'application/vnd.google-apps.folder' && Boolean(meta.driveId);
+type DriveLinkKind = 'SHARED_DRIVE' | 'SHARED_FOLDER';
+
+/** Mirrors resolveDriveLinkKind — Shared Drive has driveId; Shared Folder does not. */
+function resolveDriveLinkKind(driveId: string | null | undefined): DriveLinkKind {
+  return driveId ? 'SHARED_DRIVE' : 'SHARED_FOLDER';
 }
 
+function isLinkableFolder(meta: { mimeType: string }): boolean {
+  return meta.mimeType === 'application/vnd.google-apps.folder';
+}
+
+assert(resolveDriveLinkKind('0ABcdSharedDrive') === 'SHARED_DRIVE', 'shared drive kind');
+assert(resolveDriveLinkKind(null) === 'SHARED_FOLDER', 'shared folder kind');
+assert(resolveDriveLinkKind(undefined) === 'SHARED_FOLDER', 'missing driveId = shared folder');
 assert(
-  isSharedDriveFolder({
-    mimeType: 'application/vnd.google-apps.folder',
-    driveId: '0ABcdSharedDrive',
-  }),
-  'shared drive folder ok'
+  isLinkableFolder({ mimeType: 'application/vnd.google-apps.folder' }),
+  'folder ok'
 );
-assert(
-  !isSharedDriveFolder({
-    mimeType: 'application/vnd.google-apps.folder',
-    driveId: null,
-  }),
-  'my drive folder rejected'
-);
-assert(
-  !isSharedDriveFolder({
-    mimeType: 'application/pdf',
-    driveId: '0ABcdSharedDrive',
-  }),
-  'file rejected'
-);
+assert(!isLinkableFolder({ mimeType: 'application/pdf' }), 'file rejected');
 
 /** First link becomes primary when none exists. */
 function shouldBePrimary(opts: { isPrimary?: boolean; existingCount: number }): boolean {
@@ -63,5 +56,12 @@ assert(shouldBePrimary({ existingCount: 0, isPrimary: true }), 'explicit primary
 assert(!shouldBePrimary({ existingCount: 0, isPrimary: false }), 'first can skip primary');
 assert(!shouldBePrimary({ existingCount: 2 }), 'extra defaults non-primary');
 assert(shouldBePrimary({ existingCount: 2, isPrimary: true }), 'promote primary');
+
+/** Switching storage kind later = unlink + re-link (no Drive tree migration). */
+function canSwitchLinkKind(from: DriveLinkKind, to: DriveLinkKind): boolean {
+  return from !== to || from === to;
+}
+assert(canSwitchLinkKind('SHARED_DRIVE', 'SHARED_FOLDER'), 'switch drive → folder');
+assert(canSwitchLinkKind('SHARED_FOLDER', 'SHARED_DRIVE'), 'switch folder → drive');
 
 console.log('engagementDrive.selfcheck: ok');

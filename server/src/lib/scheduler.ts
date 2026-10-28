@@ -2,7 +2,7 @@ import prisma from './prisma.js';
 import { getEnv } from './env.js';
 import logger from './logger.js';
 import { sendEmail, emailTemplates, processEmailOutbox } from './emailService.js';
-import { syncAllActiveDriveConnections } from './driveSync.js';
+import { syncAllActiveDriveConnections, syncAllEngagementDriveTrees } from './driveSync.js';
 
 const HOUR_MS = 3600 * 1000;
 const FOLLOWUP_THRESHOLD_HOURS = 48;
@@ -13,6 +13,7 @@ const MAX_FOLLOWUPS_BEFORE_ESCALATION = 3;
  *  - Document follow-up emails for missing checklist items >48h
  *  - Marking "Requested" items as "Missing" if past 48h
  *  - Deadline reminder emails (T-7 and T-1)
+ *  - Google Drive library sync + engagement Drive folder sync (Tika index)
  *
  * Designed to be idempotent — uses `lastFollowupAt` and `followupCount`
  * to avoid duplicate sends.
@@ -32,6 +33,7 @@ export async function runScheduler(): Promise<void> {
     await sendDocumentFollowups();
     await sendDeadlineReminders();
     await syncAllActiveDriveConnections();
+    await syncAllEngagementDriveTrees();
     const { runRecurringScheduler } = await import('./recurringScheduler.js');
     const recurring = await runRecurringScheduler();
     if (recurring.created > 0) {

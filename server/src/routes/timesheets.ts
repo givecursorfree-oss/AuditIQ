@@ -7,6 +7,7 @@ import logger from '../lib/logger.js';
 import { canAttestTimesheets } from '../lib/gradeCapabilities.js';
 import { formatStaffTitle } from '../lib/staffTitle.js';
 import { expandTimesheetDays, groupTimesheetDays, timesheetWorkbookBuffer } from '../lib/timesheetExcel.js';
+import { notifyTimesheetSubmitted } from '../lib/timesheetSubmitMail.js';
 
 const router = Router();
 router.use(authenticate);
@@ -607,6 +608,14 @@ router.post('/submit', async (req: AuthRequest, res: Response): Promise<void> =>
         reviewedAt: null,
         reviewNote: null,
       },
+    });
+    // Respond before email — same pattern as leave submit
+    void notifyTimesheetSubmitted(req.user!.id, body.date).catch((err: unknown) => {
+      logger.error('Timesheet submit confirmation email failed', {
+        error: (err as Error).message,
+        userId: req.user!.id,
+        date: body.date,
+      });
     });
     res.json(day);
   } catch (err) {

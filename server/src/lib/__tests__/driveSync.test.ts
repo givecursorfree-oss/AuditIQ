@@ -2,8 +2,21 @@ import { describe, it, expect } from 'vitest';
 import {
   parseGoogleDriveFolderId,
   parseSyncFolders,
+  resolveDriveLinkKind,
   serializeSyncFolders,
 } from '../driveSync.js';
+
+describe('resolveDriveLinkKind', () => {
+  it('maps Shared Drive ids to SHARED_DRIVE', () => {
+    expect(resolveDriveLinkKind('0ABcdSharedDrive')).toBe('SHARED_DRIVE');
+  });
+
+  it('maps missing driveId to SHARED_FOLDER', () => {
+    expect(resolveDriveLinkKind(null)).toBe('SHARED_FOLDER');
+    expect(resolveDriveLinkKind(undefined)).toBe('SHARED_FOLDER');
+    expect(resolveDriveLinkKind('')).toBe('SHARED_FOLDER');
+  });
+});
 
 describe('parseGoogleDriveFolderId', () => {
   it('accepts raw ids', () => {

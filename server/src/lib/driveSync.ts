@@ -555,6 +555,261 @@ export async function syncAllActiveDriveConnections(): Promise<void> {
   }
 }
 
+/**
+ * Prefer the linker’s Google connection, then any active firm connection.
+ * Exported for self-check of priority order.
+ */
+export function pickEngagementDriveConnectionUserIds(
+  linkerIds: Array<string | null | undefined>,
+  firmConnectionUserIds: string[]
+): string[] {
+  const preferred = [...new Set(linkerIds.filter((id): id is string => Boolean(id)))];
+  const fallback = firmConnectionUserIds.filter((id) => !preferred.includes(id));
+  return [...preferred, ...fallback];
+}
+
+async function resolveEngagementDriveConnection(
+  firmId: string,
+  linkerIds: Array<string | null | undefined>
+): Promise<{ id: string; userId: string; firmId: string } | null> {
+  const firmConns = await prisma.googleDriveConnection.findMany({
+    where: { firmId, isActive: true },
+    select: { id: true, userId: true, firmId: true },
+  });
+  if (firmConns.length === 0) return null;
+  const order = pickEngagementDriveConnectionUserIds(
+    linkerIds,
+    firmConns.map((c) => c.userId)
+  );
+  for (const userId of order) {
+    const hit = firmConns.find((c) => c.userId === userId);
+    if (hit) return hit;
+  }
+  return firmConns[0] ?? null;
+}
+
+/**
+ * Recursively download + Tika-index all files under an engagement’s linked
+ * Drive folders (Shared Drive / Shared Folder). Skips unchanged INDEXED files.
+ * Stale removal is scoped to this engagement only.
+ */
+export async function syncEngagementDriveTrees(engagementId: string): Promise<DriveSyncResult> {
+  const lockKey = `engagement:${engagementId}`;
+  if (activeSyncs.has(lockKey)) {
+    throw new Error('Engagement Drive sync already in progress');
+  }
+  activeSyncs.add(lockKey);
+
+  const errors: string[] = [];
+  let synced = 0;
+  let skipped = 0;
+  let removed = 0;
+  const seenExternalIds = new Set<string>();
+
+  try {
+    const eng = await prisma.engagement.findFirst({
+      where: { id: engagementId, archivedAt: null },
+      select: { id: true, firmId: true, clientId: true },
+    });
+    if (!eng) {
+      return { synced: 0, skipped: 0, removed: 0, errors: ['Engagement not found'] };
+    }
+
+    const links = await prisma.engagementDriveFolder.findMany({
+      where: { engagementId },
+      select: { folderId: true, name: true, linkedById: true },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    });
+    if (links.length === 0) {
+      return { synced: 0, skipped: 0, removed: 0, errors: [] };
+    }
+
+    const conn = await resolveEngagementDriveConnection(
+      eng.firmId,
+      links.map((l) => l.linkedById)
+    );
+    if (!conn) {
+      return {
+        synced: 0,
+        skipped: 0,
+        removed: 0,
+        errors: ['No active Google Drive connection for this firm'],
+      };
+    }
+
+    const { drive } = await getDriveClient(conn.id);
+    const uploadDir = path.join(process.cwd(), getEnv().UPLOAD_DIR);
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+    for (const link of links) {
+      let files: Array<{ id: string; name: string; mimeType: string; modifiedTime?: string }>;
+      try {
+        files = await listFilesInFolder(drive, link.folderId);
+      } catch (err) {
+        const msg = (err as Error).message;
+        logger.warn('Engagement Drive folder list failed', {
+          engagementId,
+          folderId: link.folderId,
+          error: msg,
+        });
+        errors.push(`${link.name}: ${msg}`);
+        continue;
+      }
+
+      for (const file of files) {
+        if (
+          !EXPORTABLE_MIME.has(file.mimeType) &&
+          !file.mimeType.startsWith('application/vnd.google-apps.')
+        ) {
+          skipped++;
+          continue;
+        }
+
+        seenExternalIds.add(file.id);
+
+        const existing = await prisma.document.findFirst({
+          where: { firmId: eng.firmId, externalId: file.id },
+        });
+
+        const driveModified = file.modifiedTime ? new Date(file.modifiedTime) : new Date();
+        if (
+          existing?.driveModifiedAt &&
+          existing.driveModifiedAt >= driveModified &&
+          existing.indexStatus === 'INDEXED' &&
+          existing.engagementId === eng.id
+        ) {
+          skipped++;
+          continue;
+        }
+
+        try {
+          const { localPath, mimeType, size } = await downloadDriveFile(
+            drive,
+            file.id,
+            file.mimeType,
+            uploadDir
+          );
+
+          if (existing) {
+            if (existing.storagePath && fs.existsSync(existing.storagePath)) {
+              try {
+                fs.unlinkSync(existing.storagePath);
+              } catch {
+                /* ignore stale path */
+              }
+            }
+            await prisma.document.update({
+              where: { id: existing.id },
+              data: {
+                fileName: path.basename(localPath),
+                originalName: file.name,
+                mimeType,
+                size,
+                storagePath: localPath,
+                driveModifiedAt: driveModified,
+                syncedAt: new Date(),
+                indexStatus: 'PENDING',
+                isOcrProcessed: false,
+                engagementId: eng.id,
+                clientId: eng.clientId,
+                visibility: 'ENGAGEMENT',
+              },
+            });
+            enqueueDocumentIndex(existing.id);
+          } else {
+            const doc = await prisma.document.create({
+              data: {
+                fileName: path.basename(localPath),
+                originalName: file.name,
+                mimeType,
+                size,
+                storagePath: localPath,
+                source: 'GOOGLE_DRIVE',
+                externalId: file.id,
+                visibility: 'ENGAGEMENT',
+                firmId: eng.firmId,
+                clientId: eng.clientId,
+                engagementId: eng.id,
+                uploadedById: conn.userId,
+                driveModifiedAt: driveModified,
+                syncedAt: new Date(),
+                indexStatus: 'PENDING',
+              },
+            });
+            enqueueDocumentIndex(doc.id);
+          }
+          synced++;
+        } catch (err) {
+          const msg = (err as Error).message;
+          logger.warn('Engagement Drive file sync failed', {
+            engagementId,
+            fileId: file.id,
+            error: msg,
+          });
+          errors.push(`${file.name}: ${msg}`);
+          skipped++;
+        }
+      }
+    }
+
+    // Remove Drive docs for this engagement that disappeared from linked folders
+    if (seenExternalIds.size > 0) {
+      const stale = await prisma.document.findMany({
+        where: {
+          firmId: eng.firmId,
+          engagementId: eng.id,
+          source: 'GOOGLE_DRIVE',
+          externalId: { not: null, notIn: [...seenExternalIds] },
+        },
+        select: { id: true, firmId: true, storagePath: true, originalName: true },
+      });
+
+      for (const doc of stale) {
+        try {
+          if (doc.firmId) await removeDocumentFromIndex(doc.firmId, doc.id);
+          if (doc.storagePath && fs.existsSync(doc.storagePath)) fs.unlinkSync(doc.storagePath);
+          await prisma.document.delete({ where: { id: doc.id } });
+          removed++;
+        } catch (err) {
+          errors.push(`Remove ${doc.originalName}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    return { synced, skipped, removed, errors };
+  } finally {
+    activeSyncs.delete(lockKey);
+  }
+}
+
+/** Scheduler entry: sync every non-archived engagement that has Drive folder link(s). */
+export async function syncAllEngagementDriveTrees(): Promise<void> {
+  const rows = await prisma.engagementDriveFolder.findMany({
+    where: { engagement: { archivedAt: null } },
+    select: { engagementId: true },
+    distinct: ['engagementId'],
+  });
+  for (const row of rows) {
+    try {
+      const result = await syncEngagementDriveTrees(row.engagementId);
+      if (result.synced > 0 || result.removed > 0 || result.errors.length > 0) {
+        logger.info('Engagement Drive sync', {
+          engagementId: row.engagementId,
+          synced: result.synced,
+          skipped: result.skipped,
+          removed: result.removed,
+          errors: result.errors.length,
+        });
+      }
+    } catch (err) {
+      logger.error('Engagement Drive sync failed', {
+        engagementId: row.engagementId,
+        error: (err as Error).message,
+      });
+    }
+  }
+}
+
 export type DriveSendReviewResult = {
   synced: number;
   skipped: number;

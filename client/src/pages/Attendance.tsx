@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { cn } from '@/lib/utils';
 import { attendanceLoginNotice } from '../lib/attendanceLoginNotice';
 import { appAlert, appConfirm } from '@/context/AppDialogContext';
@@ -542,21 +543,17 @@ export default function AttendancePage() {
                       <Label htmlFor="attendance-client">
                         Client{placeOfWork === 'Office' ? ' (optional)' : ''}
                       </Label>
-                      <select
+                      <SearchableSelect
                         id="attendance-client"
                         aria-label="Client"
-                        className="input-field h-10 w-full"
+                        className="w-full"
                         required={placeOfWork === 'Client Place'}
                         value={clientName}
-                        onChange={(e) => setClientName(e.target.value)}
-                      >
-                        <option value="">
-                          {placeOfWork === 'Office' ? 'No client / —' : 'Select client'}
-                        </option>
-                        {clientOptions.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
+                        onChange={setClientName}
+                        emptyLabel={placeOfWork === 'Office' ? 'No client / —' : 'Select client'}
+                        placeholder="Search client…"
+                        options={clientOptions.map((c) => ({ value: c, label: c }))}
+                      />
                     </div>
                   )}
                   <Button

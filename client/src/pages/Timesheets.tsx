@@ -9,6 +9,7 @@ import PageHeader from '@/components/layout/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { ApprovalStatusBadge } from '@/components/mkd/WorkflowStatusBadge';
 import { DownloadSimple as Download } from '@phosphor-icons/react';
 import { downloadBlob } from '@/lib/downloadCsv';
@@ -113,7 +114,10 @@ export default function Timesheets() {
   async function submitDay() {
     try {
       await api.post('/timesheets/submit', { date });
-      await appAlert({ title: 'Submitted', message: 'Timesheet submitted.' });
+      await appAlert({
+        title: 'Submitted',
+        message: 'Timesheet submitted. A confirmation email with today’s summary and any recent missing weekdays was sent to you.',
+      });
       const r = await api.get<Timesheet>(`/timesheets?staffId=${user!.id}&date=${date}`);
       setSheet(r.data);
     } catch (e: unknown) {
@@ -282,24 +286,28 @@ export default function Timesheets() {
           {canFirm && (
             <div className="mb-3 max-w-sm">
               <Label>Staff</Label>
-              <select
-                className="input-field mt-1 w-full"
-                value={staffId}
-                onChange={(e) => setStaffId(e.target.value)}
+              <SearchableSelect
+                className="mt-1 w-full"
                 aria-label="Staff"
-              >
-                {firmRows.length > 0
-                  ? firmRows.map((r) => (
-                      <option key={r.user.id} value={r.user.id}>
-                        {r.user.firstName} {r.user.lastName}
-                      </option>
-                    ))
-                  : user && (
-                      <option value={user.id}>
-                        {user.firstName} {user.lastName}
-                      </option>
-                    )}
-              </select>
+                value={staffId}
+                onChange={setStaffId}
+                placeholder="Search staff…"
+                options={
+                  firmRows.length > 0
+                    ? firmRows.map((r) => ({
+                        value: r.user.id,
+                        label: `${r.user.firstName} ${r.user.lastName}`,
+                      }))
+                    : user
+                      ? [
+                          {
+                            value: user.id,
+                            label: `${user.firstName} ${user.lastName}`,
+                          },
+                        ]
+                      : []
+                }
+              />
             </div>
           )}
           {sheet && (

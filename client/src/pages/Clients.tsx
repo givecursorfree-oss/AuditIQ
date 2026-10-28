@@ -42,6 +42,7 @@ import {
   TableRow,
 } from '../components/ui/table';
 import { isTeamAssignmentBlocked, LETTER_GATE_MESSAGE, engagementHasTeam } from '@/lib/letterGatePolicy';
+import { searchableMatch } from '@/lib/searchableMatch';
 import EngagementTeamMultiSelect from '@/components/engagement/EngagementTeamMultiSelect';
 
 interface StaffUser {
@@ -215,13 +216,13 @@ export default function Clients() {
 
   const filteredClients = useMemo(() => {
     if (!data) return [];
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
+    if (!q) return data.clients;
     return data.clients.filter(
       (c) =>
-        !q ||
-        c.name.toLowerCase().includes(q) ||
-        c.contactEmail?.toLowerCase().includes(q) ||
-        c.pan?.toLowerCase().includes(q)
+        searchableMatch(c.name, q) ||
+        (c.contactEmail ? searchableMatch(c.contactEmail, q) : false) ||
+        (c.pan ? searchableMatch(c.pan, q) : false)
     );
   }, [data, search]);
 

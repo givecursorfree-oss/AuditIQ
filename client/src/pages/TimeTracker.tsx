@@ -7,6 +7,7 @@ import { AppPageContainer } from '@/components/layout/AppPageContainer';
 import PageHeader from '@/components/layout/PageHeader';
 import { PanelCard } from '@/components/layout/PanelCard';
 import { Button } from '@/components/ui/button';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import EngagementTimerWidget from '@/components/time/EngagementTimerWidget';
 import PageLoading from '@/components/layout/PageLoading';
 import { ErrorBanner } from '@/components/layout/ErrorBanner';
@@ -111,6 +112,8 @@ export default function TimeTracker() {
     compOff: false,
     description: '',
   });
+  const [dayAttestationStatus, setDayAttestationStatus] = useState('Draft');
+  const [submittingDay, setSubmittingDay] = useState(false);
 
   async function loadStopwatch() {
     try {
@@ -219,6 +222,14 @@ export default function TimeTracker() {
   }
 
   useEffect(() => { void loadAll(); }, []);
+
+  useEffect(() => {
+    if (!user?.id || !manualForm.date) return;
+    void api
+      .get<{ attestation?: { status?: string } }>(`/timesheets?staffId=${user.id}&date=${manualForm.date}`)
+      .then((r) => setDayAttestationStatus(r.data?.attestation?.status || 'Draft'))
+      .catch(() => setDayAttestationStatus('Draft'));
+  }, [user?.id, manualForm.date]);
 
   // After attendance check-in / resume: open engagement picker once
   useEffect(() => {
@@ -381,6 +392,32 @@ export default function TimeTracker() {
     return gridClients.find((client) => client.name.trim().toLowerCase() === key)?.engagements ?? [];
   }, [gridClients, manualForm.clientName]);
 
+  async function submitDay() {
+    if (!isEntryDateAllowed(manualForm.date)) {
+      await appAlert({ title: 'Date not allowed', message: 'You can only submit today or yesterday.' });
+      return;
+    }
+    if (submittingDay) return;
+    setSubmittingDay(true);
+    try {
+      await api.post('/timesheets/submit', { date: manualForm.date });
+      setDayAttestationStatus('Submitted');
+      await appAlert({
+        title: 'Submitted',
+        message:
+          'Timesheet submitted. A confirmation email with today’s summary and any recent missing weekdays was sent to you.',
+      });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      await appAlert({
+        title: 'Could not submit',
+        message: err?.response?.data?.error || 'Failed to submit timesheet day',
+      });
+    } finally {
+      setSubmittingDay(false);
+    }
+  }
+
   async function submitManual() {
     if (!manualForm.clientName.trim()) {
       await appAlert({ title: 'Client required', message: 'Select a client.' });
@@ -452,6 +489,17 @@ export default function TimeTracker() {
                 Timesheets
               </Button>
             ) : null}
+            {isEntryDateAllowed(manualForm.date) &&
+            !['Submitted', 'Approved'].includes(dayAttestationStatus) ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={submittingDay}
+                onClick={() => void submitDay()}
+              >
+                {submittingDay ? 'Submitting…' : 'Submit day'}
+              </Button>
+            ) : null}
             {reminders.length > 0 ? (
               <Button type="button" size="sm" variant="outline" className="text-warning border-warning/30" onClick={() => setTab('today')}>
                 <BellRinging size={16} className="mr-1" />
@@ -482,13 +530,24 @@ export default function TimeTracker() {
           <div className="space-y-3 max-w-lg mx-auto">
             <h3 className="font-semibold text-foreground text-center">Start client stopwatch</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <select className="input-field" aria-label="Engagement" value={startForm.engagementId} onChange={e => setStartForm({ ...startForm, engagementId: e.target.value })}>
-                <option value="">Select engagement…</option>
-                {engagements.map(e => <option key={e.id} value={e.id}>{e.client.name} — {e.title}</option>)}
-              </select>
-              <select className="input-field" aria-label="Work type" value={startForm.workType} onChange={e => setStartForm({ ...startForm, workType: e.target.value })}>
-                {workTypes.map(w => <option key={w}>{w}</option>)}
-              </select>
+              <SearchableSelect
+                aria-label="Engagement"
+                value={startForm.engagementId}
+                onChange={(engagementId) => setStartForm({ ...startForm, engagementId })}
+                emptyLabel="Select engagement…"
+                placeholder="Search engagement…"
+                options={engagements.map((e) => ({
+                  value: e.id,
+                  label: `${e.client.name} — ${e.title}`,
+                }))}
+              />
+              <SearchableSelect
+                aria-label="Work type"
+                value={startForm.workType}
+                onChange={(workType) => setStartForm({ ...startForm, workType })}
+                placeholder="Search activity…"
+                options={workTypes.map((w) => ({ value: w, label: w }))}
+              />
               <input className="input-field" aria-label="Notes" placeholder="Notes (optional)" value={startForm.notes} onChange={e => setStartForm({ ...startForm, notes: e.target.value })} />
             </div>
             <div className="flex justify-center gap-2">
@@ -613,52 +672,54 @@ export default function TimeTracker() {
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Client</span>
-              <select
-                className="input-field mt-1"
+              <SearchableSelect
+                className="mt-1"
                 aria-label="Client"
                 required
                 value={manualForm.clientName}
-                onChange={(e) => setManualForm({ ...manualForm, clientName: e.target.value, engagementId: '' })}
-              >
-                <option value="">Select client</option>
-                {gridClients.map((client) => (
-                  <option key={client.name} value={client.name}>{client.name}</option>
-                ))}
-              </select>
+                onChange={(clientName) => setManualForm({ ...manualForm, clientName, engagementId: '' })}
+                emptyLabel="Select client"
+                placeholder="Search client…"
+                options={gridClients.map((client) => ({ value: client.name, label: client.name }))}
+              />
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Engagement</span>
-              <select
-                className="input-field mt-1"
+              <SearchableSelect
+                className="mt-1"
                 aria-label="Engagement"
                 value={manualForm.engagementId}
-                onChange={(e) => setManualForm({ ...manualForm, engagementId: e.target.value })}
-              >
-                <option value="">—</option>
-                {clientEngagements.map((engagement) => (
-                  <option key={engagement.id} value={engagement.id}>{engagement.title}</option>
-                ))}
-              </select>
+                onChange={(engagementId) => setManualForm({ ...manualForm, engagementId })}
+                emptyLabel="—"
+                placeholder="Search engagement…"
+                options={clientEngagements.map((engagement) => ({
+                  value: engagement.id,
+                  label: engagement.title,
+                }))}
+              />
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Activity</span>
-              <select className="input-field mt-1" aria-label="Work type" value={manualForm.workType} onChange={e => setManualForm({ ...manualForm, workType: e.target.value })}>
-                {workTypes.map(w => <option key={w}>{w}</option>)}
-              </select>
+              <SearchableSelect
+                className="mt-1"
+                aria-label="Work type"
+                value={manualForm.workType}
+                onChange={(workType) => setManualForm({ ...manualForm, workType })}
+                placeholder="Search activity…"
+                options={workTypes.map((w) => ({ value: w, label: w }))}
+              />
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Manager / Partner</span>
-              <select
-                className="input-field mt-1"
+              <SearchableSelect
+                className="mt-1"
                 aria-label="Manager or partner"
                 value={manualForm.supervisorId}
-                onChange={(e) => setManualForm({ ...manualForm, supervisorId: e.target.value })}
-              >
-                <option value="">—</option>
-                {supervisors.map((person) => (
-                  <option key={person.id} value={person.id}>{person.name}</option>
-                ))}
-              </select>
+                onChange={(supervisorId) => setManualForm({ ...manualForm, supervisorId })}
+                emptyLabel="—"
+                placeholder="Search manager / partner…"
+                options={supervisors.map((person) => ({ value: person.id, label: person.name }))}
+              />
             </label>
             <label className="block">
               <span className="text-xs text-muted-foreground">Hours</span>
@@ -683,7 +744,21 @@ export default function TimeTracker() {
             </label>
           </div>
           <input className="input-field" aria-label="Notes or description" placeholder="Notes / description" value={manualForm.description} onChange={e => setManualForm({ ...manualForm, description: e.target.value })} />
-          <Button type="button" size="sm" onClick={() => void submitManual()}>Add entry</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={() => void submitManual()}>Add entry</Button>
+            {isEntryDateAllowed(manualForm.date) &&
+            !['Submitted', 'Approved'].includes(dayAttestationStatus) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={submittingDay}
+                onClick={() => void submitDay()}
+              >
+                {submittingDay ? 'Submitting…' : 'Submit day'}
+              </Button>
+            ) : null}
+          </div>
 
           <div className="mt-6">
             <h4 className="font-semibold text-foreground mb-2">Recent entries</h4>
