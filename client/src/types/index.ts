@@ -57,6 +57,8 @@ export interface Firm {
   email?: string;
   website?: string;
   expenseSubmissionWindowDays?: number;
+  /** Max minutes between app check-in/out and biometric punch before HR flag */
+  bioDeviationMinutes?: number;
 }
 
 
@@ -299,6 +301,14 @@ export interface Attendance {
     hierarchyLevel?: { title: string } | null;
   };
   office?: { name: string };
+  bioIn?: string | null;
+  bioOut?: string | null;
+  bioHrs?: string | null;
+  finalIn?: string | null;
+  finalOut?: string | null;
+  finalHrs?: string | null;
+  finalBasis?: 'app' | 'bio' | 'matched' | 'bio_out_suggested' | 'none';
+  validation?: 'ok' | 'review' | 'mismatch' | 'missing_bio' | 'missing_app' | 'abnormal';
 }
 
 export interface LeaveRequest {

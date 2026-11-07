@@ -27,6 +27,10 @@ import {
   type PlaceOfWork,
 } from '../lib/articleAttendancePolicy.js';
 import {
+  formatIstHmFromDate,
+  reconcileAttendanceBio,
+} from '../lib/biometricImport.js';
+import {
   computeArticleAttendanceDebit,
   hasWfhApproval,
   userIsArticleAssistant,
@@ -247,14 +251,55 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
         office: { select: { name: true } },
       },
     });
+
+    const firmId = req.user!.firmId;
+    const bioByKey = new Map<string, { inTime: string | null; outTime: string | null; workHrs: string | null }>();
+    let deviationMinutes = 30;
+    if (firmId && records.length) {
+      const firm = await prisma.firm.findUnique({
+        where: { id: firmId },
+        select: { bioDeviationMinutes: true },
+      });
+      deviationMinutes = firm?.bioDeviationMinutes ?? 30;
+      const userIds = [...new Set(records.map((r) => r.userId))];
+      const dates = records.map((r) => r.date);
+      const minD = dates.reduce((a, b) => (a < b ? a : b));
+      const maxD = dates.reduce((a, b) => (a > b ? a : b));
+      const bios = await prisma.biometricDay.findMany({
+        where: {
+          firmId,
+          userId: { in: userIds },
+          date: { gte: new Date(`${getAttendanceDateKey(minD)}T00:00:00.000Z`), lte: new Date(`${getAttendanceDateKey(maxD)}T00:00:00.000Z`) },
+        },
+        select: { userId: true, date: true, inTime: true, outTime: true, workHrs: true },
+      });
+      for (const b of bios) {
+        if (!b.userId) continue;
+        bioByKey.set(`${b.userId}|${getAttendanceDateKey(b.date)}`, {
+          inTime: b.inTime,
+          outTime: b.outTime,
+          workHrs: b.workHrs,
+        });
+      }
+    }
+
     res.json(
-      records.map((r) => ({
-        ...r,
-        hoursWorked:
+      records.map((r) => {
+        const hoursWorked =
           r.checkIn && r.checkOut
             ? +((r.checkOut.getTime() - r.checkIn.getTime()) / 3_600_000).toFixed(2)
-            : null,
-      }))
+            : null;
+        const bio = bioByKey.get(`${r.userId}|${getAttendanceDateKey(r.date)}`);
+        const recon = reconcileAttendanceBio({
+          appIn: r.checkIn ? formatIstHmFromDate(r.checkIn) : null,
+          appOut: r.checkOut ? formatIstHmFromDate(r.checkOut) : null,
+          bioIn: bio?.inTime ?? null,
+          bioOut: bio?.outTime ?? null,
+          bioHrs: bio?.workHrs ?? null,
+          deviationMinutes,
+        });
+        return { ...r, hoursWorked, ...recon };
+      })
     );
   } catch (err) {
     logger.error('List attendance error:', err);
@@ -730,7 +775,7 @@ router.patch('/:id/forgive', async (req: AuthRequest, res: Response): Promise<vo
   }
 });
 
-// PATCH /api/attendance/:id/bio — mark biometric present (until Bio import exists)
+// PATCH /api/attendance/:id/bio — mark biometric present (also set by biometric import)
 router.patch('/:id/bio', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!HR_ATTENDANCE_ROLES.includes(req.user!.role as (typeof HR_ATTENDANCE_ROLES)[number])) {

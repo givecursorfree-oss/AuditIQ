@@ -73,13 +73,14 @@ Date: ___________`,
   {
     name: 'GSTR Monthly Data Request Letter',
     category: 'gstr_monthly_letter',
-    serviceTypes: ['GSTR_1', 'GSTR_3B'],
-    subject: 'Data Required for GSTR Filing — {{FINANCIAL_YEAR}} — {{MONTH}}',
+    serviceTypes: ['GSTR_1', 'GSTR_3B', 'GST_MONTHLY_RETURNS'],
+    // One em dash; MONTH_YEAR = previous calendar month (returns filed next month)
+    subject: 'Data Required for GSTR Filing — {{MONTH_YEAR}}',
     body: `Dear {{CLIENT_NAME}},
 
 This is to inform you that the due date for filing GSTR-1 is approaching.
 Kindly share the following data at the earliest:
-- Sales invoices for the month of {{MONTH}}
+- Sales invoices for the month of {{MONTH_YEAR}}
 - Purchase invoices and credit/debit notes
 - Export details (if applicable)
 - E-way bill summary (if applicable)
@@ -173,17 +174,31 @@ export async function seedDocumentTemplates(
 ): Promise<number> {
   let created = 0;
   for (const tpl of MKD_DOCUMENT_TEMPLATES) {
-    const existing = await prisma.documentTemplate.findFirst({
-      where: { firmId, name: tpl.name },
-    });
-    if (existing) continue;
-
     const variables = [
       ...new Set([
         ...extractTemplateVariables(tpl.subject),
         ...extractTemplateVariables(tpl.body),
       ]),
     ];
+
+    const existing = await prisma.documentTemplate.findFirst({
+      where: { firmId, name: tpl.name },
+    });
+    if (existing) {
+      // Keep GSTR letter subject/body in sync (previous-month + single em dash)
+      if (tpl.category === 'gstr_monthly_letter') {
+        await prisma.documentTemplate.update({
+          where: { id: existing.id },
+          data: {
+            subject: tpl.subject,
+            body: tpl.body,
+            serviceTypes: tpl.serviceTypes,
+            variables,
+          },
+        });
+      }
+      continue;
+    }
 
     await prisma.documentTemplate.create({
       data: {

@@ -117,6 +117,9 @@ export interface ClaimPersonPolicyFlags {
   userId: string;
   computerLogoffTime?: string | null;
   fingerprintLogoffTime?: string | null;
+  departureTime?: string | null;
+  departureSource?: 'bio' | 'app' | 'none';
+  location?: string | null;
   duplicateSameDay?: boolean;
   duplicateClaimIds?: string[];
 }
@@ -264,12 +267,21 @@ function evidenceLine(
 
 /** Two evidence rows for the manager. They do not approve or reject the claim. */
 export function claimEvidenceLines(
-  flags: Pick<ClaimPersonPolicyFlags, 'computerLogoffTime' | 'fingerprintLogoffTime'> | null | undefined
+  flags: Pick<
+    ClaimPersonPolicyFlags,
+    'computerLogoffTime' | 'fingerprintLogoffTime' | 'departureTime' | 'departureSource'
+  > | null | undefined
 ): [ClaimEvidenceLine, ClaimEvidenceLine] {
-  return [
-    evidenceLine('App log-off', flags?.computerLogoffTime, 'Not recorded'),
-    evidenceLine('Thumbprint out', flags?.fingerprintLogoffTime, 'Not available'),
-  ];
+  const app = evidenceLine('App log-off', flags?.computerLogoffTime, 'Not recorded');
+  const thumb = evidenceLine('Thumbprint out', flags?.fingerprintLogoffTime, 'Not available');
+  // Office food claims prefer Bio Out as departure; mark the preferred evidence row.
+  if (flags?.departureSource === 'bio' && flags.fingerprintLogoffTime) {
+    return [app, { ...thumb, mark: thumb.mark || '✓' }];
+  }
+  if (flags?.departureSource === 'app' && flags.computerLogoffTime) {
+    return [{ ...app, mark: app.mark || '✓' }, thumb];
+  }
+  return [app, thumb];
 }
 
 export function personPolicyFlags(

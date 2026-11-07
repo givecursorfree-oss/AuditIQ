@@ -109,6 +109,7 @@ model User {
   notifications     Notification[]
   navAttentionAcks  NavAttentionAck[]
   attendances       Attendance[]
+  biometricDays     BiometricDay[]     @relation("BiometricDayUser")
   leaveRequests     LeaveRequest[]
   leaveApprovals    LeaveRequest[]     @relation("LeaveApprover")
   auditLogs         AuditLog[]
@@ -176,6 +177,9 @@ model User {
   engagementsImported      Engagement[]       @relation("EngagementImportedBy")
   engagementsArchived      Engagement[]       @relation("EngagementArchivedBy")
   engagementsRestored      Engagement[]       @relation("EngagementRestoredBy")
+  firmServicesCreated      FirmService[]      @relation("FirmServiceCreatedBy")
+  firmServicesArchived     FirmService[]      @relation("FirmServiceArchivedBy")
+  firmServicesRestored     FirmService[]      @relation("FirmServiceRestoredBy")
   engagementDriveFoldersLinked EngagementDriveFolder[] @relation("EngagementDriveFolderLinker")
 
   @@index([firmId])
@@ -198,6 +202,8 @@ model Firm {
   email          String?
   website                     String?
   expenseSubmissionWindowDays Int      @default(3)
+  /// Max minutes |app check-in/out − biometric punch| before HR flag (bio import)
+  bioDeviationMinutes         Int      @default(30)
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
 
@@ -210,7 +216,9 @@ model Firm {
   clientRequests    ClientRequest[]
   documentTemplates DocumentTemplate[]
   lookupValues      FirmLookupValue[]
+  firmServices      FirmService[]
   compOffRequests   CompOffRequest[]
+  biometricDays     BiometricDay[]
 }
 
 // ─── PRD 5.1: Engagement & Client Management ───
@@ -967,6 +975,37 @@ model Attendance {
   @@index([userId, date])
 }
 
+/// One day of biometric punches from device export (eSSL Organization-Wise Attendance).
+model BiometricDay {
+  id           String   @id @default(uuid())
+  firmId       String
+  firm         Firm     @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  /// Biometric software User ID (maps to EmployeeProfile.employeeCode)
+  employeeCode String
+  bioName      String
+  userId       String?
+  user         User?    @relation("BiometricDayUser", fields: [userId], references: [id], onDelete: SetNull)
+  date         DateTime
+  /// HH:mm IST first punch-in
+  inTime       String?
+  /// HH:mm IST last punch-out
+  outTime      String?
+  workHrs      String?
+  /// |app checkIn − bio in| minutes when both exist
+  checkInDeviationMinutes  Int?
+  /// |app checkOut − bio out| minutes when both exist
+  checkOutDeviationMinutes Int?
+  /// True when either deviation exceeds firm.bioDeviationMinutes
+  deviationFlag Boolean @default(false)
+  importedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([firmId, employeeCode, date])
+  @@index([firmId, userId, date])
+  @@index([firmId, date])
+  @@index([userId, date])
+}
+
 /// Manager pre-approval required before Article WFH check-in (HR).
 model WfhApproval {
   id           String   @id @default(uuid())
@@ -1162,6 +1201,7 @@ model EmployeeProfile {
   // Employment
   joiningDate    DateTime?
   department     String?
+  /// Matches biometric export "User ID" (eSSL / org attendance)
   employeeCode   String?
   employmentType String? // Full-time | Part-time | Contract | Intern
   probationEnd   DateTime?
@@ -1171,6 +1211,8 @@ model EmployeeProfile {
 
   salaryStructure   SalaryStructure?
   employeeDocuments EmployeeDocument[]
+
+  @@index([employeeCode])
 }
 
 model SalaryStructure {
@@ -1956,6 +1998,39 @@ model EngagementPeriod {
 
   @@unique([engagementId, periodKey])
   @@index([engagementId])
+}
+
+// ─── Firm service catalog (seeded from MKD defaults; add / edit / archive) ───
+
+model FirmService {
+  id           String    @id @default(uuid())
+  code         String    // e.g. GSTR_1 — unique per firm
+  domain       String    // DT | IDT | AUDIT
+  name         String
+  dueRule      String?
+  recurrence   String?   // monthly | quarterly | annual | ad_hoc
+  templateId   String    // DT_COMPLIANCE | IDT_GST_RETURN | AUDIT_STATUTORY
+  sortOrder    Int       @default(0)
+  isSystem     Boolean   @default(false) // seeded from MKD catalog
+  archivedAt   DateTime?
+  archivedById String?
+  restoredAt   DateTime?
+  restoredById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  firmId      String
+  firm        Firm  @relation(fields: [firmId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User? @relation("FirmServiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  archivedBy  User? @relation("FirmServiceArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  restoredBy  User? @relation("FirmServiceRestoredBy", fields: [restoredById], references: [id], onDelete: SetNull)
+
+  @@unique([firmId, code])
+  @@index([firmId, archivedAt])
+  @@index([firmId, domain])
+  @@index([archivedById])
+  @@index([restoredById])
 }
 
 // ─── Per-client recurring schedule config ───

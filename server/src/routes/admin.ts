@@ -597,6 +597,7 @@ const updateFirmSchema = z.object({
   email: optionalEmail,
   website: optionalString,
   expenseSubmissionWindowDays: z.number().int().min(1).max(30).optional(),
+  bioDeviationMinutes: z.number().int().min(0).max(240).optional(),
 });
 
 router.put('/firm', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest, res: Response): Promise<void> => {
@@ -605,8 +606,11 @@ router.put('/firm', authorize('Partner', 'Admin', 'HR'), async (req: AuthRequest
 
     if (req.user!.role === 'HR') {
       const keys = Object.keys(data).filter((k) => (data as Record<string, unknown>)[k] !== undefined);
-      if (keys.length !== 1 || !keys.includes('expenseSubmissionWindowDays')) {
-        res.status(403).json({ error: 'HR can only update expense submission window (days)' });
+      const allowed = new Set(['expenseSubmissionWindowDays', 'bioDeviationMinutes']);
+      if (!keys.length || keys.some((k) => !allowed.has(k))) {
+        res.status(403).json({
+          error: 'HR can only update expense submission window and biometric deviation minutes',
+        });
         return;
       }
     }

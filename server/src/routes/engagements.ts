@@ -9,7 +9,8 @@ import { generateSuggestedTasks, generateDataChecklist } from '../lib/suggestedT
 import { notifyClientPortalUsers } from '../lib/clientScope.js';
 import { engagementAccessWhereForUser, requireEngagementAccess, getEngagementTeamMemberIds } from '../lib/engagementAccess.js';
 import logger from '../lib/logger.js';
-import { SERVICE_CATALOG, WORKFLOW_TEMPLATES, resolveTemplateId } from '../lib/workflowCatalog.js';
+import { WORKFLOW_TEMPLATES, resolveTemplateId } from '../lib/workflowCatalog.js';
+import { resolveServiceMeta } from '../lib/firmServiceCatalog.js';
 import { inferDomainFromEngagementType } from '../lib/workflowEngine.js';
 import { assertTeamAssignmentAllowed, engagementHasTeam } from '../lib/letterGatePolicy.js';
 import { validateResourceAssignees } from '../lib/assigneePolicy.js';
@@ -169,7 +170,7 @@ router.get('/portfolio', async (req: AuthRequest, res: Response): Promise<void> 
       })),
     }));
 
-    const serviceMeta = SERVICE_CATALOG.find((s) => s.code === service);
+    const serviceMeta = await resolveServiceMeta(prisma, user.firmId, service);
     res.json({ service, serviceName: serviceMeta?.name ?? service, clientCount: rows.length, rows });
   } catch (err) {
     logger.error('Engagement portfolio error', { error: (err as Error).message });
@@ -359,18 +360,24 @@ router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthReque
     const data = engagementSchema.parse(req.body);
     const { memberIds, startDate, deadline, serviceCode, workflowDomain, isRecurring, recurringSchedule, ...rest } = data;
 
-    let domain = workflowDomain;
-    if (serviceCode) {
-      const svc = SERVICE_CATALOG.find((s) => s.code === serviceCode);
-      if (svc) domain = svc.domain;
-    }
-    if (!domain) domain = inferDomainFromEngagementType(rest.type);
-
     const firmId = req.user!.firmId;
     if (!firmId) {
       res.status(403).json({ error: 'Firm context required' });
       return;
     }
+
+    let domain = workflowDomain;
+    let serviceTemplateId: string | null = null;
+    if (serviceCode) {
+      const svc = await resolveServiceMeta(prisma, firmId, serviceCode);
+      if (!svc) {
+        res.status(400).json({ error: 'Unknown or archived service — pick an active catalog service' });
+        return;
+      }
+      domain = svc.domain;
+      serviceTemplateId = svc.templateId;
+    }
+    if (!domain) domain = inferDomainFromEngagementType(rest.type);
 
     const client = await prisma.client.findFirst({
       where: { id: rest.clientId, firmId, archivedAt: null },
@@ -413,11 +420,12 @@ router.post('/', authorize('Partner', 'Admin', 'Manager'), async (req: AuthReque
       }
     }
 
-    const templateId = resolveTemplateId({
-      workflowDomain: domain,
-      serviceCode: serviceCode ?? null,
-      type: rest.type,
-    });
+    const templateId = (serviceTemplateId as keyof typeof WORKFLOW_TEMPLATES | null) ??
+      resolveTemplateId({
+        workflowDomain: domain,
+        serviceCode: serviceCode ?? null,
+        type: rest.type,
+      });
     const firstStep = WORKFLOW_TEMPLATES[templateId].steps[0];
     const initialStage =
       templateId === 'AUDIT_STATUTORY' ? 'Data Pending' : firstStep.label;

@@ -462,8 +462,10 @@ export default function Engagements() {
 }
 
 // ─── Create Engagement Modal ───
-function serviceToEngagementType(code: string): EngagementType {
-  const svc = SERVICE_CATALOG.find((s) => s.code === code);
+type CatalogSvc = { code: string; domain: WorkflowDomain; name: string; dueRule?: string };
+
+function serviceToEngagementType(code: string, catalog: CatalogSvc[]): EngagementType {
+  const svc = catalog.find((s) => s.code === code);
   if (!svc) return 'Special';
   if (svc.domain === 'IDT') return 'GST';
   if (svc.domain === 'AUDIT') {
@@ -479,6 +481,7 @@ function CreateEngagementModal({
   onClose: () => void;
   onCreated: (engagementId?: string) => void;
 }) {
+  const [catalog, setCatalog] = useState<CatalogSvc[]>(SERVICE_CATALOG);
   const [form, setForm] = useState({
     title: '',
     clientId: '',
@@ -511,6 +514,18 @@ function CreateEngagementModal({
   const [creatingClient, setCreatingClient] = useState(false);
 
   useEffect(() => {
+    api
+      .get<{ services?: CatalogSvc[] }>('/workflow/catalog')
+      .then(({ data }) => {
+        const rows = (data.services || []).map((s) => ({
+          code: s.code,
+          domain: s.domain,
+          name: s.name,
+          dueRule: s.dueRule,
+        }));
+        if (rows.length) setCatalog(rows);
+      })
+      .catch(() => {});
     // Default /clients is page=1&limit=20 — that truncated the Select client list to early A-names
     api
       .get<{ clients?: { id: string; name: string }[] }>('/clients?limit=2000')
@@ -559,7 +574,7 @@ function CreateEngagementModal({
   };
 
   const onServiceChange = (serviceCode: string) => {
-    const svc = SERVICE_CATALOG.find((s) => s.code === serviceCode);
+    const svc = catalog.find((s) => s.code === serviceCode);
     if (!svc) return;
     const monthlyRecurring = ['GST_MONTHLY_RETURNS', 'GSTR_1', 'GSTR_3B', 'TDS_REMITTANCE'].includes(serviceCode);
     if (monthlyRecurring) {
@@ -569,7 +584,7 @@ function CreateEngagementModal({
       ...prev,
       serviceCode,
       workflowDomain: svc.domain as WorkflowDomain,
-      type: serviceToEngagementType(serviceCode),
+      type: serviceToEngagementType(serviceCode, catalog),
       title: prev.title.trim() ? prev.title : `${svc.name} — FY ${prev.financialYear}`,
     }));
   };
@@ -621,10 +636,10 @@ function CreateEngagementModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="eng-create-service" className="block text-sm font-medium text-foreground-muted mb-1.5">Service (MKD catalog)</label>
+            <label htmlFor="eng-create-service" className="block text-sm font-medium text-foreground-muted mb-1.5">Service</label>
             <select
               id="eng-create-service"
-              aria-label="Service (MKD catalog)"
+              aria-label="Service"
               value={form.serviceCode}
               onChange={(e) => onServiceChange(e.target.value)}
               required
@@ -632,7 +647,7 @@ function CreateEngagementModal({
             >
               {CREATE_DOMAIN_GROUPS.map((domain) => (
                 <optgroup key={domain} label={WORKFLOW_DOMAIN_LABELS[domain]}>
-                  {SERVICE_CATALOG.filter((s) => s.domain === domain).map((s) => (
+                  {catalog.filter((s) => s.domain === domain).map((s) => (
                     <option key={s.code} value={s.code}>
                       {s.name}{s.dueRule ? ` — ${s.dueRule}` : ''}
                     </option>

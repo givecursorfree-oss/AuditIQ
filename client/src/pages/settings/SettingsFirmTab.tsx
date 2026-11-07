@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const FIRM_FIELD_KEYS = [
-  'name', 'registrationNo', 'pan', 'gstin', 'address', 'city', 'state', 'pincode', 'phone', 'email', 'website', 'expenseSubmissionWindowDays',
+  'name', 'registrationNo', 'pan', 'gstin', 'address', 'city', 'state', 'pincode', 'phone', 'email', 'website', 'expenseSubmissionWindowDays', 'bioDeviationMinutes',
 ] as const;
 
 const FIRM_FIELDS: { key: keyof Firm; label: string }[] = [
@@ -33,13 +33,14 @@ const FIRM_FIELDS: { key: keyof Firm; label: string }[] = [
   { key: 'email', label: 'Email' },
   { key: 'website', label: 'Website' },
   { key: 'expenseSubmissionWindowDays', label: 'Expense submission window (days)' },
+  { key: 'bioDeviationMinutes', label: 'Biometric vs app deviation (minutes)' },
 ];
 
 export default function SettingsFirmTab() {
   const { user } = useAuth();
   const isHrOnly = user?.role === 'HR';
   const visibleFields = isHrOnly
-    ? FIRM_FIELDS.filter((f) => f.key === 'expenseSubmissionWindowDays')
+    ? FIRM_FIELDS.filter((f) => f.key === 'expenseSubmissionWindowDays' || f.key === 'bioDeviationMinutes')
     : FIRM_FIELDS;
   const [firm, setFirm] = useState<Firm | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +65,7 @@ export default function SettingsFirmTab() {
     setSaving(true);
     try {
       const keys = isHrOnly
-        ? (['expenseSubmissionWindowDays'] as const)
+        ? (['expenseSubmissionWindowDays', 'bioDeviationMinutes'] as const)
         : FIRM_FIELD_KEYS;
       const payload = pickFormPayload(form as Record<string, unknown>, [...keys]);
       const { data } = await api.put('/admin/firm', payload);
@@ -89,10 +90,10 @@ export default function SettingsFirmTab() {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>{isHrOnly ? 'Claim submission cutoff' : 'Firm Profile'}</CardTitle>
+          <CardTitle>{isHrOnly ? 'HR attendance & claims settings' : 'Firm Profile'}</CardTitle>
           <CardDescription>
             {isHrOnly
-              ? 'T+N days after expense date allowed for claim submit'
+              ? 'Claim submit window and biometric vs app login deviation limit'
               : 'Manage your CA firm details and contact information'}
           </CardDescription>
         </div>
@@ -123,13 +124,23 @@ export default function SettingsFirmTab() {
             <div key={key} className="space-y-2">
               <Label>{label}</Label>
               {editing ? (
-                key === 'expenseSubmissionWindowDays' ? (
+                key === 'expenseSubmissionWindowDays' || key === 'bioDeviationMinutes' ? (
                   <Input
                     type="number"
-                    min={1}
-                    max={30}
-                    value={String((form as Record<string, unknown>)[key] ?? 3)}
-                    onChange={(e) => setForm({ ...form, [key]: parseInt(e.target.value, 10) || 3 })}
+                    min={key === 'bioDeviationMinutes' ? 0 : 1}
+                    max={key === 'bioDeviationMinutes' ? 240 : 30}
+                    value={String(
+                      (form as Record<string, unknown>)[key] ??
+                        (key === 'bioDeviationMinutes' ? 30 : 3)
+                    )}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        [key]:
+                          parseInt(e.target.value, 10) ||
+                          (key === 'bioDeviationMinutes' ? 30 : 3),
+                      })
+                    }
                   />
                 ) : (
                   <Input
@@ -138,7 +149,14 @@ export default function SettingsFirmTab() {
                   />
                 )
               ) : (
-                <p className="text-sm text-foreground py-2">{(firm as Record<string, any>)?.[key] ?? (key === 'expenseSubmissionWindowDays' ? 3 : '—')}</p>
+                <p className="text-sm text-foreground py-2">
+                  {(firm as Record<string, any>)?.[key] ??
+                    (key === 'expenseSubmissionWindowDays'
+                      ? 3
+                      : key === 'bioDeviationMinutes'
+                        ? 30
+                        : '—')}
+                </p>
               )}
             </div>
           ))}

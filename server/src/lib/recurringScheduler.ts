@@ -5,7 +5,9 @@ import { scheduleEmail } from './emailService.js';
 import { buildDataRequestTeamCc, withDataRequestMailButtons } from './dataRequestSend.js';
 import {
   buildDefaultTemplateVars,
+  previousCalendarMonth,
   renderTemplate,
+  tidyRenderedSubject,
 } from './templateRenderer.js';
 import { seedDocumentTemplates } from './documentTemplateSeed.js';
 import { scheduleMatchesDate, computeNextCreateAt } from './recurringScheduleHelpers.js';
@@ -189,8 +191,12 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
       },
     });
 
-    const pk = periodKey(now);
-    const label = periodLabel(now);
+    // GST returns for month M are filed in M+1 — period label is previous month
+    const isGstMonthly =
+      rule.serviceCode.startsWith('GSTR') || rule.serviceCode === 'GST_MONTHLY_RETURNS';
+    const periodDate = isGstMonthly ? previousCalendarMonth(now) : now;
+    const pk = periodKey(periodDate);
+    const label = periodLabel(periodDate);
     const fy = parent.financialYear || currentFinancialYear(now);
 
     const existingPeriod = await prisma.engagementPeriod.findUnique({
@@ -288,8 +294,10 @@ export async function runRecurringScheduler(now = new Date()): Promise<{
           ? `${rule.triggerDay + 7} ${now.toLocaleDateString('en-IN', { month: 'long' })}`
           : undefined,
         date: now,
+        usePreviousMonth: isGstMonthly,
+        periodDate,
       });
-      const subject = renderTemplate(template.subject, vars);
+      const subject = tidyRenderedSubject(renderTemplate(template.subject, vars));
       const body = renderTemplate(template.body, vars).replace(/\n/g, '<br/>');
       const teamCc = await buildDataRequestTeamCc({
         category: template.category,

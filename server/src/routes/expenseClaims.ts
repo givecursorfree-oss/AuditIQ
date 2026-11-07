@@ -14,6 +14,7 @@ import { evaluateFoodLateSittingPolicy } from '../lib/foodClaimPolicy.js';
 import { verifyLateHoursClaim } from '../lib/lateHoursPolicy.js';
 import { getFingerprintLogoffTime } from '../lib/biometricService.js';
 import { getComputerLogoffTime } from '../lib/appLogoff.js';
+import { attendanceDayFilter } from '../lib/attendanceDates.js';
 import { logClaimAudit } from '../lib/claimAudit.js';
 import { queueClaimReceiptOcr, recheckBareIdentifierOcr } from '../lib/claimReceiptOcr.js';
 import {
@@ -139,28 +140,75 @@ async function buildFoodPolicyFlags(
     where: { staffId, date: expenseDate, status: 'approved' },
     select: { actualEndTime: true },
   });
+  const att = await prisma.attendance.findFirst({
+    where: { userId: staffId, date: attendanceDayFilter(expenseDate) },
+    select: { location: true, checkOut: true },
+  });
   const [computerLogoffTime, fingerprintLogoffTime] = await Promise.all([
     getComputerLogoffTime(staffId, expenseDate),
     knownFingerprint !== undefined ? Promise.resolve(knownFingerprint) : getFingerprintLogoffTime(staffId, expenseDate),
   ]);
-  const endTime = late?.actualEndTime ?? computerLogoffTime;
+
+  const location = att?.location || 'Office';
+  const officeDay = location === 'Office';
+  // Office: Bio Out is departure evidence. Client Place / WFH: approved App Out.
+  const departureTime = officeDay
+    ? fingerprintLogoffTime || computerLogoffTime
+    : computerLogoffTime || late?.actualEndTime || null;
+  const departureSource = officeDay
+    ? fingerprintLogoffTime
+      ? 'bio'
+      : computerLogoffTime
+        ? 'app'
+        : 'none'
+    : computerLogoffTime
+      ? 'app'
+      : 'none';
+
+  const endTime = late?.actualEndTime ?? departureTime;
   const sitting = evaluateFoodLateSittingPolicy(expenseDate, endTime);
+
+  const extraReasons: string[] = [];
+  if (officeDay && !fingerprintLogoffTime) extraReasons.push('Missing biometric Out — review');
+  if (!officeDay && !computerLogoffTime) extraReasons.push('Missing app Out for Client Place / WFH — review');
+  if (
+    officeDay &&
+    fingerprintLogoffTime &&
+    computerLogoffTime &&
+    fingerprintLogoffTime !== computerLogoffTime
+  ) {
+    extraReasons.push('App Out and Bio Out conflict — review');
+  }
+
   const logoff = endTime
-    ? verifyLateHoursClaim({ actualEndTime: endTime, computerLogoffTime, fingerprintLogoffTime })
+    ? verifyLateHoursClaim({
+        actualEndTime: endTime,
+        computerLogoffTime: officeDay ? computerLogoffTime : computerLogoffTime,
+        fingerprintLogoffTime: officeDay ? fingerprintLogoffTime : fingerprintLogoffTime,
+      })
     : {
-        flagged: !computerLogoffTime && !fingerprintLogoffTime,
-        flagReason: !computerLogoffTime && !fingerprintLogoffTime
-          ? 'No computer or biometric log-off record for this date'
-          : null,
+        flagged: extraReasons.length > 0 || (!computerLogoffTime && !fingerprintLogoffTime),
+        flagReason:
+          extraReasons[0] ||
+          (!computerLogoffTime && !fingerprintLogoffTime
+            ? 'No computer or biometric log-off record for this date'
+            : null),
         computerMismatchMinutes: null,
         fingerprintMismatchMinutes: null,
       };
+
+  const logoffMismatch = logoff.flagged || extraReasons.length > 0;
+  const logoffMismatchReason = [logoff.flagReason, ...extraReasons].filter(Boolean).join('; ') || null;
+
   return {
     ...sitting,
     computerLogoffTime,
     fingerprintLogoffTime,
-    logoffMismatch: logoff.flagged,
-    logoffMismatchReason: logoff.flagReason,
+    departureTime,
+    departureSource,
+    location,
+    logoffMismatch,
+    logoffMismatchReason,
   };
 }
 

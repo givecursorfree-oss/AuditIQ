@@ -1,17 +1,15 @@
 import { getEnv } from './env.js';
 import logger from './logger.js';
+import { getStoredFingerprintLogoffTime } from './biometricImport.js';
 
 /**
  * Biometric (fingerprint) attendance integration point.
  *
- * Late-hours claims are cross-checked against both the computer log-off time and
- * the fingerprint device log-off time, subject to manager approval. Real devices
- * (eSSL, ZKTeco, etc.) expose vendor-specific APIs, so this is a pluggable
- * provider: when `BIOMETRIC_API_URL` is configured it queries that endpoint,
- * otherwise it returns null and the claim proceeds on the computer log-off alone.
+ * Prefer imported BiometricDay rows (HR spreadsheet upload). Optionally fall
+ * back to BIOMETRIC_API_URL when configured.
  *
- * ponytail: single HTTP provider with a 5s timeout, no retry/caching — upgrade to
- * a per-vendor adapter + queue if multiple device brands need supporting.
+ * ponytail: DB first, then single HTTP provider with a 5s timeout — upgrade to
+ * a per-vendor adapter + queue if live device APIs need supporting.
  */
 export interface BiometricProvider {
   /** Returns the last fingerprint punch-out time as "HH:MM" for the day, or null. */
@@ -47,8 +45,13 @@ class HttpBiometricProvider implements BiometricProvider {
   }
 }
 
-class NullBiometricProvider implements BiometricProvider {
-  async getLogoffTime(): Promise<string | null> {
+class ImportedThenHttpProvider implements BiometricProvider {
+  constructor(private readonly http: BiometricProvider | null) {}
+
+  async getLogoffTime(staffId: string, date: Date): Promise<string | null> {
+    const fromImport = await getStoredFingerprintLogoffTime(staffId, date);
+    if (fromImport) return fromImport;
+    if (this.http) return this.http.getLogoffTime(staffId, date);
     return null;
   }
 }
@@ -58,9 +61,10 @@ let _provider: BiometricProvider | undefined;
 export function getBiometricProvider(): BiometricProvider {
   if (_provider) return _provider;
   const env = getEnv();
-  _provider = env.BIOMETRIC_API_URL
+  const http = env.BIOMETRIC_API_URL
     ? new HttpBiometricProvider(env.BIOMETRIC_API_URL, env.BIOMETRIC_API_KEY)
-    : new NullBiometricProvider();
+    : null;
+  _provider = new ImportedThenHttpProvider(http);
   return _provider;
 }
 

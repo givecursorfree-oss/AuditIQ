@@ -6,11 +6,14 @@ import { authorize, type AuthRequest } from '../middleware/auth.js';
 import {
   buildDefaultTemplateVars,
   extractTemplateVariables,
+  isGstDataRequestCategory,
   renderTemplate,
+  tidyRenderedSubject,
 } from '../lib/templateRenderer.js';
 import { scheduleEmail, sendEmail } from '../lib/emailService.js';
 import { isDataRequestCategory } from '../lib/dataRequestMail.js';
 import { buildDataRequestTeamCc, withDataRequestMailButtons } from '../lib/dataRequestSend.js';
+import { seedDocumentTemplates } from '../lib/documentTemplateSeed.js';
 
 const router = Router();
 
@@ -28,6 +31,16 @@ const sendSchema = z.object({
   engagementId: z.string().optional(),
   variables: z.record(z.string()).optional(),
   scheduledAt: z.coerce.date().optional(),
+  /** Final subject after user edits the draft (skips template render when set) */
+  subject: z.string().min(1).optional(),
+  /** Final plain-text body after user edits the draft */
+  body: z.string().min(1).optional(),
+});
+
+const previewSchema = z.object({
+  clientId: z.string(),
+  engagementId: z.string().optional(),
+  variables: z.record(z.string()).optional(),
 });
 
 async function canSendDataRequestAsArticle(
@@ -209,6 +222,118 @@ router.delete(
   }
 );
 
+async function loadClientForTemplateSend(
+  firmId: string,
+  clientId: string,
+  engagementId?: string
+): Promise<
+  | {
+      ok: true;
+      client: {
+        id: string;
+        name: string;
+        contactEmail: string | null;
+        pan: string | null;
+        gstin: string | null;
+        address: string | null;
+        firm: { name: string } | null;
+      };
+      engagement: { id: string; financialYear: string | null } | null;
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const client = await prisma.client.findFirst({
+    where: { id: clientId, firmId },
+    select: {
+      id: true,
+      name: true,
+      contactEmail: true,
+      pan: true,
+      gstin: true,
+      address: true,
+      firm: { select: { name: true } },
+    },
+  });
+  if (!client) return { ok: false, status: 404, error: 'Client not found' };
+  if (engagementId) {
+    const eng = await prisma.engagement.findFirst({
+      where: { id: engagementId, clientId: client.id, firmId },
+      select: { id: true, financialYear: true },
+    });
+    if (!eng) return { ok: false, status: 400, error: 'Engagement does not belong to this client' };
+    return { ok: true, client, engagement: eng };
+  }
+  return { ok: true, client, engagement: null };
+}
+
+function varsForTemplate(
+  category: string,
+  client: { name?: string; pan?: string | null; gstin?: string | null; address?: string | null; firm?: { name?: string } | null },
+  extras?: { financialYear?: string; variables?: Record<string, string> }
+) {
+  return {
+    ...buildDefaultTemplateVars({
+      client,
+      firm: client.firm ?? undefined,
+      financialYear: extras?.financialYear,
+      usePreviousMonth: isGstDataRequestCategory(category),
+    }),
+    ...(extras?.variables ?? {}),
+  };
+}
+
+// POST /api/templates/:id/preview — rendered draft (subject + body) before send
+router.post(
+  '/:id/preview',
+  authorize('Partner', 'Admin', 'Manager', 'Staff', 'Intern'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const body = previewSchema.parse(req.body);
+      if (req.user!.firmId) {
+        await seedDocumentTemplates(prisma, req.user!.firmId, req.user!.id).catch(() => {});
+      }
+      const tpl = await prisma.documentTemplate.findFirst({
+        where: { id: String(req.params.id), firmId: req.user!.firmId!, isActive: true },
+      });
+      if (!tpl) {
+        res.status(404).json({ error: 'Template not found' });
+        return;
+      }
+      const loaded = await loadClientForTemplateSend(
+        req.user!.firmId!,
+        body.clientId,
+        body.engagementId
+      );
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
+        return;
+      }
+      const vars = varsForTemplate(tpl.category, loaded.client, {
+        financialYear: loaded.engagement?.financialYear ?? undefined,
+        variables: body.variables,
+      });
+      const subject = tidyRenderedSubject(renderTemplate(tpl.subject, vars));
+      const bodyText = renderTemplate(tpl.body, vars);
+      res.json({
+        templateId: tpl.id,
+        templateName: tpl.name,
+        category: tpl.category,
+        subject,
+        body: bodyText,
+        to: loaded.client.contactEmail,
+        variables: vars,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: 'Validation failed', details: err.errors });
+        return;
+      }
+      logger.error('Template preview error', { error: (err as Error).message });
+      res.status(500).json({ error: 'Failed to preview template' });
+    }
+  }
+);
+
 // POST /api/templates/:id/send
 // Partner/Admin/Manager: any template. Staff/Intern: data-request categories on their engagement only.
 router.post(
@@ -217,6 +342,9 @@ router.post(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const body = sendSchema.parse(req.body);
+      if (req.user!.firmId) {
+        await seedDocumentTemplates(prisma, req.user!.firmId, req.user!.id).catch(() => {});
+      }
       const tpl = await prisma.documentTemplate.findFirst({
         where: { id: String(req.params.id), firmId: req.user!.firmId!, isActive: true },
       });
@@ -248,36 +376,29 @@ router.post(
         }
       }
 
-      const client = await prisma.client.findFirst({
-        where: { id: body.clientId, firmId: req.user!.firmId! },
-        include: { firm: true },
-      });
-      if (!client) {
-        res.status(404).json({ error: 'Client not found' });
+      const loaded = await loadClientForTemplateSend(
+        req.user!.firmId!,
+        body.clientId,
+        body.engagementId
+      );
+      if (!loaded.ok) {
+        res.status(loaded.status).json({ error: loaded.error });
         return;
       }
+      const { client, engagement } = loaded;
       if (!client.contactEmail) {
         res.status(400).json({ error: 'Client has no contact email' });
         return;
       }
 
-      if (body.engagementId) {
-        const eng = await prisma.engagement.findFirst({
-          where: { id: body.engagementId, clientId: client.id, firmId: req.user!.firmId! },
-          select: { id: true },
-        });
-        if (!eng) {
-          res.status(400).json({ error: 'Engagement does not belong to this client' });
-          return;
-        }
-      }
-
-      const vars = {
-        ...buildDefaultTemplateVars({ client, firm: client.firm }),
-        ...(body.variables ?? {}),
-      };
-      const filledSubject = renderTemplate(tpl.subject, vars);
-      const filledContent = renderTemplate(tpl.body, vars);
+      const vars = varsForTemplate(tpl.category, client, {
+        financialYear: engagement?.financialYear ?? undefined,
+        variables: body.variables,
+      });
+      const filledSubject = tidyRenderedSubject(
+        body.subject?.trim() || renderTemplate(tpl.subject, vars)
+      );
+      const filledContent = body.body?.trim() || renderTemplate(tpl.body, vars);
       const htmlBody = filledContent.split('\n').map((l) => `<p style="margin:0 0 8px">${l || '&nbsp;'}</p>`).join('');
 
       const teamCc = await buildDataRequestTeamCc({

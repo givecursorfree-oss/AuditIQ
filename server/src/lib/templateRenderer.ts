@@ -22,6 +22,28 @@ export function renderTemplate(text: string, vars: TemplateVariables): string {
   });
 }
 
+/** Collapse empty placeholders that left " —  — " (double em dash) in subjects. */
+export function tidyRenderedSubject(subject: string): string {
+  return subject
+    .replace(/\s*—(?:\s*—)+/g, ' —')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** First day of the calendar month before `d` (IST-agnostic local Date). */
+export function previousCalendarMonth(d = new Date()): Date {
+  return new Date(d.getFullYear(), d.getMonth() - 1, 1);
+}
+
+export function formatMonthYear(d: Date): string {
+  return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+/** GST returns for month M are typically filed in M+1 — data request uses previous month. */
+export function isGstDataRequestCategory(category: string): boolean {
+  return category === 'gstr_monthly_letter' || category.startsWith('gstr_');
+}
+
 export function buildDefaultTemplateVars(input: {
   client?: { name?: string; pan?: string | null; gstin?: string | null; address?: string | null };
   firm?: { name?: string };
@@ -32,6 +54,10 @@ export function buildDefaultTemplateVars(input: {
   engagementType?: string;
   deadlineDate?: string;
   date?: Date;
+  /** Explicit period the letter is about */
+  periodDate?: Date;
+  /** When true, MONTH / MONTH_YEAR are previous calendar month vs `date` */
+  usePreviousMonth?: boolean;
 }): TemplateVariables {
   const today = input.date ?? new Date();
   const dateStr = today.toLocaleDateString('en-IN', {
@@ -42,6 +68,10 @@ export function buildDefaultTemplateVars(input: {
   const fy =
     input.financialYear ||
     (input.financialYears?.length ? input.financialYears.join(', ') : '');
+
+  const period =
+    input.periodDate ??
+    (input.usePreviousMonth ? previousCalendarMonth(today) : today);
 
   return {
     CLIENT_NAME: input.client?.name ?? '',
@@ -58,7 +88,8 @@ export function buildDefaultTemplateVars(input: {
     DEADLINE_DATE: input.deadlineDate ?? '',
     FEE_AMOUNT: '',
     REFERENCE_NUMBER: '',
-    MONTH: today.toLocaleDateString('en-IN', { month: 'long' }),
+    MONTH: period.toLocaleDateString('en-IN', { month: 'long' }),
+    MONTH_YEAR: formatMonthYear(period),
     DATA_DEADLINE_DATE: input.deadlineDate ?? '',
     INSTALLMENT: '',
     NOTICE_TYPE: '',

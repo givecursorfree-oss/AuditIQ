@@ -39,6 +39,7 @@ const EngagementPortfolio = lazyRetry(() => import('./pages/EngagementPortfolio'
 const Workpapers = lazyRetry(() => import('./pages/Workpapers'));
 const Documents = lazyRetry(() => import('./pages/Documents'));
 const Attendance = lazyRetry(() => import('./pages/Attendance'));
+const BiometricImport = lazyRetry(() => import('./pages/BiometricImport'));
 const Reports = lazyRetry(() => import('./pages/Reports'));
 const Settings = lazyRetry(() => import('./pages/Settings'));
 const ClientPortal = lazyRetry(() => import('./pages/ClientPortal'));
@@ -212,6 +213,7 @@ export default function App() {
                   <Route path="/services" element={<ServiceCatalog />} />
                   <Route path="/workpapers" element={<Workpapers />} />
                   <Route path="/attendance" element={<Attendance />} />
+                  <Route path="/attendance/biometric-import" element={<BiometricImport />} />
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/observations" element={<Navigate to="/reports?tab=observations" replace />} />
                   <Route path="/form3cd" element={<Navigate to="/reports?tab=form3cd" replace />} />

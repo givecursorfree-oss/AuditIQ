@@ -48,6 +48,7 @@ export default function AttendancePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const canViewFirmAttendance = Boolean(user && FIRM_ATTENDANCE_ROLES.includes(user.role));
+  const canImportBiometric = Boolean(user && ['Partner', 'Admin', 'HR'].includes(user.role));
   const [records, setRecords] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(true);
   const [todayRecord, setTodayRecord] = useState<Attendance | null>(null);
@@ -362,7 +363,11 @@ export default function AttendancePage() {
       });
       downloadCsv(
         `attendance-${exportFrom}_to_${exportTo}.csv`,
-        ['Date', 'Staff', 'Designation', 'Status', 'Location', 'Client', 'GPS', 'Check-in', 'Check-out', 'Hours', 'Method'],
+        [
+          'Date', 'Staff', 'Designation', 'Status', 'Location', 'Client', 'GPS',
+          'Check-in', 'Check-out', 'Hours', 'Method',
+          'Bio In', 'Bio Out', 'Bio Hrs', 'Final In', 'Final Out', 'Final Hrs', 'Final Basis', 'Validation',
+        ],
         data.map((record) => [
           new Date(record.date).toLocaleDateString('en-IN'),
           record.user ? `${record.user.firstName} ${record.user.lastName}`.trim() : '',
@@ -377,6 +382,14 @@ export default function AttendancePage() {
           record.checkOut ? new Date(record.checkOut).toLocaleString('en-IN') : '',
           record.hoursWorked ?? hoursBetween(record.checkIn, record.checkOut) ?? '',
           record.method,
+          record.bioIn || '',
+          record.bioOut || '',
+          record.bioHrs || '',
+          record.finalIn || '',
+          record.finalOut || '',
+          record.finalHrs || '',
+          record.finalBasis || '',
+          record.validation || '',
         ])
       );
     } catch {
@@ -418,6 +431,11 @@ export default function AttendancePage() {
                   {exporting ? 'Exporting…' : 'Export'}
                 </Button>
               </>
+            )}
+            {canImportBiometric && (
+              <Button type="button" size="sm" variant="outline" asChild>
+                <Link to="/attendance/biometric-import">Biometric import</Link>
+              </Button>
             )}
             <Button type="button" size="sm" variant="outline" onClick={prevMonth} aria-label="Previous month">
               <ChevronLeft size={16} />
@@ -811,6 +829,13 @@ export default function AttendancePage() {
                       : hoursBetween(r.checkIn, r.checkOut)?.toFixed(1) ?? '—'}{' '}
                     h
                   </span>
+                  {canViewFirmAttendance && (r.bioIn || r.bioOut || r.validation) ? (
+                    <span className="hidden text-[10px] text-muted-foreground lg:inline">
+                      Bio {r.bioIn || '—'}→{r.bioOut || '—'}
+                      {r.finalHrs ? ` · Final ${r.finalHrs}` : ''}
+                      {r.validation && r.validation !== 'ok' ? ` · ${r.validation}` : ''}
+                    </span>
+                  ) : null}
                 </div>
               </div>
             ))}
