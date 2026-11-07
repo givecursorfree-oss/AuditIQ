@@ -517,12 +517,11 @@ function CreateEngagementModal({
     api
       .get<{ services?: CatalogSvc[] }>('/workflow/catalog')
       .then(({ data }) => {
-        const rows = (data.services || []).map((s) => ({
-          code: s.code,
-          domain: s.domain,
-          name: s.name,
-          dueRule: s.dueRule,
-        }));
+        const rows: CatalogSvc[] = [];
+        for (const s of data.services || []) {
+          if (s.domain !== 'DT' && s.domain !== 'IDT' && s.domain !== 'AUDIT') continue;
+          rows.push({ code: s.code, domain: s.domain, name: s.name, dueRule: s.dueRule });
+        }
         if (rows.length) setCatalog(rows);
       })
       .catch(() => {});

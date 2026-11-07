@@ -8,8 +8,15 @@ export const WORKFLOW_DOMAIN_LABELS: Record<WorkflowDomain, string> = {
   AUDIT: 'Audit & Assurance',
 };
 
-export const SERVICE_CATALOG = [
-  { code: 'TDS_REMITTANCE', domain: 'DT' as WorkflowDomain, name: 'TDS remittance', dueRule: '7th of every month' },
+export type ServiceCatalogItem = {
+  code: string;
+  domain: WorkflowDomain;
+  name: string;
+  dueRule?: string;
+};
+
+export const SERVICE_CATALOG: ServiceCatalogItem[] = [
+  { code: 'TDS_REMITTANCE', domain: 'DT', name: 'TDS remittance', dueRule: '7th of every month' },
   { code: 'TDS_QUARTERLY', domain: 'DT', name: 'TDS quarterly return', dueRule: 'End of month after quarter' },
   { code: 'TCS_QUARTERLY', domain: 'DT', name: 'TCS quarterly return', dueRule: '15th after quarter' },
   { code: 'ADVANCE_TAX', domain: 'DT', name: 'Advance tax', dueRule: 'Quarter end month' },
